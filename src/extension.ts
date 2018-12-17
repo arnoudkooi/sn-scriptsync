@@ -38,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
 				else if (fieldType.includes("json"))
 					fileExtension = ".json";
 				else if (fieldType.includes("css"))
-					fileExtension = ".css";					
+					fileExtension = ".scss";					
 				else if (fieldType.includes("string") || fieldType == "conditions")
 					fileExtension = ".txt";
 
