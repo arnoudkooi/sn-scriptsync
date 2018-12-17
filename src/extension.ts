@@ -27,8 +27,6 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 			req.on('end', () => {
 				jsnx = JSON.parse(jsnS);
-				console.log(jsnx);
-
 				var fs = require('fs');
 
 				var fileExtension = ".js";
@@ -51,7 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
 					jsnx.field + '^' + jsnx.name + '^' + jsnx.sys_id + fileExtension;
 					writeFile(fileName, jsnx.content, function (err) {
 					if (err) {
-						console.log(err);
+						//console.log(err);
 						err.response = {};
 						err.response.result = {};
 						err.send = false;		
@@ -63,7 +61,6 @@ export function activate(context: vscode.ExtensionContext) {
 						});
 					}
 					else {
-						console.log("The file was saved!");
 						jsnx.result = '';
 						jsnx.contentLength = jsnx.content.length;
 						jsnx.send = false;		
@@ -104,9 +101,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 		vscode.workspace.onDidSaveTextDocument(listener => {
+			
+			try{
 			var fileName = listener.fileName;
 			var fileNameArr = fileName.split(/\\|\/|\.|\^/).slice(1).slice(-6);//
-			if (fileNameArr.length < 5) return;
+			if (fileNameArr.length < 6) return;
+			if (fileNameArr[4].length != 32) return; //must be the sys_id
 			var scriptObj = <any>{};
 			scriptObj.name = fileNameArr[3];
 			scriptObj.tableName = fileNameArr[1];
@@ -120,12 +120,16 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			wss.clients.forEach(function each(client) {
 				if (client.readyState === WebSocket.OPEN) {
-					if (lastsend != Date.now()){
+					if ((Date.now() - lastsend) > 100){
 						client.send(JSON.stringify(scriptObj));
 						lastsend = Date.now(); 
 					}
 				}
 			});
+		}
+		catch(err){
+			vscode.window.showErrorMessage("Error while saving file: " + JSON.stringify(err,null,4) );
+		}
 
 
 		});
@@ -145,7 +149,7 @@ function writeInstanceSettings(instance) {
 	var path = workspace.rootPath + "/" + instance.name + "/settings.json";
 	mkdirp(getDirName(path), function (err) {
 		if (err) console.log(err);
-		fs.writeFile(path, JSON.stringify(instance, null, 4));
+		fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
 	});
 }
 
@@ -158,7 +162,7 @@ function writeFile(path, contents, cb) {
 
 	mkdirp(getDirName(path), function (err) {
 		if (err) return cb(err);
-		fs.writeFile(path, contents);
+		fs.writeFile(path, contents,(error) => { /* handle error */ });
 		vscode.workspace.openTextDocument(path).then(doc => {
 			vscode.window.showTextDocument(doc);
 		});
