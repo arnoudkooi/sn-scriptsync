@@ -49,7 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 				var fileName = workspace.rootPath + "/" + jsnx.instance.name + "/" + jsnx.table + "/" +
 					jsnx.field + '^' + jsnx.name + '^' + jsnx.sys_id + fileExtension;
-				writeFile(fileName, jsnx.content, function (err) {
+					writeFile(fileName, jsnx.content, function (err) {
 					if (err) {
 						console.log(err);
 						err.response = {};
@@ -96,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		ws.on('message', function incoming(message) {
 			if (message.includes('error'))
-				vscode.window.showErrorMessage(message);
+				vscode.window.showErrorMessage("Error while saving file: " + message);
 		});
 
 		//send immediatly a feedback to the incoming connection    
@@ -106,6 +106,7 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidSaveTextDocument(listener => {
 			var fileName = listener.fileName;
 			var fileNameArr = fileName.split(/\\|\/|\.|\^/).slice(1).slice(-6);//
+			if (fileNameArr.length < 5) return;
 			var scriptObj = <any>{};
 			scriptObj.name = fileNameArr[3];
 			scriptObj.tableName = fileNameArr[1];
@@ -114,11 +115,14 @@ export function activate(context: vscode.ExtensionContext) {
 			scriptObj.content = window.activeTextEditor.document.getText();
 			scriptObj.instance = getInstanceSettings(fileNameArr[0]);	
 
+			if (!wss.clients.size){
+				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+			}
 			wss.clients.forEach(function each(client) {
 				if (client.readyState === WebSocket.OPEN) {
 					if (lastsend != Date.now()){
 						client.send(JSON.stringify(scriptObj));
-						lastsend = Date.now();
+						lastsend = Date.now(); 
 					}
 				}
 			});
