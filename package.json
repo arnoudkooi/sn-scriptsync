@@ -1,0 +1,41 @@
+{
+	"name": "sn-scriptsync",
+	"displayName": "sn-scriptsync",
+	"description": "ServiceNow ScriptSync for VS Code",
+	"version": "0.9.0",
+	"publisher": "arnoudkooi",
+	"repository": "https://github.com/arnoudkooi/vscode-scriptsync",
+	"engines": {
+		"vscode": "^1.25.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"*"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "extension.snScriptSync",
+				"title": "ServiceNow ScriptSync"
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"postinstall": "node ./node_modules/vscode/bin/install"
+	},
+	"devDependencies": {
+		"@types/node": "^8.10.38",
+		"tslint": "^5.11.0",
+		"typescript": "^2.6.1",
+		"vscode": "^1.1.26"
+	},
+	"dependencies": {
+		"ws": "^6.1.2"
+	}
+}
