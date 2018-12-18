@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code",
-	"version": "0.9.1",
+	"version": "0.9.2",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
 	"repository": "https://github.com/arnoudkooi/vscode-scriptsync",
