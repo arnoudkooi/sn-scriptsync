@@ -4,6 +4,7 @@
 	"description": "ServiceNow ScriptSync for VS Code",
 	"version": "0.9.1",
 	"publisher": "arnoudkooicom",
+	"icon": "img/icon128.png",
 	"repository": "https://github.com/arnoudkooi/vscode-scriptsync",
 	"engines": {
 		"vscode": "^1.25.0"
