@@ -10,12 +10,16 @@ var fs = require('fs');
 var getDirName = require('path').dirname;
 var lastsend = Date.now();
 
+let scriptSyncStatusBarItem: vscode.StatusBarItem;
+
 export function activate(context: vscode.ExtensionContext) {
 
 	let disposable = vscode.commands.registerCommand('extension.snScriptSync', () => {
 		vscode.window.showInformationMessage('ServiceNow ScriptSync!');
 	});
 	context.subscriptions.push(disposable);
+
+	scriptSyncStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 
 	const server = http.createServer((req, res) => {
 		if (req.method === 'POST') {
@@ -98,6 +102,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		//send immediatly a feedback to the incoming connection    
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]',function(){});
+		updateScriptSyncStatusBarItem('http:1977 ws:1978');
 
 
 		vscode.workspace.onDidSaveTextDocument(listener => {
@@ -168,4 +173,9 @@ function writeFile(path, contents, cb) {
 		});
 		return cb();
 	});
+}
+
+function updateScriptSyncStatusBarItem(message): void {
+	scriptSyncStatusBarItem.text = `$(megaphone) SN ScriptSync: ${message}`;
+	scriptSyncStatusBarItem.show();
 }
