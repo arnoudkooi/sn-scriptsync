@@ -2,13 +2,13 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
 	"repository": {
-	  "type": "git",
-	  "url": "https://github.com/arnoudkooi/vscode-scriptsync"
+		"type": "git",
+		"url": "https://github.com/arnoudkooi/sn-scriptsync"
 	},
 	"engines": {
 		"vscode": "^1.25.0"
@@ -23,10 +23,25 @@
 	"contributes": {
 		"commands": [
 			{
-				"command": "extension.snScriptSync",
-				"title": "ServiceNow ScriptSync"
+				"command": "extension.snScriptSyncEnable",
+				"title": "ServiceNow ScriptSync Enable"
+			},
+			{
+				"command": "extension.snScriptSyncDisable",
+				"title": "ServiceNow ScriptSync Disable"
 			}
-		]
+		],
+		"configuration": {
+			"type": "object",
+			"title": "SN ScriptSync",
+			"properties": {
+				"sn-scriptsync.path": {
+					"type": "string",
+					"default": "~/Documents/sn-scriptsync",
+					"description": "Scripts folder (Extension will auto activate when opening this folder)"
+				}
+			}
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",

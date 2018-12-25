@@ -4,24 +4,65 @@ import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAli
 import * as http from 'http';
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
+import { userInfo } from 'os';
 
-var mkdirp = require('mkdirp');
-var fs = require('fs');
-var getDirName = require('path').dirname;
-var lastsend = Date.now();
+let mkdirp = require('mkdirp');
+let fs = require('fs');
+let getDirName = require('path').dirname;
+let lastsend = Date.now();
+
+let wss;
+let server;
+let serverRunning = false;
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
 
-export function activate(context: vscode.ExtensionContext) {
+export function activate({ subscriptions }: vscode.ExtensionContext) {
 
-	let disposable = vscode.commands.registerCommand('extension.snScriptSync', () => {
-		vscode.window.showInformationMessage('ServiceNow ScriptSync!');
-	});
-	context.subscriptions.push(disposable);
-
+	//initialize statusbaritem and click events
+	const toggleSyncID = 'sample.toggleScriptSync';
+	subscriptions.push(vscode.commands.registerCommand(toggleSyncID, () => {
+		if (serverRunning)
+			vscode.commands.executeCommand("extension.snScriptSyncDisable");
+		else
+			vscode.commands.executeCommand("extension.snScriptSyncEnable");
+			
+	}));
 	scriptSyncStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	scriptSyncStatusBarItem.command = toggleSyncID;
+	subscriptions.push(scriptSyncStatusBarItem);
+	
+	updateScriptSyncStatusBarItem('click to start.');
 
-	const server = http.createServer((req, res) => {
+	const settings = vscode.workspace.getConfiguration('sn-scriptsync')
+	var syncDir:string = settings.get('path');
+	syncDir = syncDir.replace('~',userInfo().homedir);
+	if (vscode.workspace.rootPath == syncDir){
+		startServers();
+	}
+		
+
+	vscode.commands.registerCommand('extension.snScriptSyncEnable', () => {
+		startServers();
+	});
+
+	vscode.commands.registerCommand('extension.snScriptSyncDisable', () => {
+		stopServers();
+	});
+
+	vscode.workspace.onDidSaveTextDocument(listener => {
+		saveFieldsToServiceNow(listener.fileName);
+	});
+
+}
+
+export function deactivate() { }
+
+
+function startServers(){
+
+	//start the webserver
+	server = http.createServer((req, res) => {
 		if (req.method === 'POST') {
 
 			let postedData = '';
@@ -33,16 +74,11 @@ export function activate(context: vscode.ExtensionContext) {
 				postedJson = JSON.parse(postedData);
 				writeInstanceSettings(postedJson.instance);
 
-
 				if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
-					saveFieldAsFile(postedJson, wss);
+					saveFieldAsFile(postedJson);
 				else if (postedJson.action == 'saveWidget')
-					saveWidget(postedJson, wss);
+					saveWidget(postedJson);
 				//requestRecord(postedJson,wss);
-
-
-
-
 			});
 			res.setHeader("Access-Control-Allow-Origin", "*");
 			res.end('Data received');
@@ -53,7 +89,8 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	server.listen(1977);
 
-	const wss = new WebSocket.Server({ port: 1978 });
+	//Start WebSocket Server
+	wss = new WebSocket.Server({ port: 1978 });
 	wss.on('connection', (ws: WebSocket) => {
 
 		ws.on('message', function incoming(message) {
@@ -63,24 +100,36 @@ export function activate(context: vscode.ExtensionContext) {
 
 		//send immediatly a feedback to the incoming connection    
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
-		updateScriptSyncStatusBarItem('http:1977 ws:1978');
-
-
 
 	});
-
-	vscode.workspace.onDidSaveTextDocument(listener => {
-		saveFieldsToServiceNow(listener.fileName, wss);
-	});
-
-
+	updateScriptSyncStatusBarItem('Running');
+	serverRunning = true;
 
 }
 
+function stopServers(){
+	server.close()
+	wss.close();
+	updateScriptSyncStatusBarItem('Stopped');
+	serverRunning = false;
+}
 
-export function deactivate() { }
+function isPortTaken(port, fn) {
+	var net = require('net')
+	var tester = net.createServer()
+	.once('error', function (err) {
+	  if (err.code != 'EADDRINUSE') return fn(err)
+	  fn(null, true)
+	})
+	.once('listening', function() {
+	  tester.once('close', function() { fn(null, false) })
+	  .close()
+	})
+	.listen(port)
+  }
 
-function saveWidget(postedJson, wss) {
+
+function saveWidget(postedJson) {
 	var filePath = workspace.rootPath + "/" + postedJson.instance.name + "/" +
 		postedJson.tableName + "/" + postedJson.name + '/';
 
@@ -130,10 +179,9 @@ function saveWidget(postedJson, wss) {
 			}
 		}
 	});	
-
-
 }
-function saveFieldsToServiceNow(fileName, wss) {
+
+function saveFieldsToServiceNow(fileName) {
 
 
 	try {
@@ -188,8 +236,7 @@ function saveFieldsToServiceNow(fileName, wss) {
 
 }
 
-function saveFieldAsFile(postedJson, wss) {
-	var fs = require('fs');
+function saveFieldAsFile(postedJson) {
 
 	var fileExtension = ".js";
 	var fieldType: string = postedJson.fieldType;
@@ -244,20 +291,20 @@ function writeInstanceSettings(instance) {
 	});
 }
 
-function getInstanceSettings(instanceName) {
+function getInstanceSettings(instanceName:string) {
 	var path = workspace.rootPath + "/" + instanceName + "/settings.json";
 	return JSON.parse(fs.readFileSync(path)) || {};
 }
 
-function getFileAsJson(path) {
+function getFileAsJson(path:string) {
 	return JSON.parse(fs.readFileSync(path)) || {};
 }
 
-function getFileAsArray(path) {
+function getFileAsArray(path:string) {
 	return fs.readFileSync(path, {"encoding" : "utf8"}).split("\n") || [];
 }
 
-function writeFile(path, contents, openFile, cb) {
+function writeFile(path:string, contents:string, openFile, cb:Function) {
 
 	mkdirp(getDirName(path), function (err) {
 		if (err) return cb(err);
@@ -284,7 +331,7 @@ function writeFileIfNotExists(path, contents, openFile, cb) {
 }
 
 
-function updateScriptSyncStatusBarItem(message): void {
+function updateScriptSyncStatusBarItem(message:string): void {
 	scriptSyncStatusBarItem.text = `$(megaphone) SN ScriptSync: ${message}`;
 	scriptSyncStatusBarItem.show();
 }
