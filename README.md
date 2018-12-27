@@ -3,7 +3,7 @@ Easy Integration from ServiceNow to VSCode to be able to script in a full fledge
 
 ![Use Extension](img/sn-scriptsync.gif)
 
-## [YouTube video demonstarting usage](https://www.youtube.com/watch?v=vCQ-PtQYnGU)
+## [YouTube video demonstrating usage](https://www.youtube.com/watch?v=vCQ-PtQYnGU)
 
 # Servicenow Utils
 Requires 
