@@ -9,7 +9,6 @@ import { userInfo } from 'os';
 let mkdirp = require('mkdirp');
 let fs = require('fs');
 let getDirName = require('path').dirname;
-let lastsend = Date.now();
 
 let wss;
 let server;
@@ -93,6 +92,9 @@ function startServers(){
 	wss = new WebSocket.Server({ port: 1978 });
 	wss.on('connection', (ws: WebSocket) => {
 
+		if (wss.clients.size > 1) {
+			ws.close(0,'max connection');
+		}
 		ws.on('message', function incoming(message) {
 			if (message.includes('error'))
 				vscode.window.showErrorMessage("Error while saving file: " + message);
@@ -130,6 +132,7 @@ function isPortTaken(port, fn) {
 
 
 function saveWidget(postedJson) {
+	//lastsend = 0;
 	var filePath = workspace.rootPath + "/" + postedJson.instance.name + "/" +
 		postedJson.tableName + "/" + postedJson.name + '/';
 
@@ -173,10 +176,7 @@ function saveWidget(postedJson) {
 	postedJson.content.length = contentLength;
 	wss.clients.forEach(function each(client) {
 		if (client.readyState === WebSocket.OPEN) {
-			if ((Date.now() - lastsend) > 100) {
 				client.send(JSON.stringify(postedJson));
-				lastsend = Date.now();
-			}
 		}
 	});	
 }
@@ -223,10 +223,7 @@ function saveFieldsToServiceNow(fileName) {
 		}
 		wss.clients.forEach(function each(client) {
 			if (client.readyState === WebSocket.OPEN) {
-				if ((Date.now() - lastsend) > 100) {
 					client.send(JSON.stringify(scriptObj));
-					lastsend = Date.now();
-				}
 			}
 		});
 	}

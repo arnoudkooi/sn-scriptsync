@@ -51,4 +51,14 @@ This will create all the relevant fields as file on the filesystem, in a folder 
 Besides that a file test_urls.txt is created.
 In this page you can add your own urls. When saving a file, ScriptSync will refresh the browserpages that match that URL, enabeling live preview.
 
+## ESLint
+I recommend installing ESLint and the [ESLint ServiceNow plugin](https://www.npmjs.com/package/eslint-plugin-servicenow).
+This will do some basic codechecks
+
+![ESLint](img/eslint.png)
+
+## Issues
+Please report an isue on GitHubn if you experience problems, or have a feature request.
+
+
 
