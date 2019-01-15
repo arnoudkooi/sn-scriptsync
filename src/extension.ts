@@ -245,9 +245,12 @@ function saveFieldAsFile(postedJson) {
 		fileExtension = ".json";
 	else if (fieldType.includes("css"))
 		fileExtension = ".scss";
+	else if (postedJson.name.split(".").length == 2){
+		fileExtension = "." + postedJson.name.split(".")[1];
+		postedJson.name = postedJson.name.split(".")[0];
+	}
 	else if (fieldType.includes("string") || fieldType == "conditions")
 		fileExtension = ".txt";
-
 
 	var fileName = workspace.rootPath + "/" + postedJson.instance.name + "/" + postedJson.table + "/" +
 		postedJson.field + '^' + postedJson.name + '^' + postedJson.sys_id + fileExtension;

@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code",
-	"version": "1.0.8",
+	"version": "1.0.9",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
