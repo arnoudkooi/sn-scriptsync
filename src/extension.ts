@@ -16,6 +16,8 @@ let serverRunning = false;
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
 
+
+
 export function activate({ subscriptions }: vscode.ExtensionContext) {
 
 	//initialize statusbaritem and click events
@@ -25,21 +27,21 @@ export function activate({ subscriptions }: vscode.ExtensionContext) {
 			vscode.commands.executeCommand("extension.snScriptSyncDisable");
 		else
 			vscode.commands.executeCommand("extension.snScriptSyncEnable");
-			
+
 	}));
 	scriptSyncStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	scriptSyncStatusBarItem.command = toggleSyncID;
 	subscriptions.push(scriptSyncStatusBarItem);
-	
+
 	updateScriptSyncStatusBarItem('click to start.');
 
 	const settings = vscode.workspace.getConfiguration('sn-scriptsync')
-	var syncDir:string = settings.get('path');
-	syncDir = syncDir.replace('~',userInfo().homedir);
-	if (vscode.workspace.rootPath == syncDir){
+	var syncDir: string = settings.get('path');
+	syncDir = syncDir.replace('~', userInfo().homedir);
+	if (vscode.workspace.rootPath == syncDir) {
 		startServers();
 	}
-		
+
 
 	vscode.commands.registerCommand('extension.snScriptSyncEnable', () => {
 		startServers();
@@ -58,7 +60,7 @@ export function activate({ subscriptions }: vscode.ExtensionContext) {
 export function deactivate() { }
 
 
-function startServers(){
+function startServers() {
 
 	//start the webserver
 	server = http.createServer((req, res) => {
@@ -93,11 +95,14 @@ function startServers(){
 	wss.on('connection', (ws: WebSocket) => {
 
 		if (wss.clients.size > 1) {
-			ws.close(0,'max connection');
+			ws.close(0, 'max connection');
 		}
 		ws.on('message', function incoming(message) {
-			if (message.includes('error'))
-				vscode.window.showErrorMessage("Error while saving file: " + message);
+			let messageJson = JSON.parse(message)
+			// if (message.includes('error'))
+			// 	vscode.window.showErrorMessage("Error while saving file: " + message);
+			// else
+				saveRequestResponse(messageJson);
 		});
 
 		//send immediatly a feedback to the incoming connection    
@@ -109,26 +114,12 @@ function startServers(){
 
 }
 
-function stopServers(){
+function stopServers() {
 	server.close()
 	wss.close();
 	updateScriptSyncStatusBarItem('Stopped');
 	serverRunning = false;
 }
-
-function isPortTaken(port, fn) {
-	var net = require('net')
-	var tester = net.createServer()
-	.once('error', function (err) {
-	  if (err.code != 'EADDRINUSE') return fn(err)
-	  fn(null, true)
-	})
-	.once('listening', function() {
-	  tester.once('close', function() { fn(null, false) })
-	  .close()
-	})
-	.listen(port)
-  }
 
 
 function saveWidget(postedJson) {
@@ -163,11 +154,23 @@ function saveWidget(postedJson) {
 		});
 	}
 
+	let requestJson = <any>{};
+	requestJson.action = 'requestRecords';
+	requestJson.instance = postedJson.instance;
+	requestJson.filePath = filePath;
+	requestJson.tableName = 'sp_ng_template';
+	requestJson.displayValueField = 'sys_name';
+	let fields = [];
+	fields.push({"name" : "template", "fileType" : "html" }); 
+	requestJson.fields = fields;
+	requestJson.queryString = 'sysparm_query=sp_widget=' + postedJson.sys_id;
+
+	requestRecords(requestJson);
+
 	var testUrls = [];
 	testUrls.push(postedJson.instance.url + "/$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id);
 	testUrls.push(postedJson.instance.url + "/sp_config/?id=" + postedJson.widget.id.displayValue);
-	writeFileIfNotExists(filePath + "test_urls.txt", testUrls.join("\n"),false,function(){});
-
+	writeFileIfNotExists(filePath + "test_urls.txt", testUrls.join("\n"), false, function () { });
 
 	postedJson.widget = {};
 	postedJson.result = {};
@@ -176,9 +179,41 @@ function saveWidget(postedJson) {
 	postedJson.content.length = contentLength;
 	wss.clients.forEach(function each(client) {
 		if (client.readyState === WebSocket.OPEN) {
-				client.send(JSON.stringify(postedJson));
+			client.send(JSON.stringify(postedJson));
 		}
-	});	
+	});
+}
+
+
+function saveRequestResponse(responseJson) {
+	let filePath = responseJson.filePath + responseJson.tableName + "/";
+	for (let result of responseJson.results) {
+		for (let field of responseJson.fields) {
+			writeFile(filePath + 
+					field.name + '^' + 
+					result[responseJson.displayValueField].replace(/\./,'') + '^' + 
+					result.sys_id + '^' + 
+					field.fileType, 
+				result[field.name], false, function(){});
+		}
+	}
+}
+
+function requestRecords(requestJson) {
+
+	try {
+		if (!wss.clients.size) {
+			vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+		}
+		wss.clients.forEach(function each(client) {
+			if (client.readyState === WebSocket.OPEN) {
+				client.send(JSON.stringify(requestJson));
+			}
+		});
+	}
+	catch (err) {
+		vscode.window.showErrorMessage("Error requesting data: " + JSON.stringify(err, null, 4));
+	}
 }
 
 function saveFieldsToServiceNow(fileName) {
@@ -195,7 +230,14 @@ function saveFieldsToServiceNow(fileName) {
 			scriptObj.tableName = fileNameArr[1];
 			scriptObj.fieldName = fileNameArr[2];
 			scriptObj.sys_id = fileNameArr[4];
-			scriptObj.instance = getInstanceSettings(fileNameArr[0]);
+			if (fileNameArrFull.length < 8)
+				scriptObj.instance = getInstanceSettings(fileNameArr[0]);
+			else { //subdirectory of a widget
+				var basePath = fileNameArrFull.slice(0, -5).join("/");
+				scriptObj.instance = getInstanceSettings(fileNameArrFull[fileNameArrFull.length - 8]);
+				scriptObj.testUrls = getFileAsArray(basePath + "/test_urls.txt");
+			}
+
 		}
 		else if (fileNameArr[2] == 'sp_widget') {
 
@@ -223,7 +265,7 @@ function saveFieldsToServiceNow(fileName) {
 		}
 		wss.clients.forEach(function each(client) {
 			if (client.readyState === WebSocket.OPEN) {
-					client.send(JSON.stringify(scriptObj));
+				client.send(JSON.stringify(scriptObj));
 			}
 		});
 	}
@@ -245,7 +287,7 @@ function saveFieldAsFile(postedJson) {
 		fileExtension = ".json";
 	else if (fieldType.includes("css"))
 		fileExtension = ".scss";
-	else if (postedJson.name.split(".").length == 2){
+	else if (postedJson.name.split(".").length == 2) {
 		fileExtension = "." + postedJson.name.split(".")[1];
 		postedJson.name = postedJson.name.split(".")[0];
 	}
@@ -291,20 +333,20 @@ function writeInstanceSettings(instance) {
 	});
 }
 
-function getInstanceSettings(instanceName:string) {
+function getInstanceSettings(instanceName: string) {
 	var path = workspace.rootPath + "/" + instanceName + "/settings.json";
 	return JSON.parse(fs.readFileSync(path)) || {};
 }
 
-function getFileAsJson(path:string) {
+function getFileAsJson(path: string) {
 	return JSON.parse(fs.readFileSync(path)) || {};
 }
 
-function getFileAsArray(path:string) {
-	return fs.readFileSync(path, {"encoding" : "utf8"}).split("\n") || [];
+function getFileAsArray(path: string) {
+	return fs.readFileSync(path, { "encoding": "utf8" }).split("\n") || [];
 }
 
-function writeFile(path:string, contents:string, openFile, cb:Function) {
+function writeFile(path: string, contents: string, openFile, cb: Function) {
 
 	mkdirp(getDirName(path), function (err) {
 		if (err) return cb(err);
@@ -321,7 +363,7 @@ function writeFileIfNotExists(path, contents, openFile, cb) {
 
 	mkdirp(getDirName(path), function (err) {
 		if (err) return cb(err);
-		fs.writeFile(path, contents, { "flag" : "wx"}, (error) => { /* handle error */ });
+		fs.writeFile(path, contents, { "flag": "wx" }, (error) => { /* handle error */ });
 		vscode.workspace.openTextDocument(path).then(doc => {
 			if (openFile)
 				vscode.window.showTextDocument(doc, { "preview": false });
@@ -331,7 +373,7 @@ function writeFileIfNotExists(path, contents, openFile, cb) {
 }
 
 
-function updateScriptSyncStatusBarItem(message:string): void {
+function updateScriptSyncStatusBarItem(message: string): void {
 	scriptSyncStatusBarItem.text = `$(megaphone) SN ScriptSync: ${message}`;
 	scriptSyncStatusBarItem.show();
 }
