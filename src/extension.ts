@@ -62,6 +62,11 @@ export function deactivate() { }
 
 function startServers() {
 
+	if (typeof workspace.rootPath == 'undefined'){
+		vscode.window.showWarningMessage("Please open a folder, before running ScriptSync");
+		return;
+	}
+
 	//start the webserver
 	server = http.createServer((req, res) => {
 		if (req.method === 'POST') {
@@ -99,9 +104,13 @@ function startServers() {
 		}
 		ws.on('message', function incoming(message) {
 			let messageJson = JSON.parse(message)
-			// if (message.includes('error'))
-			// 	vscode.window.showErrorMessage("Error while saving file: " + message);
-			// else
+			if (messageJson.hasOwnProperty('error')){
+				if (messageJson.error.detail.includes("ACL"))
+					messageJson.error.detail = "ACL Error, try changing scope in the browser";
+
+				 vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
+			}
+			else
 				saveRequestResponse(messageJson);
 		});
 
@@ -161,7 +170,7 @@ function saveWidget(postedJson) {
 	requestJson.tableName = 'sp_ng_template';
 	requestJson.displayValueField = 'sys_name';
 	let fields = [];
-	fields.push({"name" : "template", "fileType" : "html" }); 
+	fields.push({ "name": "template", "fileType": "html" });
 	requestJson.fields = fields;
 	requestJson.queryString = 'sysparm_query=sp_widget=' + postedJson.sys_id;
 
@@ -189,12 +198,12 @@ function saveRequestResponse(responseJson) {
 	let filePath = responseJson.filePath + responseJson.tableName + "/";
 	for (let result of responseJson.results) {
 		for (let field of responseJson.fields) {
-			writeFile(filePath + 
-					field.name + '^' + 
-					result[responseJson.displayValueField].replace(/\./,'') + '^' + 
-					result.sys_id + '^' + 
-					field.fileType, 
-				result[field.name], false, function(){});
+			writeFile(filePath +
+				field.name + '^' +
+				result[responseJson.displayValueField].replace(/\./, '') + '^' +
+				result.sys_id + '^' +
+				field.fileType,
+				result[field.name], false, function () { });
 		}
 	}
 }
@@ -218,45 +227,44 @@ function requestRecords(requestJson) {
 
 function saveFieldsToServiceNow(fileName) {
 
-
 	try {
-		var fileNameArrFull = fileName.split(/\\|\/|\.|\^/);//
-		var fileNameArr = fileNameArrFull.slice(1).slice(-6);//
-		if (fileNameArr.length < 6) return;
-		if (fileNameArr[4].length != 32 && fileNameArr[2] != 'sp_widget') return; //must be the sys_id
+
+		var fileNameUse = fileName.replace(workspace.rootPath, "");
+		var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
+		var basePath = workspace.rootPath + "/" + fileNameArr.slice(0, 2).join("/");
+
+		if (fileNameArr.length < 5) return;
+		if (fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') return; //must be the sys_id
 		var scriptObj = <any>{};
+		scriptObj.instance = getInstanceSettings(fileNameArr[0]);
+		scriptObj.tableName = fileNameArr[1];
 		if (fileNameArr[4].length == 32) {
 			scriptObj.name = fileNameArr[3];
-			scriptObj.tableName = fileNameArr[1];
 			scriptObj.fieldName = fileNameArr[2];
 			scriptObj.sys_id = fileNameArr[4];
-			if (fileNameArrFull.length < 8)
-				scriptObj.instance = getInstanceSettings(fileNameArr[0]);
-			else { //subdirectory of a widget
-				var basePath = fileNameArrFull.slice(0, -5).join("/");
-				scriptObj.instance = getInstanceSettings(fileNameArrFull[fileNameArrFull.length - 8]);
-				scriptObj.testUrls = getFileAsArray(basePath + "/test_urls.txt");
-			}
-
 		}
-		else if (fileNameArr[2] == 'sp_widget') {
+		else if (fileNameArr[1] == 'sp_widget') {
+			scriptObj.name = fileNameArr[2];
+			scriptObj.testUrls = getFileAsArray(basePath + "/" + scriptObj.name + "/test_urls.txt");
 
-			var basePath = fileNameArrFull.slice(0, -2).join("/");
-			var nameToField = {
-				"1 HTML Template": "template",
-				"2 SCSS": "css",
-				"3 Client Script": "client_script",
-				"4 Server Script": "script",
-				"5 Link function": "link",
-				"6 Option schema": "option_schema",
-				"7 Demo data": fileNameArr
+			if (fileNameArr[3] != 'sp_ng_template') {
+				var nameToField = {
+					"1 HTML Template": "template",
+					"2 SCSS": "css",
+					"3 Client Script": "client_script",
+					"4 Server Script": "script",
+					"5 Link function": "link",
+					"6 Option schema": "option_schema",
+					"7 Demo data": fileNameArr
+				}
+				scriptObj.fieldName = nameToField[fileNameArr[3]];
+				scriptObj.sys_id = getFileAsJson(basePath + "/" + scriptObj.name + "/widget.json")['sys_id'];
 			}
-			scriptObj.name = fileNameArr[3];
-			scriptObj.tableName = fileNameArr[2];
-			scriptObj.fieldName = nameToField[fileNameArr[4]];
-			scriptObj.sys_id = getFileAsJson(basePath + "/widget.json")['sys_id'];
-			scriptObj.instance = getInstanceSettings(fileNameArr[1]);
-			scriptObj.testUrls = getFileAsArray(basePath + "/test_urls.txt");
+			else {
+				scriptObj.tableName = fileNameArr[3];
+				scriptObj.fieldName = fileNameArr[4];
+				scriptObj.sys_id = fileNameArr[6];
+			}
 		}
 		scriptObj.content = window.activeTextEditor.document.getText();
 
