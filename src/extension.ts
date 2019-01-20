@@ -62,7 +62,7 @@ export function deactivate() { }
 
 function startServers() {
 
-	if (typeof workspace.rootPath == 'undefined'){
+	if (typeof workspace.rootPath == 'undefined') {
 		vscode.window.showWarningMessage("Please open a folder, before running ScriptSync");
 		return;
 	}
@@ -104,11 +104,11 @@ function startServers() {
 		}
 		ws.on('message', function incoming(message) {
 			let messageJson = JSON.parse(message)
-			if (messageJson.hasOwnProperty('error')){
+			if (messageJson.hasOwnProperty('error')) {
 				if (messageJson.error.detail.includes("ACL"))
 					messageJson.error.detail = "ACL Error, try changing scope in the browser";
 
-				 vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
+				vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
 			}
 			else
 				saveRequestResponse(messageJson);
@@ -136,15 +136,29 @@ function saveWidget(postedJson) {
 	var filePath = workspace.rootPath + "/" + postedJson.instance.name + "/" +
 		postedJson.tableName + "/" + postedJson.name + '/';
 
-	var files = {
-		"1 HTML Template.html": { "content": postedJson.widget.template.value, "openFile": true },
-		"2 SCSS.css": { "content": postedJson.widget.css.value, "openFile": true },
-		"3 Client Script.js": { "content": postedJson.widget.client_script.value, "openFile": true },
-		"4 Server Script.js": { "content": postedJson.widget.script.value, "openFile": true },
-		"5 Link function.js": { "content": postedJson.widget.link.value, "openFile": false },
-		"6 Option schema.json": { "content": postedJson.widget.option_schema.value, "openFile": false },
-		"7 Demo data.json": { "content": postedJson.widget.demo_data.value, "openFile": false },
-		"widget.json": { "content": JSON.stringify(postedJson, null, 4), "openFile": false },
+	var files = {};
+
+	if (postedJson.widget.hasOwnProperty("option_schema")) { //sp_widget
+		files = {
+			"1 HTML Template.html": { "content": postedJson.widget.template.value, "openFile": true },
+			"2 SCSS.css": { "content": postedJson.widget.css.value, "openFile": true },
+			"3 Client Script.js": { "content": postedJson.widget.client_script.value, "openFile": true },
+			"4 Server Script.js": { "content": postedJson.widget.script.value, "openFile": true },
+			"5 Link function.js": { "content": postedJson.widget.link.value, "openFile": false },
+			"6 Option schema.json": { "content": postedJson.widget.option_schema.value, "openFile": false },
+			"7 Demo data.json": { "content": postedJson.widget.demo_data.value, "openFile": false },
+			"widget.json": { "content": JSON.stringify(postedJson, null, 4), "openFile": false },
+		}
+	}
+	else { //sp_header_footer
+		files = {
+			"1 HTML Template.html": { "content": postedJson.widget.template.value, "openFile": true },
+			"2 SCSS.css": { "content": postedJson.widget.css.value, "openFile": true },
+			"3 Client Script.js": { "content": postedJson.widget.client_script.value, "openFile": true },
+			"4 Server Script.js": { "content": postedJson.widget.script.value, "openFile": true },
+			"5 Link function.js": { "content": postedJson.widget.link.value, "openFile": false },
+			"widget.json": { "content": JSON.stringify(postedJson, null, 4), "openFile": false },
+		}
 	}
 
 	var contentLength = 0;
