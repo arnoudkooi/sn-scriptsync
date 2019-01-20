@@ -48,8 +48,9 @@ Saving it in VS Code, will save it back to the instance.
 ## Widgets
 The workflow for ServicePortal widgets is shown in the animated gif above. From the widget editor click on the save button.
 This will create all the relevant fields as file on the filesystem, in a folder with the name of the widget.
-Besides that a file test_urls.txt is created.
 In a subfolder the angular ng-templates will be placed.
+
+Besides that a file test_urls.txt is created.
 In this page you can add your own urls. When saving a file, ScriptSync will refresh the browserpages that match that URL, enabeling live preview.
 
 ## ESLint
