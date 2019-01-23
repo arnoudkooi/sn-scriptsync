@@ -87,6 +87,7 @@ function startServers() {
 				//requestRecord(postedJson,wss);
 			});
 			res.setHeader("Access-Control-Allow-Origin", "*");
+			res.setHeader('Access-Control-Allow-Methods', 'POST');
 			res.end('Data received');
 		}
 		else {

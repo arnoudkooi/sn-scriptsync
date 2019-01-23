@@ -6,14 +6,14 @@ Easy Integration from ServiceNow to VSCode to be able to script in a full fledge
 ## [YouTube video demonstrating usage](https://www.youtube.com/watch?v=vCQ-PtQYnGU)
 
 # Servicenow Utils
-Requires 
+Requires the latest version of
 [ServiceNow Utils for Chrome](https://chrome.google.com/webstore/detail/servicenow-utils/jgaodbdddndbaijmcljdbglhpdhnjobg) or 
-[ServiceNow Utils Firefox](https://addons.mozilla.org/nl/firefox/addon/servicenow-utils2/) 3.0 or higher.
+[ServiceNow Utils Firefox](https://addons.mozilla.org/nl/firefox/addon/servicenow-utils2/) 
 
+**In case of issues, always check for the latest version of both the browser and VS Code extension, and update if needed!**
 
 # Setup
-After installing both this extension and the browser extension, right click and enable in the browser context menu.
-
+After installing both this extension and the browser extension, open a folder in vscode and enable scriptsync in vscode.
 
 ## Setting folder
 In the settings page you can enter a default file path.
@@ -26,12 +26,11 @@ The ScriptSync service can be manually start stopped by clicking the Statusbar t
 ![Use Extension](img/startstop.png)
 
 ## Enable in ServiceNow Utils
-From the browser ScriptSync must be analed once, by using the 
-context menu > VS Code ScriptSync > Enable
+From the browser ScriptSync must be enabled once, by opening the popup and in the settings tab enable the checkbox 
 ![Use Extension](img/enablesnu.png)
 
 # Usage
-While using be sure to keep the helper tab open. This will show logging and acts as a comunnication channel between ServiceNow and VS code. this can be opened from the context menu.
+While using, be sure to keep the helper tab open. This will show logging and acts as a comunnication channel between ServiceNow and VS code. this can be opened from the context menu.
 ![Helper tab](img/helpertab.png)
 
 ## Forms
@@ -60,7 +59,7 @@ This will do some basic codechecks
 ![ESLint](img/eslint.png)
 
 ## Issues
-Please report an isue on GitHubn if you experience problems, or have a feature request.
+Please report an issue on GitHub if you experience problems, or have a feature request.
 
 
 
