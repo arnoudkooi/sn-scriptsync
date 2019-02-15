@@ -1,14 +1,14 @@
-
-
 import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAlignment, StatusBarItem, TextDocument } from 'vscode';
 import * as http from 'http';
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { userInfo } from 'os';
 
+
 let mkdirp = require('mkdirp');
 let fs = require('fs');
 let getDirName = require('path').dirname;
+const nodePath = require('path');
 
 let wss;
 let server;
@@ -134,8 +134,8 @@ function stopServers() {
 
 function saveWidget(postedJson) {
 	//lastsend = 0;
-	var filePath = workspace.rootPath + "/" + postedJson.instance.name + "/" +
-		postedJson.tableName + "/" + postedJson.name + '/';
+	var filePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep +
+		postedJson.tableName + nodePath.sep + postedJson.name + nodePath.sep;
 
 	var files = {};
 
@@ -192,8 +192,8 @@ function saveWidget(postedJson) {
 	requestRecords(requestJson);
 
 	var testUrls = [];
-	testUrls.push(postedJson.instance.url + "/$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id);
-	testUrls.push(postedJson.instance.url + "/sp_config/?id=" + postedJson.widget.id.displayValue);
+	testUrls.push(postedJson.instance.url + nodePath.sep + "$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id);
+	testUrls.push(postedJson.instance.url + nodePath.sep + "sp_config?id=" + postedJson.widget.id.displayValue);
 	writeFileIfNotExists(filePath + "test_urls.txt", testUrls.join("\n"), false, function () { });
 
 	postedJson.widget = {};
@@ -210,7 +210,7 @@ function saveWidget(postedJson) {
 
 
 function saveRequestResponse(responseJson) {
-	let filePath = responseJson.filePath + responseJson.tableName + "/";
+	let filePath = responseJson.filePath + responseJson.tableName + nodePath.sep;
 	for (let result of responseJson.results) {
 		for (let field of responseJson.fields) {
 			writeFile(filePath +
@@ -246,7 +246,7 @@ function saveFieldsToServiceNow(fileName) {
 
 		var fileNameUse = fileName.replace(workspace.rootPath, "");
 		var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
-		var basePath = workspace.rootPath + "/" + fileNameArr.slice(0, 2).join("/");
+		var basePath = workspace.rootPath + nodePath.sep + fileNameArr.slice(0, 2).join(nodePath.sep);
 
 		if (fileNameArr.length < 5) return;
 		if (fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') return; //must be the sys_id
@@ -260,7 +260,7 @@ function saveFieldsToServiceNow(fileName) {
 		}
 		else if (fileNameArr[1] == 'sp_widget') {
 			scriptObj.name = fileNameArr[2];
-			scriptObj.testUrls = getFileAsArray(basePath + "/" + scriptObj.name + "/test_urls.txt");
+			scriptObj.testUrls = getFileAsArray(basePath + nodePath.sep + scriptObj.name + nodePath.sep + "test_urls.txt");
 
 			if (fileNameArr[3] != 'sp_ng_template') {
 				var nameToField = {
@@ -273,7 +273,7 @@ function saveFieldsToServiceNow(fileName) {
 					"7 Demo data": fileNameArr
 				}
 				scriptObj.fieldName = nameToField[fileNameArr[3]];
-				scriptObj.sys_id = getFileAsJson(basePath + "/" + scriptObj.name + "/widget.json")['sys_id'];
+				scriptObj.sys_id = getFileAsJson(basePath + nodePath.sep + scriptObj.name + nodePath.sep + "widget.json")['sys_id'];
 			}
 			else {
 				scriptObj.tableName = fileNameArr[3];
@@ -317,7 +317,7 @@ function saveFieldAsFile(postedJson) {
 	else if (fieldType.includes("string") || fieldType == "conditions")
 		fileExtension = ".txt";
 
-	var fileName = workspace.rootPath + "/" + postedJson.instance.name + "/" + postedJson.table + "/" +
+	var fileName = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep + postedJson.table + nodePath.sep +
 		postedJson.field + '^' + postedJson.name + '^' + postedJson.sys_id + fileExtension;
 	writeFile(fileName, postedJson.content, true, function (err) {
 		if (err) {
@@ -349,7 +349,7 @@ function saveFieldAsFile(postedJson) {
 
 
 function writeInstanceSettings(instance) {
-	var path = workspace.rootPath + "/" + instance.name + "/settings.json";
+	var path = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep + "settings.json";
 	mkdirp(getDirName(path), function (err) {
 		if (err) console.log(err);
 		fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
@@ -357,7 +357,7 @@ function writeInstanceSettings(instance) {
 }
 
 function getInstanceSettings(instanceName: string) {
-	var path = workspace.rootPath + "/" + instanceName + "/settings.json";
+	var path = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep + "settings.json";
 	return JSON.parse(fs.readFileSync(path)) || {};
 }
 
