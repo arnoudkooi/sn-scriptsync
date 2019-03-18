@@ -16,8 +16,6 @@ let serverRunning = false;
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
 
-
-
 export function activate({ subscriptions }: vscode.ExtensionContext) {
 
 	//initialize statusbaritem and click events
@@ -55,6 +53,10 @@ export function activate({ subscriptions }: vscode.ExtensionContext) {
 		saveFieldsToServiceNow(listener.fileName);
 	});
 
+	vscode.workspace.createFileSystemWatcher("**/*.js").onDidChange((uri) => {
+		var fileName = uri.fsPath;
+		saveFieldsToServiceNow(fileName);
+	});
 }
 
 export function deactivate() { }
