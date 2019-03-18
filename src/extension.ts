@@ -248,6 +248,10 @@ function saveFieldsToServiceNow(fileName) {
 		var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
 		var basePath = workspace.rootPath + nodePath.sep + fileNameArr.slice(0, 2).join(nodePath.sep);
 
+		if (fileNameArr[5] === "ts") {
+			return;
+		}
+
 		if (fileNameArr.length < 5) return;
 		if (fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') return; //must be the sys_id
 		var scriptObj = <any>{};
