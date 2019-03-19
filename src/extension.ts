@@ -250,6 +250,7 @@ function saveFieldsToServiceNow(fileName) {
 		var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
 		var basePath = workspace.rootPath + nodePath.sep + fileNameArr.slice(0, 2).join(nodePath.sep);
 
+		// Ignore TS files
 		if (fileNameArr[5] === "ts") {
 			return;
 		}
@@ -287,15 +288,18 @@ function saveFieldsToServiceNow(fileName) {
 				scriptObj.sys_id = fileNameArr[6];
 			}
 		}
-		scriptObj.content = window.activeTextEditor.document.getText();
 
-		if (!wss.clients.size) {
-			vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
-		}
-		wss.clients.forEach(function each(client) {
-			if (client.readyState === WebSocket.OPEN) {
-				client.send(JSON.stringify(scriptObj));
+		vscode.workspace.openTextDocument(fileName).then((document) => {
+			scriptObj.content = document.getText();
+
+			if (!wss.clients.size) {
+				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
 			}
+			wss.clients.forEach(function each(client) {
+				if (client.readyState === WebSocket.OPEN) {
+					client.send(JSON.stringify(scriptObj));
+				}
+			});
 		});
 	}
 	catch (err) {
