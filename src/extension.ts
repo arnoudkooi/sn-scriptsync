@@ -289,18 +289,23 @@ function saveFieldsToServiceNow(fileName) {
 			}
 		}
 
-		vscode.workspace.openTextDocument(fileName).then((document) => {
-			scriptObj.content = document.getText();
+		// Wait for FS to catch up (somehow? this is triggered by FS event..)
+		setTimeout(() => {
+			vscode.workspace.openTextDocument(fileName).then((document) => {
+				scriptObj.content = document.getText();
 
-			if (!wss.clients.size) {
-				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
-			}
-			wss.clients.forEach(function each(client) {
-				if (client.readyState === WebSocket.OPEN) {
-					client.send(JSON.stringify(scriptObj));
+				if (!wss.clients.size) {
+					vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
 				}
+				wss.clients.forEach(function each(client) {
+					if (client.readyState === WebSocket.OPEN) {
+						client.send(JSON.stringify(scriptObj));
+					}
+				});
 			});
-		});
+		}, 500)
+
+
 	}
 	catch (err) {
 		vscode.window.showErrorMessage("Error while saving file: " + JSON.stringify(err, null, 4));
