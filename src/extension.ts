@@ -216,7 +216,7 @@ function saveRequestResponse(responseJson) {
 			writeFile(filePath +
 				field.name + '^' +
 				result[responseJson.displayValueField].replace(/\./, '') + '^' +
-				result.sys_id + '^' +
+				result.sys_id + '.' +
 				field.fileType,
 				result[field.name], false, function () { });
 		}
