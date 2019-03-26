@@ -52,13 +52,28 @@ export function activate({ subscriptions }: vscode.ExtensionContext) {
 	});
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
-		saveFieldsToServiceNow(listener.fileName);
+		if(!saveFieldsToServiceNow(listener.fileName)) {
+			markFileAsDirty(listener)
+		}
 	});
 
 }
 
 export function deactivate() { }
 
+function markFileAsDirty(file : TextDocument) : void {
+	let insertEdit: vscode.WorkspaceEdit = new vscode.WorkspaceEdit();
+	let removeEdit: vscode.WorkspaceEdit = new vscode.WorkspaceEdit();
+	let lastLineIndex: number = file.lineCount - 1;
+	let lastCharacterIndex: number = file.lineAt(lastLineIndex).range.end.character;
+
+	insertEdit.insert(file.uri, new vscode.Position(lastLineIndex, lastCharacterIndex), " ");
+	removeEdit.delete(file.uri, new vscode.Range(
+		new vscode.Position(lastLineIndex, lastCharacterIndex), new vscode.Position(lastLineIndex, lastCharacterIndex+1)));
+	workspace.applyEdit(insertEdit).then(() => {
+		workspace.applyEdit(removeEdit);
+	});
+}
 
 function startServers() {
 
@@ -110,6 +125,8 @@ function startServers() {
 					messageJson.error.detail = "ACL Error, try changing scope in the browser";
 
 				vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
+
+				markFileAsDirty(window.activeTextEditor.document);
 			}
 			else
 				saveRequestResponse(messageJson);
@@ -240,20 +257,19 @@ function requestRecords(requestJson) {
 	}
 }
 
-function saveFieldsToServiceNow(fileName) {
-
+function saveFieldsToServiceNow(fileName) : boolean {
+	let success : boolean = true;
 	try {
-
 		var fileNameUse = fileName.replace(workspace.rootPath, "");
 		var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
 		var basePath = workspace.rootPath + nodePath.sep + fileNameArr.slice(0, 2).join(nodePath.sep);
 
 		if (fileNameArr[5] === "ts") {
-			return;
+			return true;
 		}
 
-		if (fileNameArr.length < 5) return;
-		if (fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') return; //must be the sys_id
+		if (fileNameArr.length < 5) return true;
+		if (fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') return true; //must be the sys_id
 		var scriptObj = <any>{};
 		scriptObj.instance = getInstanceSettings(fileNameArr[0]);
 		scriptObj.tableName = fileNameArr[1];
@@ -289,17 +305,21 @@ function saveFieldsToServiceNow(fileName) {
 
 		if (!wss.clients.size) {
 			vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+			success = false;
 		}
 		wss.clients.forEach(function each(client) {
 			if (client.readyState === WebSocket.OPEN) {
 				client.send(JSON.stringify(scriptObj));
 			}
 		});
+
 	}
 	catch (err) {
 		vscode.window.showErrorMessage("Error while saving file: " + JSON.stringify(err, null, 4));
+		success = false;
 	}
 
+	return success;
 }
 
 function saveFieldAsFile(postedJson) {
