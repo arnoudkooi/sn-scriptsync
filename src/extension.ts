@@ -6,6 +6,8 @@ import { userInfo } from 'os';
 
 
 let mkdirp = require('mkdirp');
+let sass = require('sass');
+
 let fs = require('fs');
 let getDirName = require('path').dirname;
 const nodePath = require('path');
@@ -52,8 +54,37 @@ export function activate({ subscriptions }: vscode.ExtensionContext) {
 	});
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
-		if(!saveFieldsToServiceNow(listener.fileName)) {
+		if (!saveFieldsToServiceNow(listener.fileName)) {
 			markFileAsDirty(listener)
+		}
+	});
+
+	vscode.workspace.onDidChangeTextDocument(listener => {
+		if (listener.document.fileName.endsWith('css')) {
+			if (!wss.clients.size) {
+				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+			}
+			var scriptObj = <any>{};
+			scriptObj.liveupdate = true;
+			var filePath = listener.document.fileName.substring(0, listener.document.fileName.lastIndexOf("/"));
+			scriptObj.sys_id = getFileAsJson(filePath + nodePath.sep +  "widget.json")['sys_id'];
+			var scss = ".v" + scriptObj.sys_id + " { " + listener.document.getText()  + " }";
+			var cssObj = sass.renderSync({
+				"data": scss,
+				"outputStyle" : "expanded"
+			});
+
+			scriptObj.testUrls = getFileAsArray(filePath + nodePath.sep + "test_urls.txt");
+
+
+			if (scriptObj.testUrls.length) {
+				scriptObj.css =  cssObj.css.toString();
+				wss.clients.forEach(function each(client) {
+					if (client.readyState === WebSocket.OPEN) {
+						client.send(JSON.stringify(scriptObj));
+					}
+				});
+			}
 		}
 	});
 
@@ -61,7 +92,7 @@ export function activate({ subscriptions }: vscode.ExtensionContext) {
 
 export function deactivate() { }
 
-function markFileAsDirty(file : TextDocument) : void {
+function markFileAsDirty(file: TextDocument): void {
 	let insertEdit: vscode.WorkspaceEdit = new vscode.WorkspaceEdit();
 	let removeEdit: vscode.WorkspaceEdit = new vscode.WorkspaceEdit();
 	let lastLineIndex: number = file.lineCount - 1;
@@ -69,7 +100,7 @@ function markFileAsDirty(file : TextDocument) : void {
 
 	insertEdit.insert(file.uri, new vscode.Position(lastLineIndex, lastCharacterIndex), " ");
 	removeEdit.delete(file.uri, new vscode.Range(
-		new vscode.Position(lastLineIndex, lastCharacterIndex), new vscode.Position(lastLineIndex, lastCharacterIndex+1)));
+		new vscode.Position(lastLineIndex, lastCharacterIndex), new vscode.Position(lastLineIndex, lastCharacterIndex + 1)));
 	workspace.applyEdit(insertEdit).then(() => {
 		workspace.applyEdit(removeEdit);
 	});
@@ -159,7 +190,7 @@ function saveWidget(postedJson) {
 	if (postedJson.widget.hasOwnProperty("option_schema")) { //sp_widget
 		files = {
 			"1 HTML Template.html": { "content": postedJson.widget.template.value, "openFile": true },
-			"2 SCSS.css": { "content": postedJson.widget.css.value, "openFile": true },
+			"2 SCSS.scss": { "content": postedJson.widget.css.value, "openFile": true },
 			"3 Client Script.js": { "content": postedJson.widget.client_script.value, "openFile": true },
 			"4 Server Script.js": { "content": postedJson.widget.script.value, "openFile": true },
 			"5 Link function.js": { "content": postedJson.widget.link.value, "openFile": false },
@@ -171,7 +202,7 @@ function saveWidget(postedJson) {
 	else { //sp_header_footer
 		files = {
 			"1 HTML Template.html": { "content": postedJson.widget.template.value, "openFile": true },
-			"2 SCSS.css": { "content": postedJson.widget.css.value, "openFile": true },
+			"2 SCSS.scss": { "content": postedJson.widget.css.value, "openFile": true },
 			"3 Client Script.js": { "content": postedJson.widget.client_script.value, "openFile": true },
 			"4 Server Script.js": { "content": postedJson.widget.script.value, "openFile": true },
 			"5 Link function.js": { "content": postedJson.widget.link.value, "openFile": false },
@@ -257,8 +288,8 @@ function requestRecords(requestJson) {
 	}
 }
 
-function saveFieldsToServiceNow(fileName) : boolean {
-	let success : boolean = true;
+function saveFieldsToServiceNow(fileName): boolean {
+	let success: boolean = true;
 	try {
 		var fileNameUse = fileName.replace(workspace.rootPath, "");
 		var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
@@ -390,7 +421,12 @@ function getFileAsJson(path: string) {
 }
 
 function getFileAsArray(path: string) {
-	return fs.readFileSync(path, { "encoding": "utf8" }).split("\n") || [];
+	try {
+		return fs.readFileSync(path, { "encoding": "utf8" }).split("\n") || [];
+	}
+	catch{
+		return [];
+	}
 }
 
 function writeFile(path: string, contents: string, openFile, cb: Function) {

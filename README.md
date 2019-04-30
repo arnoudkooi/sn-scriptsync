@@ -52,6 +52,8 @@ In a subfolder the angular ng-templates will be placed.
 Besides that a file test_urls.txt is created.
 In this page you can add your own urls. When saving a file, ScriptSync will refresh the browser pages that match that URL, enabling live preview.
 
+
+
 ## ESLint
 I recommend installing ESLint and the [ESLint ServiceNow plugin](https://www.npmjs.com/package/eslint-plugin-servicenow).
 This will do some basic code checks.
