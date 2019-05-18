@@ -40,9 +40,11 @@ Clicking it will save the current field value direct to the filesystem and open 
 ![Save from form](img/saveform.png)
 
 In VS Code the structure for the file will be:
-instance/table/field^fieldname^scriptname^sys_id.extension
+instance/table/fieldname^scriptname^sys_id.extension
 
 Saving it in VS Code, will save it back to the instance.
+
+*Note the live preview is currently only supported in Chrome, not in FireFox*
 
 ## Widgets
 The workflow for ServicePortal widgets is shown in the animated gif above. From the widget editor click on the save button.
@@ -51,6 +53,10 @@ In a subfolder the angular ng-templates will be placed.
 
 Besides that a file test_urls.txt is created.
 In this page you can add your own urls. When saving a file, ScriptSync will refresh the browser pages that match that URL, enabling live preview.
+
+Widget SCSS can be live edited, each change can immediate be previewd in the browser. See animation below.
+
+![Use Extension](img/sn-scriptsync-css.gif)
 
 
 

@@ -242,6 +242,7 @@ function saveWidget(postedJson) {
 	var testUrls = [];
 	testUrls.push(postedJson.instance.url + nodePath.sep + "$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id);
 	testUrls.push(postedJson.instance.url + nodePath.sep + "sp_config?id=" + postedJson.widget.id.displayValue);
+	testUrls.push(postedJson.instance.url + nodePath.sep + "sp?id=" + postedJson.widget.id.displayValue);
 	writeFileIfNotExists(filePath + "test_urls.txt", testUrls.join("\n"), false, function () { });
 
 	postedJson.widget = {};
