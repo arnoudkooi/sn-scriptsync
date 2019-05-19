@@ -44,8 +44,6 @@ instance/table/fieldname^scriptname^sys_id.extension
 
 Saving it in VS Code, will save it back to the instance.
 
-*Note the live preview is currently only supported in Chrome, not in FireFox*
-
 ## Widgets
 The workflow for ServicePortal widgets is shown in the animated gif above. From the widget editor click on the save button.
 This will create all the relevant fields as files on the filesystem, in a folder with the name of the widget.
@@ -54,11 +52,11 @@ In a subfolder the angular ng-templates will be placed.
 Besides that a file test_urls.txt is created.
 In this page you can add your own urls. When saving a file, ScriptSync will refresh the browser pages that match that URL, enabling live preview.
 
-Widget SCSS can be live edited, each change can immediate be previewd in the browser. See animation below.
+Widget SCSS can be live edited, each change can immediate be previewed in the browser. See animation below.
 
 ![Use Extension](img/sn-scriptsync-css.gif)
 
-
+*Note: live preview, and realtime css is currently only supported in Chrome, not in FireFox*
 
 ## ESLint
 I recommend installing ESLint and the [ESLint ServiceNow plugin](https://www.npmjs.com/package/eslint-plugin-servicenow).
