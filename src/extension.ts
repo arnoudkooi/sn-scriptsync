@@ -4,11 +4,14 @@ import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { userInfo } from 'os';
 import { ScopeTreeViewProvider } from "./scopeTree";
+import * as path from "path";
 
 
 
 let mkdirp = require('mkdirp');
 let sass = require('sass');
+let scriptFields;
+
 
 let fs = require('fs');
 let getDirName = require('path').dirname;
@@ -25,22 +28,6 @@ let scriptSyncStatusBarItem: vscode.StatusBarItem;
 
 
 export function activate(context: vscode.ExtensionContext) {
-
-	var dta = { "cars": [
-		{ "name":"Ford", "models":[ {"label":"Fiesta"}, {"label":"Focus"}, {"label":"Mustang"} ] },
-		{ "name":"BMW", "models":[ {"label":"320"}, {"label":"X3"}, {"label":"X5"} ] }
-	  ]};
-
-	let jsn = getFileAsJson('/Users/arnoudkooi/Downloads/vscode-extension-samples-master/sn-scriptsync/data.json');
-	let scriptFields;
-	if (!scriptFields)
-	scriptFields = getFileAsJson('/Users/arnoudkooi/Downloads/vscode-extension-samples-master/sn-scriptsync/resources/syncfields.json');
-
-	const scopeTreeViewProvider = new ScopeTreeViewProvider(jsn, scriptFields);
-	vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
-
-	 // var dta = {data : jsn.artifacts};
-	  //scopeTreeViewProvider.refresh(dta);
 
 	//initialize statusbaritem and click events
 	const toggleSyncID = 'sample.toggleScriptSync';
@@ -150,6 +137,15 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() { }
 
+
+function setScopeTreeView(jsn?:any){
+	if (!scriptFields)
+		scriptFields = getFileAsJson( path.join(__filename, '..', '..', 'resources', 'syncfields.json'));
+
+	const scopeTreeViewProvider = new ScopeTreeViewProvider(jsn, scriptFields);
+	vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
+}
+
 function markFileAsDirty(file: TextDocument): void {
 
 	if (!serverRunning) return;
@@ -192,6 +188,8 @@ function startServers() {
 					saveFieldAsFile(postedJson);
 				else if (postedJson.action == 'saveWidget')
 					saveWidget(postedJson);
+				else if (postedJson.action == 'linkAppToVSCode')
+					linkAppToVSCode(postedJson);					
 				//requestRecord(postedJson,wss);
 			});
 			res.setHeader("Access-Control-Allow-Origin", "*");
@@ -220,6 +218,9 @@ function startServers() {
 				vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
 
 				markFileAsDirty(window.activeTextEditor.document);
+			}
+			else if (messageJson.action == "requestAppMeta"){
+				setScopeTreeView(messageJson.result);
 			}
 			else if (messageJson.hasOwnProperty('actionGoal')) {
 				if (messageJson.actionGoal == 'updateCheck') {
@@ -347,6 +348,26 @@ function saveRequestResponse(responseJson) {
 		}
 	}
 }
+
+function linkAppToVSCode(postedJson) {
+
+	let req = <any>{};
+	req.action = 'requestAppMeta';
+	req.actionGoal = 'saveCheck';
+	req.appId = postedJson.appId;
+	req.appName = postedJson.appName;
+	req.appScope = postedJson.appScope;
+	req.instance = postedJson.instance;
+	requestRecords(req);
+
+	wss.clients.forEach(function each(client) {
+		if (client.readyState === WebSocket.OPEN && !postedJson.send) {
+			client.send(JSON.stringify(postedJson));
+			postedJson.send = true;
+		}
+	});
+}
+
 
 function requestRecords(requestJson) {
 
