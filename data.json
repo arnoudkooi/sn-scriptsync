@@ -1,0 +1,1693 @@
+{
+    "artifacts": [
+        {
+            "id": "Data Model",
+            "name": "Data Model",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Tables available to store instance data. Each table stores a collection of records. Each row corresponds to a single record, and each column corresponds to a field. Applications use tables and records to manage data and processes.",
+                    "id": "sys_db_object",
+                    "name": "Table",
+                    "navigationKey": "sys_db_object",
+                    "pluralName": "Tables",
+                    "recordType": "sys_db_object",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [
+                        {
+                            "alternateName": "var__m_sys_hub_flow_input_cfb5d0ed4f513b409881c5c18110c7af.null",
+                            "id": "0b5698214f913b409881c5c18110c7d3",
+                            "name": "var__m_sys_hub_flow_input_cfb5d0ed4f513b409881c5c18110c7af [var__m_sys_hub_flow_input_cfb5d0ed4f513b409881c5c18110c7af]",
+                            "sysId": "0b5698214f913b409881c5c18110c7d3"
+                        },
+                        {
+                            "alternateName": "var__m_sys_hub_flow_input_cfb5d0ed4f513b409881c5c18110c7af.null",
+                            "id": "ba56d4214f913b409881c5c18110c7a3",
+                            "name": "var__m_sys_hub_flow_input_cfb5d0ed4f513b409881c5c18110c7af [var__m_sys_hub_flow_input_cfb5d0ed4f513b409881c5c18110c7af]",
+                            "sysId": "ba56d4214f913b409881c5c18110c7a3"
+                        }
+                    ],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify the properties of database tables and columns such as data type, length, and default value",
+                    "id": "sys_dictionary",
+                    "name": "Table Column",
+                    "navigationKey": "sys_dictionary",
+                    "pluralName": "Table Columns",
+                    "recordType": "sys_dictionary",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Many-to-many relationship between two tables for allowing one table to be a related list of another",
+                    "id": "sys_m2m",
+                    "name": "Many to Many Definition",
+                    "navigationKey": "sys_m2m",
+                    "pluralName": "Many to Many Definitions",
+                    "recordType": "sys_m2m",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to create a relationship between two data tables, which are required to display related lists",
+                    "id": "sys_relationship",
+                    "name": "Relationship",
+                    "navigationKey": "sys_relationship",
+                    "pluralName": "Relationships",
+                    "recordType": "sys_relationship",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Forms & UI",
+            "name": "Forms & UI",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify what fields to show on a form for a particular view or user",
+                    "id": "sys_ui_form",
+                    "name": "Form",
+                    "navigationKey": "sys_ui_form",
+                    "pluralName": "Forms",
+                    "recordType": "sys_ui_form",
+                    "requiresTableName": true
+                },
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify what columns to show on a list for a particular view or user",
+                    "id": "sys_ui_list",
+                    "name": "List Layout",
+                    "navigationKey": "sys_ui_list",
+                    "pluralName": "List Layouts",
+                    "recordType": "sys_ui_list",
+                    "requiresTableName": true
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify which list features are available such as displaying the New and Edit buttons",
+                    "id": "sys_ui_list_control",
+                    "limitTablesToScope": true,
+                    "name": "List Control",
+                    "navigationKey": "sys_ui_list_control",
+                    "pluralName": "List Controls",
+                    "recordType": "sys_ui_list_control",
+                    "requiresTableName": true
+                },
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Related lists display records in another table that have\n        a relationship to the current record. Users can view and modify\n        information in related lists using standard list controls.",
+                    "id": "sys_ui_related_list",
+                    "name": "Related List",
+                    "navigationKey": "sys_ui_related_list",
+                    "pluralName": "Related Lists",
+                    "recordType": "sys_ui_related_list",
+                    "requiresTableName": true
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify the CSS styling of a particular field",
+                    "id": "sys_ui_style",
+                    "name": "Style",
+                    "navigationKey": "sys_ui_style",
+                    "pluralName": "Styles",
+                    "recordType": "sys_ui_style",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to create a custom link in a list or form's contextual menu to perform a particular action",
+                    "id": "sys_ui_context_menu",
+                    "name": "Context Menu",
+                    "navigationKey": "sys_ui_context_menu",
+                    "pluralName": "Context Menus",
+                    "recordType": "sys_ui_context_menu",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to automatically set the Form View based on record field values",
+                    "id": "sysrule_view",
+                    "name": "View Rule",
+                    "navigationKey": "sysrule_view",
+                    "pluralName": "View Rules",
+                    "recordType": "sysrule_view",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Custom Jelly-based HTML pages available to the system",
+                    "id": "sys_ui_page",
+                    "name": "UI Page",
+                    "navigationKey": "sys_ui_page",
+                    "pluralName": "UI Pages",
+                    "recordType": "sys_ui_page",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Script-based controls for generating calendars and timelines",
+                    "id": "cmn_schedule_page",
+                    "name": "Schedule Page",
+                    "navigationKey": "cmn_schedule_page",
+                    "pluralName": "Schedule Pages",
+                    "recordType": "cmn_schedule_page",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Record changes that occur between two predefined dates",
+                    "id": "cmn_timeline_page",
+                    "name": "Timeline Page",
+                    "navigationKey": "cmn_timeline_page",
+                    "pluralName": "Timeline Pages",
+                    "recordType": "cmn_timeline_page",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Geographical maps to associate with records in the database",
+                    "id": "cmn_map_page",
+                    "name": "Map Page",
+                    "navigationKey": "cmn_map_page",
+                    "pluralName": "Map Pages",
+                    "recordType": "cmn_map_page",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to pre-populate particular forms with record data",
+                    "id": "sys_template",
+                    "name": "Template",
+                    "navigationKey": "sys_template",
+                    "pluralName": "Templates",
+                    "recordType": "sys_template",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Custom Jelly-based user interface elements available for lists, forms, and pages",
+                    "id": "sys_ui_macro",
+                    "name": "UI Macro",
+                    "navigationKey": "sys_ui_macro",
+                    "pluralName": "UI Macros",
+                    "recordType": "sys_ui_macro",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify what custom user interface to display on a particular form",
+                    "id": "sys_ui_formatter",
+                    "name": "UI Formatter",
+                    "navigationKey": "sys_ui_formatter",
+                    "pluralName": "UI Formatters",
+                    "recordType": "sys_ui_formatter",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Provides targeted help content to a user in a UI page, based on their role. Embedded Help Content appears in the right sidebar when the user clicks the help icon.",
+                    "id": "sys_embedded_help_content",
+                    "name": "Embedded Help",
+                    "navigationKey": "sys_embedded_help_content",
+                    "pluralName": "Embedded Help",
+                    "recordType": "sys_embedded_help_content",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Provides a way to demonstrate to users how to use a feature or perform a task in the platform. You create a set of tour steps with callouts that point to appropriate UI elements, and provide the description or instruction to proceed. You select a specific event as a trigger in each step to advance to the next step.",
+                    "id": "sys_embedded_tour_guide",
+                    "name": "Guided Tour",
+                    "navigationKey": "sys_embedded_tour_guide",
+                    "pluralName": "Guided Tours",
+                    "recordType": "sys_embedded_tour_guide",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Server Development",
+            "name": "Server Development",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "artifacts": [
+                        {
+                            "id": "sys_script.1b852c6d4f913b409881c5c18110c7b0",
+                            "name": "Do Nothing on Incident",
+                            "sysId": "1b852c6d4f913b409881c5c18110c7b0"
+                        }
+                    ],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Business logic to execute in response to an operation against a particular database record.  These business rules may take declarative actions or include arbitrary scripting.",
+                    "id": "sys_script",
+                    "name": "Business Rule",
+                    "navigationKey": "sys_script",
+                    "pluralName": "Business Rules",
+                    "recordType": "sys_script",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [
+                        {
+                            "id": "sys_script_include.fbb660ed4f913b409881c5c18110c760",
+                            "name": "CreatorConUtils",
+                            "sysId": "fbb660ed4f913b409881c5c18110c760"
+                        }
+                    ],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Server-side JavaScript classes available to the system",
+                    "id": "sys_script_include",
+                    "name": "Script Include",
+                    "navigationKey": "sys_script_include",
+                    "pluralName": "Script Includes",
+                    "recordType": "sys_script_include",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to create a custom button or link on lists or forms to perform a particular action",
+                    "id": "sys_ui_action",
+                    "name": "UI Action",
+                    "navigationKey": "sys_ui_action",
+                    "pluralName": "UI Actions",
+                    "recordType": "sys_ui_action",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Rules to enforce data integrity and policy",
+                    "id": "sys_data_policy2",
+                    "name": "Data Policy",
+                    "navigationKey": "sys_data_policy2",
+                    "pluralName": "Data Policies",
+                    "recordType": "sys_data_policy2",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "HTTP endpoints available to perform arbitrary scripting actions",
+                    "id": "sys_processor",
+                    "name": "Processor",
+                    "navigationKey": "sys_processor",
+                    "pluralName": "Processors",
+                    "recordType": "sys_processor",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Scripts available to the system to run on a schedule without needing a user transaction",
+                    "id": "sysauto_script",
+                    "name": "Scheduled Script Execution",
+                    "navigationKey": "sysauto_script",
+                    "pluralName": "Scheduled Script Executions",
+                    "recordType": "sysauto_script",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for registering events and associating them with a table",
+                    "id": "sysevent_register",
+                    "name": "Event Registration",
+                    "navigationKey": "sysevent_register",
+                    "pluralName": "Event Registry",
+                    "recordType": "sysevent_register",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Custom scripts to run when the system receives a registered system event",
+                    "id": "sysevent_script_action",
+                    "name": "Script Action",
+                    "navigationKey": "sysevent_script_action",
+                    "pluralName": "Script Actions",
+                    "recordType": "sysevent_script_action",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Scripts to fix data, schema, or settings during an upgrade ",
+                    "id": "sys_script_fix",
+                    "name": "Fix Script",
+                    "navigationKey": "sys_script_fix",
+                    "pluralName": "Fix Scripts",
+                    "recordType": "sys_script_fix",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "sys_extension_point",
+                    "name": "Extension Point",
+                    "navigationKey": "sys_extension_point",
+                    "pluralName": "Extension Points",
+                    "recordType": "sys_extension_point",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "sys_extension_instance",
+                    "name": "Extension Instance",
+                    "navigationKey": "sys_extension_instance",
+                    "pluralName": "Extension Instances",
+                    "recordType": "sys_extension_instance",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Client Development",
+            "name": "Client Development",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Client-side JavaScript for running business logic on forms when certain browser events occur",
+                    "id": "sys_script_client",
+                    "name": "Client Script",
+                    "navigationKey": "sys_script_client",
+                    "pluralName": "Client Scripts",
+                    "recordType": "sys_script_client",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify what fields are visible and editable on a form based on its current content",
+                    "id": "sys_ui_policy",
+                    "name": "UI Policy",
+                    "navigationKey": "sys_ui_policy",
+                    "pluralName": "UI Policies",
+                    "recordType": "sys_ui_policy",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "UI scripts provide a way to package client-side\n        JavaScript into a reusable form, similar to how script includes\n        store server-side JavaScript. Administrators can create UI scripts and run them\n        from client scripts and other client-side script objects and from HTML code.",
+                    "id": "sys_ui_script",
+                    "name": "UI Script",
+                    "navigationKey": "sys_ui_script",
+                    "pluralName": "UI Scripts",
+                    "recordType": "sys_ui_script",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Rules for assigning incidents based on certain value combinations",
+                    "id": "dl_u_assignment",
+                    "name": "Assignment Data Lookup",
+                    "navigationKey": "dl_u_assignment",
+                    "pluralName": "Assignment Data Lookups",
+                    "recordType": "dl_u_assignment",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Rules for setting incident priority based on certain value combinations",
+                    "id": "dl_u_priority",
+                    "name": "Priority Data Lookup",
+                    "navigationKey": "dl_u_priority",
+                    "pluralName": "Priority Data Lookups",
+                    "recordType": "dl_u_priority",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for automatically changing records values based on data lookup rules",
+                    "id": "dl_definition",
+                    "name": "Data Lookup Definitions",
+                    "navigationKey": "dl_definition",
+                    "pluralName": "Data Lookup Definitions",
+                    "recordType": "dl_definition",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Mobile Development",
+            "name": "Mobile Development",
+            "source": "sn_sg_studio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Mobile applications are mini applications that are accessible from the ServiceNow app on your mobile device.\r\n        \r\n        These applications will allow you to view and interact with data from ServiceNow.",
+                    "id": "sys_sg_application",
+                    "name": "Mobile Application",
+                    "navigationKey": "sys_sg_application",
+                    "pluralName": "Mobile Applications",
+                    "recordType": "sys_sg_application",
+                    "requiresDataItem": true,
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Access Control",
+            "name": "Access Control",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Security tokens to control access to user interface elements such as menus, modules, tables, and fields",
+                    "id": "sys_user_role",
+                    "name": "Role",
+                    "navigationKey": "sys_user_role",
+                    "pluralName": "Roles",
+                    "recordType": "sys_user_role",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [],
+                    "canCreate": false,
+                    "canRead": true,
+                    "helpText": "Access controls for restricting access to system objects and operations",
+                    "id": "sys_security_acl",
+                    "name": "Access Control",
+                    "navigationKey": "sys_security_acl",
+                    "pluralName": "Access Controls",
+                    "recordType": "sys_security_acl",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for allowing users to view a page without having to log in or pass access controls",
+                    "id": "sys_public",
+                    "name": "Public Pages",
+                    "navigationKey": "sys_public",
+                    "pluralName": "Public Pages",
+                    "recordType": "sys_public",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Properties",
+            "name": "Properties",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "artifacts": [
+                        {
+                            "id": "sys_properties.9cafa8294fd13b409881c5c18110c7c7",
+                            "name": "x_snc_sn_utils_ass.snutils_class_names",
+                            "sysId": "9cafa8294fd13b409881c5c18110c7c7"
+                        }
+                    ],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to configure application and instance behaviors",
+                    "id": "sys_properties",
+                    "name": "System Property",
+                    "navigationKey": "sys_properties",
+                    "pluralName": "System Properties",
+                    "recordType": "sys_properties",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for grouping system properties into sections on a page",
+                    "id": "sys_properties_category",
+                    "name": "System Property Category",
+                    "navigationKey": "sys_properties_category",
+                    "pluralName": "System Property Categories",
+                    "recordType": "sys_properties_category",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify what string to display in the user interface for a specific language",
+                    "id": "sys_ui_message",
+                    "name": "Message",
+                    "navigationKey": "sys_ui_message",
+                    "pluralName": "Messages",
+                    "recordType": "sys_ui_message",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Navigation",
+            "name": "Navigation",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Application menus available for the application navigator",
+                    "id": "sys_app_application",
+                    "name": "Application Menu",
+                    "navigationKey": "sys_app_application",
+                    "pluralName": "Application Menus",
+                    "recordType": "sys_app_application",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Links available to display within application menus",
+                    "id": "sys_app_module",
+                    "name": "Module",
+                    "navigationKey": "sys_app_module",
+                    "pluralName": "Modules",
+                    "recordType": "sys_app_module",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for grouping modules in the application navigator",
+                    "id": "sys_ui_application",
+                    "name": "Application Menu (Mobile)",
+                    "navigationKey": "sys_ui_application",
+                    "pluralName": "Application Menus (Mobile)",
+                    "recordType": "sys_ui_application",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for creating links to lists, UI pages, or reports in the application navigator",
+                    "id": "sys_ui_module",
+                    "name": "Module (Mobile)",
+                    "navigationKey": "sys_ui_module",
+                    "pluralName": "Modules (Mobile)",
+                    "recordType": "sys_ui_module",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Notifications",
+            "name": "Notifications",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Email notifications available to the system",
+                    "id": "sysevent_email_action",
+                    "name": "Notification",
+                    "navigationKey": "sysevent_email_action",
+                    "pluralName": "Notifications",
+                    "recordType": "sysevent_email_action",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Templates for creating email notifications",
+                    "id": "sysevent_email_template",
+                    "name": "Email Template",
+                    "navigationKey": "sysevent_email_template",
+                    "pluralName": "Email Templates",
+                    "recordType": "sysevent_email_template",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to specify how the system processes incoming email it receives",
+                    "id": "sysevent_in_email_action",
+                    "name": "Inbound Email Actions",
+                    "navigationKey": "sysevent_in_email_action",
+                    "pluralName": "Inbound Email Actions",
+                    "recordType": "sysevent_in_email_action",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Service Portal",
+            "name": "Service Portal",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Configurations to define the look, feel, and behavior of a portal.",
+                    "id": "sp_portal",
+                    "name": "Service Portal",
+                    "navigationKey": "sp_portal",
+                    "pluralName": "Service Portals",
+                    "recordType": "sp_portal",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [
+                        {
+                            "alternateName": null,
+                            "extra": {
+                                "pageId": "my_simple_list"
+                            },
+                            "id": "0cb994324fc9bf009881c5c18110c741",
+                            "name": "My Simple List - Test Page",
+                            "sysId": "0cb994324fc9bf009881c5c18110c741"
+                        }
+                    ],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Pages to hold Service Portal content. A page can open in any portal.",
+                    "id": "sp_page",
+                    "name": "Service Portal Page",
+                    "navigationKey": "sp_page",
+                    "pluralName": "Service Portal Pages",
+                    "recordType": "sp_page",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [
+                        {
+                            "id": "sp_widget.c4b994324fc9bf009881c5c18110c73f",
+                            "name": "My Simple List",
+                            "sysId": "c4b994324fc9bf009881c5c18110c73f"
+                        }
+                    ],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Angular components that execute a specified behavior within a Service Portal page.",
+                    "id": "sp_widget",
+                    "name": "Widget",
+                    "navigationKey": "sp_widget",
+                    "pluralName": "Widgets",
+                    "recordType": "sp_widget",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Style sheet associated with a header and footer to define the appearance of a portal. ",
+                    "id": "sp_theme",
+                    "name": "Theme",
+                    "navigationKey": "sp_theme",
+                    "pluralName": "Themes",
+                    "recordType": "sp_theme",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Style sheets that can be added to any Service Portal page or component to overwrite the theme. ",
+                    "id": "sp_css",
+                    "name": "Style Sheet",
+                    "navigationKey": "sp_css",
+                    "pluralName": "Style Sheets",
+                    "recordType": "sp_css",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Client-side JavaScript that can be associated with a widget and used in the widget client controller. ",
+                    "id": "sp_js_include",
+                    "name": "JS Include",
+                    "navigationKey": "sp_js_include",
+                    "pluralName": "JS Includes",
+                    "recordType": "sp_js_include",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Collection of third-party libraries, JavaScript includes, external style sheets, or angular modules that a widget depends on.",
+                    "id": "sp_dependency",
+                    "name": "Widget Dependency",
+                    "navigationKey": "sp_dependency",
+                    "pluralName": "Widget Dependencies",
+                    "recordType": "sp_dependency",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Content Management",
+            "name": "Content Management",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Group of pages that follow a set of consistent design elements such as the Employee Self-Service (ESS) portal",
+                    "id": "content_site",
+                    "name": "Site",
+                    "navigationKey": "content_site",
+                    "pluralName": "Sites",
+                    "recordType": "content_site",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Collection of links to internal content, attachments, or external URLs",
+                    "id": "content_link",
+                    "name": "Content Link",
+                    "navigationKey": "content_link",
+                    "pluralName": "Content Links",
+                    "recordType": "content_link",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Group of style sheets that define the appearance of a site",
+                    "id": "content_theme",
+                    "name": "Content Theme",
+                    "navigationKey": "content_theme",
+                    "pluralName": "Content Themes",
+                    "recordType": "content_theme",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for showing the details of a specific record",
+                    "id": "content_block_detail",
+                    "name": "Content Block - Detail",
+                    "navigationKey": "content_block_detail",
+                    "pluralName": "Content Blocks - Detail",
+                    "recordType": "content_block_detail",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for Flash movies",
+                    "id": "content_block_flash",
+                    "name": "Content Block - Flash",
+                    "navigationKey": "content_block_flash",
+                    "pluralName": "Content Blocks - Flash",
+                    "recordType": "content_block_flash",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for headers",
+                    "id": "content_block_header",
+                    "name": "Content Block - Header",
+                    "navigationKey": "content_block_header",
+                    "pluralName": "Content Blocks - Header",
+                    "recordType": "content_block_header",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for iFrame containers",
+                    "id": "content_block_iframe",
+                    "name": "Content Block - iFrame",
+                    "navigationKey": "content_block_iframe",
+                    "pluralName": "Content Blocks - iFrame",
+                    "recordType": "content_block_iframe",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for a list of records",
+                    "id": "content_block_lists",
+                    "name": "Content Block - List",
+                    "navigationKey": "content_block_lists",
+                    "pluralName": "Content Blocks - List",
+                    "recordType": "content_block_lists",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for navigation menu containers",
+                    "id": "content_block_menu",
+                    "name": "Content Block - Menu",
+                    "navigationKey": "content_block_menu",
+                    "pluralName": "Content Blocks - Menu",
+                    "recordType": "content_block_menu",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for dynamically-generated script data",
+                    "id": "content_block_programmatic",
+                    "name": "Content Block - Programmatic",
+                    "navigationKey": "content_block_programmatic",
+                    "pluralName": "Content Blocks - Programmatic",
+                    "recordType": "content_block_programmatic",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Content blocks for static HTML data",
+                    "id": "content_block_static",
+                    "name": "Content Block - Static",
+                    "navigationKey": "content_block_static",
+                    "pluralName": "Content Blocks - Static",
+                    "recordType": "content_block_static",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Collection of CSS style sheets, organized by theme",
+                    "id": "content_css",
+                    "name": "Style Sheet",
+                    "navigationKey": "content_css",
+                    "pluralName": "Style Sheets",
+                    "recordType": "content_css",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Pages available to create CMS sites",
+                    "id": "sys_portal_page",
+                    "name": "Portal Page",
+                    "navigationKey": "sys_portal_page",
+                    "pluralName": "Portal Pages",
+                    "recordType": "sys_portal_page",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Image files available to the system",
+                    "id": "db_image",
+                    "name": "Images",
+                    "navigationKey": "db_image",
+                    "pluralName": "Images",
+                    "recordType": "db_image",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Video files available to the system",
+                    "id": "db_video",
+                    "name": "Video",
+                    "navigationKey": "db_video",
+                    "pluralName": "Videos",
+                    "recordType": "db_video",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "db_audio",
+                    "name": "Audio",
+                    "navigationKey": "db_audio",
+                    "pluralName": "Audio Files",
+                    "recordType": "db_audio",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Service Catalog",
+            "name": "Service Catalog",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Catalog items available to the Service Catalog",
+                    "id": "sc_cat_item",
+                    "name": "Catalog Item",
+                    "navigationKey": "sc_cat_item",
+                    "pluralName": "Catalog Items",
+                    "recordType": "sc_cat_item",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Catalog Items to create Task records from the Service Catalog",
+                    "id": "sc_cat_item_producer",
+                    "name": "Record Producer",
+                    "navigationKey": "sc_cat_item_producer",
+                    "pluralName": "Record Producers",
+                    "recordType": "sc_cat_item_producer",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Items and services end users can order from a catalog",
+                    "id": "sc_catalog",
+                    "name": "Catalog",
+                    "navigationKey": "sc_catalog",
+                    "pluralName": "Catalogs",
+                    "recordType": "sc_catalog",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Categories to organize Service Catalog Items",
+                    "id": "sc_category",
+                    "name": "Category",
+                    "navigationKey": "sc_category",
+                    "pluralName": "Categories",
+                    "recordType": "sc_category",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Fields to display when viewing Catalog Tasks, Catalog Items, and Requested Item Tasks",
+                    "id": "catalog_ui_policy",
+                    "name": "Catalog UI Policy",
+                    "navigationKey": "catalog_ui_policy",
+                    "pluralName": "Catalog UI Policies",
+                    "recordType": "catalog_ui_policy",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Group of variables shared between catalog items",
+                    "id": "item_option_new_set",
+                    "name": "Variable Set",
+                    "navigationKey": "item_option_new_set",
+                    "pluralName": "Variable Sets",
+                    "recordType": "item_option_new_set",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Service Catalog items for providing information instead of goods or services",
+                    "id": "sc_cat_item_content",
+                    "name": "Content Item",
+                    "navigationKey": "sc_cat_item_content",
+                    "pluralName": "Content Items",
+                    "recordType": "sc_cat_item_content",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Execution Plans defining how to procure, configure, and install Catalog Items",
+                    "id": "sc_cat_item_delivery_plan",
+                    "name": "Execution Plan",
+                    "navigationKey": "sc_cat_item_delivery_plan",
+                    "pluralName": "Execution Plans",
+                    "recordType": "sc_cat_item_delivery_plan",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Guides to order multiple related Catalog Items as a single request",
+                    "id": "sc_cat_item_guide",
+                    "name": "Order Guide",
+                    "navigationKey": "sc_cat_item_guide",
+                    "pluralName": "Order Guides",
+                    "recordType": "sc_cat_item_guide",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Client-side JavaScript for running business logic on catalog items or variable sets when certain browser events occur",
+                    "id": "catalog_script_client",
+                    "name": "Catalog Client Scripts",
+                    "navigationKey": "catalog_script_client",
+                    "pluralName": "Catalog Client Scripts",
+                    "recordType": "catalog_script_client",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Reporting",
+            "name": "Reporting",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to create, display, and publish reports",
+                    "id": "sys_report",
+                    "name": "Report",
+                    "navigationKey": "sys_report",
+                    "pluralName": "Reports",
+                    "recordType": "sys_report",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Metric controls for collecting report data",
+                    "id": "metric_definition",
+                    "name": "Metric Definition",
+                    "navigationKey": "metric_definition",
+                    "pluralName": "Metric Definitions",
+                    "recordType": "metric_definition",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Reports to schedule for automatic generation and distribution by email",
+                    "id": "sysauto_report",
+                    "name": "Scheduled Email of Report",
+                    "navigationKey": "sysauto_report",
+                    "pluralName": "Scheduled Email of Reports",
+                    "recordType": "sysauto_report",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to define which colors a particular report uses",
+                    "id": "sys_report_chart_color",
+                    "name": "Chart Colors",
+                    "navigationKey": "sys_report_chart_color",
+                    "pluralName": "Chart Colors",
+                    "recordType": "sys_report_chart_color",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Colors available for reports to use",
+                    "id": "sys_report_color",
+                    "name": "Color Definition",
+                    "navigationKey": "sys_report_color",
+                    "pluralName": "Color Definitions",
+                    "recordType": "sys_report_color",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to define the label, color, and values included in a report range",
+                    "id": "sys_report_range",
+                    "name": "Range",
+                    "navigationKey": "sys_report_range",
+                    "pluralName": "Ranges",
+                    "recordType": "sys_report_range",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Inbound Integrations",
+            "name": "Inbound Integrations",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Data sources are used to import data from external sources such as a file, JDBC database, or LDAP directory service",
+                    "id": "sys_data_source",
+                    "name": "Data Source",
+                    "navigationKey": "sys_data_source",
+                    "pluralName": "Data Sources",
+                    "recordType": "sys_data_source",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "This type of web service will transform the incoming data synchronously based on the associated transform maps by default. Web Service Import Sets complement Direct Web Services and Scripted Web Services in providing a web service interface to Import Set tables.",
+                    "id": "v_ws_creator",
+                    "name": "Import Set Web Service",
+                    "navigationKey": "v_ws_creator",
+                    "pluralName": "Import Set Web Services",
+                    "recordType": "v_ws_creator",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "v_ws_editor",
+                    "name": "Import Set Web Service",
+                    "navigationKey": "v_ws_editor",
+                    "pluralName": "Import Set Web Services",
+                    "recordType": "v_ws_editor",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Scheduled imports are used to schedule the import of data using data sources and can leverage transform maps",
+                    "id": "scheduled_import_set",
+                    "name": "Scheduled Data Import",
+                    "navigationKey": "scheduled_import_set",
+                    "pluralName": "Scheduled Data Imports",
+                    "recordType": "scheduled_import_set",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Scripted REST APIs are used to create custom inbound REST APIs",
+                    "id": "sys_ws_definition",
+                    "name": "Scripted REST API",
+                    "navigationKey": "sys_ws_definition",
+                    "pluralName": "Scripted REST APIs",
+                    "recordType": "sys_ws_definition",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "sys_ws_operation",
+                    "name": "Scripted REST Resource",
+                    "navigationKey": "sys_ws_operation",
+                    "pluralName": "Scripted REST Resources",
+                    "recordType": "sys_ws_operation",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Scripted SOAP Web Services are used to create custom inbound SOAP Web Services",
+                    "id": "sys_web_service",
+                    "name": "Scripted Web Service",
+                    "navigationKey": "sys_web_service",
+                    "pluralName": "Scripted Web Services",
+                    "recordType": "sys_web_service",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Transform maps are used to transform data from an import set's temporary staging table to a target table",
+                    "id": "sys_transform_map",
+                    "name": "Table Transform Map",
+                    "navigationKey": "sys_transform_map",
+                    "pluralName": "Table Transform Maps",
+                    "recordType": "sys_transform_map",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Outbound Integrations",
+            "name": "Outbound Integrations",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Export Definitions are used to define the data that will be included in an Export Set",
+                    "id": "sys_export_definition",
+                    "name": "Export Definition",
+                    "navigationKey": "sys_export_definition",
+                    "pluralName": "Export Definitions",
+                    "recordType": "sys_export_definition",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for exporting data to an external source",
+                    "id": "sys_export_set",
+                    "name": "Export Set",
+                    "navigationKey": "sys_export_set",
+                    "pluralName": "Export Sets",
+                    "recordType": "sys_export_set",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Export Targets specify the target file on a MID server that Export Set data will be written to",
+                    "id": "sys_export_target",
+                    "name": "Export Target",
+                    "navigationKey": "sys_export_target",
+                    "pluralName": "Export Targets",
+                    "recordType": "sys_export_target",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "REST messages are used to make outbound HTTP requests to REST APIs",
+                    "id": "sys_rest_message",
+                    "name": "REST Message",
+                    "navigationKey": "sys_rest_message",
+                    "pluralName": "REST Messages",
+                    "recordType": "sys_rest_message",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Scheduled Exports are used to specify a schedule when Export Sets will be run. A single export can be scheduled or regular intervals can be scheduled with support for including only delta records",
+                    "id": "scheduled_data_export",
+                    "name": "Scheduled Data Export",
+                    "navigationKey": "scheduled_data_export",
+                    "pluralName": "Scheduled Data Exports",
+                    "recordType": "scheduled_data_export",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "SOAP messages are used to make outbound HTTP requests to SOAP Web Services",
+                    "id": "sys_soap_message",
+                    "name": "SOAP Message",
+                    "navigationKey": "sys_soap_message",
+                    "pluralName": "SOAP Messages",
+                    "recordType": "sys_soap_message",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Flow Designer",
+            "name": "Flow Designer",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "A flow is an automated process consisting of a sequence of actions and a trigger.",
+                    "id": "sys_hub_flow",
+                    "name": "Flow",
+                    "navigationKey": "sys_hub_flow",
+                    "pluralName": "Flows",
+                    "recordType": "sys_hub_flow",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "An action is a reusable operation that enables process analysts to automate Now Platform features without having to write code.",
+                    "id": "sys_hub_action_type_definition",
+                    "name": "Action",
+                    "navigationKey": "sys_hub_action_type_definition",
+                    "pluralName": "Actions",
+                    "recordType": "sys_hub_action_type_definition",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Credentials and connection information are required to gain access to a computer or network device for Discovery, Service Mapping, and Cloud Management or to perform work using Orchestration.",
+                    "id": "sys_alias",
+                    "name": "Connection & Credential Aliases",
+                    "navigationKey": "sys_alias",
+                    "pluralName": "Connection & Credential Aliases",
+                    "recordType": "sys_alias",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Workflow",
+            "name": "Workflow",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls for automating multi-step processes with a sequence of activities",
+                    "id": "wf_workflow",
+                    "name": "Workflow",
+                    "navigationKey": "wf_workflow",
+                    "pluralName": "Workflows",
+                    "recordType": "wf_workflow",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Controls to automatically run a workflow on a schedule",
+                    "id": "wf_workflow_schedule",
+                    "name": "Workflow Schedule",
+                    "navigationKey": "wf_workflow_schedule",
+                    "pluralName": "Workflow Schedules",
+                    "recordType": "wf_workflow_schedule",
+                    "requiresTableName": false
+                },
+                {
+                    "artifacts": [],
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "wf_element_activity",
+                    "name": "Activity Designer",
+                    "navigationKey": "wf_element_activity",
+                    "pluralName": "Activity Designer",
+                    "recordType": "wf_element_activity",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "Schedules",
+            "name": "Schedules",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Schedule during which Changes may be performed",
+                    "id": "cmn_schedule",
+                    "name": "Schedule",
+                    "navigationKey": "cmn_schedule",
+                    "pluralName": "Schedules",
+                    "recordType": "cmn_schedule",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Schedule during which Changes are prohibited from being performed",
+                    "id": "cmn_schedule_blackout",
+                    "name": "Blackout Schedule",
+                    "navigationKey": "cmn_schedule_blackout",
+                    "pluralName": "Blackout Schedules",
+                    "recordType": "cmn_schedule_blackout",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Schedule during which maintenance may be performed on specific CIs",
+                    "id": "cmn_schedule_maintenance",
+                    "name": "Maintenance Schedule",
+                    "navigationKey": "cmn_schedule_maintenance",
+                    "pluralName": "Maintenance Schedules",
+                    "recordType": "cmn_schedule_maintenance",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Risk conditions for change requests",
+                    "id": "risk_conditions",
+                    "name": "Risk Conditions",
+                    "navigationKey": "risk_conditions",
+                    "pluralName": "Risk Conditions",
+                    "recordType": "risk_conditions",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Scheduling options for calculating a target time or duration",
+                    "id": "cmn_relative_duration",
+                    "name": "Relative Duration",
+                    "navigationKey": "cmn_relative_duration",
+                    "pluralName": "Relative Durations",
+                    "recordType": "cmn_relative_duration",
+                    "requiresTableName": false
+                }
+            ]
+        },
+        {
+            "id": "MID Server",
+            "name": "MID Server",
+            "source": "sn_devstudio",
+            "types": [
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Script Includes available to MID servers",
+                    "id": "ecc_agent_script_include",
+                    "name": "MID Server Script Include",
+                    "navigationKey": "ecc_agent_script_include",
+                    "pluralName": "MID Server Script Includes",
+                    "recordType": "ecc_agent_script_include",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Script files available to MID Servers",
+                    "id": "ecc_agent_script_file",
+                    "name": "MID Server Script File",
+                    "navigationKey": "ecc_agent_script_file",
+                    "pluralName": "MID Server Script Files",
+                    "recordType": "ecc_agent_script_file",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Properties to configure a MID server",
+                    "id": "ecc_agent_property",
+                    "name": "MID Server Property",
+                    "navigationKey": "ecc_agent_property",
+                    "pluralName": "MID Server Properties",
+                    "recordType": "ecc_agent_property",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Functions available to a specific MID server IP address range",
+                    "id": "ecc_agent_capability",
+                    "name": "MID Server Capability",
+                    "navigationKey": "ecc_agent_capability",
+                    "pluralName": "MID Server Capabilities",
+                    "recordType": "ecc_agent_capability",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "Values a MID Server uses to search for similar devices",
+                    "id": "ecc_agent_capability_value_test",
+                    "name": "MID Server Capability Value Test",
+                    "navigationKey": "ecc_agent_capability_value_test",
+                    "pluralName": "MID Server Capability Value Tests",
+                    "recordType": "ecc_agent_capability_value_test",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "ecc_agent_ip_range",
+                    "name": "MID Server IP Range",
+                    "navigationKey": "ecc_agent_ip_range",
+                    "pluralName": "MID Server IP Ranges",
+                    "recordType": "ecc_agent_ip_range",
+                    "requiresTableName": false
+                },
+                {
+                    "canCreate": true,
+                    "canRead": true,
+                    "helpText": "",
+                    "id": "ecc_agent_application",
+                    "name": "MID Server Application",
+                    "navigationKey": "ecc_agent_application",
+                    "pluralName": "MID Server Applications",
+                    "recordType": "ecc_agent_application",
+                    "requiresTableName": false
+                }
+            ]
+        }
+    ],
+    "metadata": {
+        "appId": "b13954be4f89bf009881c5c18110c7a8",
+        "hasLocalChanges": true,
+        "name": "sn-utils-assets",
+        "publishable": true,
+        "version": "1.0.0"
+    },
+    "modules": [
+        {
+            "action": "list",
+            "additionalAction": false,
+            "children": [
+                {
+                    "action": "list",
+                    "additionalAction": false,
+                    "children": [
+                        {
+                            "action": "script",
+                            "additionalAction": true,
+                            "children": [],
+                            "clientScript": "function openTab() {\n\tvar SYSPARM_TRANSACTION_SCOPE = \"sysparm_transaction_scope\";\n\tfunction getUrlVars() {\n\t\tvar vars = {};\n\t\tvar parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {\n\t\t\tvars[key] = value;\n\t\t});\n\t\treturn vars;\n\t}\n\n\tvar scope = SYSPARM_TRANSACTION_SCOPE + '=' + getUrlVars()[SYSPARM_TRANSACTION_SCOPE];\n\n\tg_studio.openTab({\n\t\ttitle: 'Applications',\n\t\tsubTitle: 'Application List',\n\t\tname: 'Applications',\n\t\turl: '$sg-studio.do?' + scope + '&sysparm_nostack=true#/',\n\t\ttype: 'url'\n\t});\n}",
+                            "id": "Applications",
+                            "name": "Applications",
+                            "order": "100",
+                            "parent": "4b6c056353b313004205ddeeff7b1206",
+                            "sysId": "5c8cc56353b313004205ddeeff7b12c2",
+                            "type": "record_list"
+                        },
+                        {
+                            "action": "list",
+                            "additionalAction": true,
+                            "children": [],
+                            "clientScript": "function openTab() {\n\tvar SYSPARM_TRANSACTION_SCOPE = \"sysparm_transaction_scope\";\n\tfunction getUrlVars() {\n\t\tvar vars = {};\n\t\tvar parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {\n\t\t\tvars[key] = value;\n\t\t});\n\t\treturn vars;\n\t}\n\n\tvar scope = SYSPARM_TRANSACTION_SCOPE + '=' + getUrlVars()[SYSPARM_TRANSACTION_SCOPE];\n\n\tg_studio.openTab({\n\t\ttitle: 'Data Items',\n\t\tsubTitle: 'Data Item List',\n\t\turl: '$sg-studio.do?' + scope + '&sysparm_nostack=true#/dataItemsList',\n\t\ttype: 'url'\n\t});\n}",
+                            "id": "Data Items",
+                            "name": "Data Items",
+                            "order": "200",
+                            "parent": "4b6c056353b313004205ddeeff7b1206",
+                            "sysId": "b28c496353b313004205ddeeff7b12cd",
+                            "type": "record_list"
+                        },
+                        {
+                            "action": "list",
+                            "additionalAction": true,
+                            "children": [],
+                            "clientScript": "function openTab() {\n\tvar SYSPARM_TRANSACTION_SCOPE = \"sysparm_transaction_scope\";\n\tfunction getUrlVars() {\n\t\tvar vars = {};\n\t\tvar parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {\n\t\t\tvars[key] = value;\n\t\t});\n\t\treturn vars;\n\t}\n\n\tvar scope = SYSPARM_TRANSACTION_SCOPE + '=' + getUrlVars()[SYSPARM_TRANSACTION_SCOPE];\n\n\tg_studio.openTab({\n\t\ttitle: 'Action Items',\n\t\tsubTitle: 'Action Item List',\n\t\turl: '$sg-studio.do?' + scope + '&sysparm_nostack=true#/actionitemlist',\n\t\ttype: 'url'\n\t});\n}",
+                            "id": "Action Items",
+                            "name": "Action Items",
+                            "order": "300",
+                            "parent": "4b6c056353b313004205ddeeff7b1206",
+                            "sysId": "4ebbdb4453c023004205ddeeff7b1280",
+                            "type": "record_list"
+                        },
+                        {
+                            "action": "list",
+                            "additionalAction": false,
+                            "children": [
+                                {
+                                    "additionalAction": true,
+                                    "children": [],
+                                    "clientScript": "function openStudioTab() {g_studio.openTab({type: 'url', title:'Actions', subTitle:'Actions list', url:'$sg-studio.do?sysparm_transaction_scope=b13954be4f89bf009881c5c18110c7a8&sysparm_nostack=true#/actionslist'})}",
+                                    "label": "Action",
+                                    "name": "Actions",
+                                    "parentType": {
+                                        "id": "basic_url",
+                                        "navigationKey": "basic_url",
+                                        "recordType": "basic_url"
+                                    },
+                                    "subTitle": "Action",
+                                    "title": "Actions"
+                                },
+                                {
+                                    "additionalAction": true,
+                                    "children": [],
+                                    "clientScript": "function openStudioTab() {g_studio.openTab({type: 'url', title:'Smart Buttons', subTitle:'Smart Buttons list', url:'$sg-studio.do?sysparm_transaction_scope=b13954be4f89bf009881c5c18110c7a8&sysparm_nostack=true#/buttonsList'})}",
+                                    "label": "Smart Button",
+                                    "name": "Smart Buttons",
+                                    "parentType": {
+                                        "id": "basic_url",
+                                        "navigationKey": "basic_url",
+                                        "recordType": "basic_url"
+                                    },
+                                    "subTitle": "Smart Button",
+                                    "title": "Smart Buttons"
+                                },
+                                {
+                                    "additionalAction": true,
+                                    "children": [],
+                                    "clientScript": "function openStudioTab() {g_studio.openTab({type: 'url', title:'Navigations', subTitle:'Navigations list', url:'$sg-studio.do?sysparm_transaction_scope=b13954be4f89bf009881c5c18110c7a8&sysparm_nostack=true#/navList'})}",
+                                    "label": "Navigation",
+                                    "name": "Navigations",
+                                    "parentType": {
+                                        "id": "basic_url",
+                                        "navigationKey": "basic_url",
+                                        "recordType": "basic_url"
+                                    },
+                                    "subTitle": "Navigation",
+                                    "title": "Navigations"
+                                }
+                            ],
+                            "clientScript": null,
+                            "id": "Functions",
+                            "name": "Functions",
+                            "order": "400",
+                            "parent": "4b6c056353b313004205ddeeff7b1206",
+                            "sysId": "ad9cc56353b313004205ddeeff7b12cf",
+                            "type": "record_list"
+                        },
+                        {
+                            "action": "list",
+                            "additionalAction": true,
+                            "children": [],
+                            "clientScript": "function openTab() {\n\tvar SYSPARM_TRANSACTION_SCOPE = \"sysparm_transaction_scope\";\n\tfunction getUrlVars() {\n\t\tvar vars = {};\n\t\tvar parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {\n\t\t\tvars[key] = value;\n\t\t});\n\t\treturn vars;\n\t}\n\n\tvar scope = SYSPARM_TRANSACTION_SCOPE + '=' + getUrlVars()[SYSPARM_TRANSACTION_SCOPE];\n\n\tg_studio.openTab({\n\t\ttitle: 'Screen UI Policies',\n\t\tsubTitle: 'Screen UI Policy List',\n\t\turl: 'sys_sg_ui_policy_list.do?' + scope,\n\t\ttype: 'url'\n\t});\n}",
+                            "id": "UI Policies",
+                            "name": "UI Policies",
+                            "order": "500",
+                            "parent": "4b6c056353b313004205ddeeff7b1206",
+                            "sysId": "7abc896353b313004205ddeeff7b1271",
+                            "type": "record_list"
+                        },
+                        {
+                            "action": "list",
+                            "additionalAction": true,
+                            "children": [],
+                            "clientScript": "function openTab() {\n\tvar SYSPARM_TRANSACTION_SCOPE = \"sysparm_transaction_scope\";\n\tfunction getUrlVars() {\n\t\tvar vars = {};\n\t\tvar parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {\n\t\t\tvars[key] = value;\n\t\t});\n\t\treturn vars;\n\t}\n\n\tvar scope = SYSPARM_TRANSACTION_SCOPE + '=' + getUrlVars()[SYSPARM_TRANSACTION_SCOPE];\n\n\tg_studio.openTab({\n\t\ttitle: 'Screen UI Styles',\n\t\tsubTitle: 'Screen UI Style List',\n\t\turl: 'sys_sg_ui_style_list.do?' + scope,\n\t\ttype: 'url'\n\t});\n}",
+                            "id": "UI Styles",
+                            "name": "UI Styles",
+                            "order": "600",
+                            "parent": "4b6c056353b313004205ddeeff7b1206",
+                            "sysId": "d6ef6e1a535023004205ddeeff7b121d",
+                            "type": "record_list"
+                        }
+                    ],
+                    "clientScript": null,
+                    "id": "Mobile",
+                    "name": "Mobile",
+                    "order": null,
+                    "parent": "5febc56353b313004205ddeeff7b12bb",
+                    "sysId": "4b6c056353b313004205ddeeff7b1206",
+                    "type": "module_group"
+                }
+            ],
+            "clientScript": null,
+            "id": "User Experience",
+            "name": "User Experience",
+            "order": null,
+            "parent": null,
+            "sysId": "5febc56353b313004205ddeeff7b12bb",
+            "type": "module_group"
+        }
+    ]
+}

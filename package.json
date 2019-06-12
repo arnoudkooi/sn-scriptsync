@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "1.2.2",
+	"version": "1.2.5",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
@@ -17,7 +17,8 @@
 		"Other"
 	],
 	"activationEvents": [
-		"*"
+		"*",
+		"onView:scriptSync"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
@@ -29,7 +30,11 @@
 			{
 				"command": "extension.snScriptSyncDisable",
 				"title": "ServiceNow ScriptSync Disable"
-			}
+			},
+			{
+                "command": "extension.openJsonSelection",
+                "title": "Open Scope Files Selection"
+            }
 		],
 		"configuration": {
 			"type": "object",
@@ -39,8 +44,30 @@
 					"type": "string",
 					"default": "~/Documents/sn-scriptsync",
 					"description": "Scripts folder (Extension will auto activate when opening this folder)"
+				},
+				"sn-scriptsync.refresh": {
+					"type": "integer",
+					"default": "60",
+					"description": "Update check (Check the instance for update of the active record every xx seconds minimum 30, 0 to disable)"
 				}
 			}
+		},
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "sn-scriptsync",
+					"title": "sn-scriptsync",
+					"icon": "img/icon24.svg"
+				}
+			]
+		},
+		"views": {
+			"sn-scriptsync": [
+				{
+					"id": "scopeTreeView",
+					"name": "Scoped App Files"
+				}
+			]
 		}
 	},
 	"scripts": {
@@ -58,6 +85,7 @@
 	"dependencies": {
 		"mkdirp": "^0.5.1",
 		"ws": "^6.2.1",
-		"sass": "^1.19.0"
+		"sass": "^1.19.0",
+		"jsonc-parser": "^0.4.2"
 	}
 }

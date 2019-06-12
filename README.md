@@ -56,8 +56,6 @@ Widget SCSS can be live edited, each change can immediate be previewed in the br
 
 ![Use Extension](img/sn-scriptsync-css.gif)
 
-*Note: live preview, and realtime css is currently only supported in Chrome, not in FireFox*
-
 ## ESLint
 I recommend installing ESLint and the [ESLint ServiceNow plugin](https://www.npmjs.com/package/eslint-plugin-servicenow).
 This will do some basic code checks.
