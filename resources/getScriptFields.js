@@ -41,7 +41,7 @@ for (var i =0; i<t.length;i++){
         tFields[t[i]] = []
       }
       var scriptField = {
-        "fieldName" : t[i],
+        "fieldName" : f,
         "label" : l,
         "type" : ft
       }

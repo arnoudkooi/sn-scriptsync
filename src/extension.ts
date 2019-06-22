@@ -3,27 +3,22 @@ import * as http from 'http';
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { userInfo } from 'os';
-import { ScopeTreeViewProvider } from "./scopeTree";
+import { ScopeTreeViewProvider } from "./ScopeTree";
+import { ExtensionUtils } from "./ExtensionUtils";
 import * as path from "path";
 
-
-
-let mkdirp = require('mkdirp');
 let sass = require('sass');
 let scriptFields;
 
-
-let fs = require('fs');
-let getDirName = require('path').dirname;
 const nodePath = require('path');
 
 let wss;
 let server;
 let serverRunning = false;
 let openFiles = {};
-let instanceSettings = {};
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
+let eu = new ExtensionUtils();
 
 
 
@@ -47,7 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	let syncDir: string = settings.get('path');
 	let refresh: number = settings.get('refresh');
-	refresh = 20;//Math.max(refresh, 30);
+	refresh = Math.max(refresh, 30);
 	syncDir = syncDir.replace('~', userInfo().homedir);
 	if (vscode.workspace.rootPath == syncDir) {
 		startServers();
@@ -60,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
 		let currentTime = new Date().getTime()
 		if (fileMeta) {
 			if (currentTime - fileMeta.refreshed > (refresh * 1000)) {
-				let req = fileNameToObject(window.activeTextEditor.document.fileName);
+				let req = eu.fileNameToObject(window.activeTextEditor.document.fileName);
 				req.action = 'requestRecord';
 				req.actionGoal = 'updateCheck';
 				req.sys_id = req.sys_id + "?sysparm_query=sys_updated_on>" + fileMeta.sys_updated_on +
@@ -89,10 +84,6 @@ export function activate(context: vscode.ExtensionContext) {
 		stopServers();
 	});
 
-	// vscode.workspace.onDidOpenTextDocument(listener => {
-	// 	console.log(listener);
-	// });
-
 	vscode.workspace.onDidCloseTextDocument(listener => {
 		delete openFiles[listener.fileName];
 	});
@@ -112,14 +103,14 @@ export function activate(context: vscode.ExtensionContext) {
 			var scriptObj = <any>{};
 			scriptObj.liveupdate = true;
 			var filePath = listener.document.fileName.substring(0, listener.document.fileName.lastIndexOf("/"));
-			scriptObj.sys_id = getFileAsJson(filePath + nodePath.sep + "widget.json")['sys_id'];
+			scriptObj.sys_id = eu.getFileAsJson(filePath + nodePath.sep + "widget.json")['sys_id'];
 			var scss = ".v" + scriptObj.sys_id + " { " + listener.document.getText() + " }";
 			var cssObj = sass.renderSync({
 				"data": scss,
 				"outputStyle": "expanded"
 			});
 
-			scriptObj.testUrls = getFileAsArray(filePath + nodePath.sep + "test_urls.txt");
+			scriptObj.testUrls = eu.getFileAsArray(filePath + nodePath.sep + "test_urls.txt");
 
 
 			if (scriptObj.testUrls.length) {
@@ -140,7 +131,7 @@ export function deactivate() { }
 
 function setScopeTreeView(jsn?:any){
 	if (!scriptFields)
-		scriptFields = getFileAsJson( path.join(__filename, '..', '..', 'resources', 'syncfields.json'));
+		scriptFields = eu.getFileAsJson( path.join(__filename, '..', '..', 'resources', 'syncfields.json'));
 
 	const scopeTreeViewProvider = new ScopeTreeViewProvider(jsn, scriptFields);
 	vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
@@ -170,6 +161,16 @@ function startServers() {
 		return;
 	}
 
+
+	let sourceDir = path.join(__filename, '..', '..', 'autocomplete') + nodePath.sep;
+	let targetDir = path.join(workspace.rootPath, 'autocomplete') + nodePath.sep;
+	eu.copyFile(sourceDir + 'client.d.ts.txt', targetDir + 'client.d.ts', function () { });
+	eu.copyFile(sourceDir + 'server.d.ts.txt', targetDir + 'server.d.ts', function () { });
+	targetDir = path.join(workspace.rootPath,'') + nodePath.sep;
+	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
+
+
+
 	//start the webserver
 	server = http.createServer((req, res) => {
 		if (req.method === 'POST') {
@@ -181,7 +182,7 @@ function startServers() {
 			});
 			req.on('end', () => {
 				postedJson = JSON.parse(postedData);
-				writeInstanceSettings(postedJson.instance);
+				eu.writeInstanceSettings(postedJson.instance);
 				//console.log(postedJson);
 
 				if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
@@ -211,6 +212,7 @@ function startServers() {
 		}
 		ws.on('message', function incoming(message) {
 			let messageJson = JSON.parse(message)
+			console.log(messageJson);
 			if (messageJson.hasOwnProperty('error')) {
 				if (messageJson.error.detail.includes("ACL"))
 					messageJson.error.detail = "ACL Error, try changing scope in the browser";
@@ -220,7 +222,7 @@ function startServers() {
 				markFileAsDirty(window.activeTextEditor.document);
 			}
 			else if (messageJson.action == "requestAppMeta"){
-				setScopeTreeView(messageJson.result);
+				setScopeTreeView(messageJson);
 			}
 			else if (messageJson.hasOwnProperty('actionGoal')) {
 				if (messageJson.actionGoal == 'updateCheck') {
@@ -229,6 +231,10 @@ function startServers() {
 					openFiles[messageJson.fileName].sys_updated_by = messageJson.result.sys_updated_by;
 					openFiles[messageJson.fileName].scope = messageJson.result['sys_scope.scope'];
 					openFiles[messageJson.fileName].content = messageJson.result[messageJson.fieldName];
+				}
+				if (messageJson.actionGoal == 'getCurrent') {
+       				eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
+					
 				}
 				else {
 					saveRequestResponse(messageJson);
@@ -292,7 +298,7 @@ function saveWidget(postedJson) {
 		if (file != "widget.json")
 			contentLength += files[file].content.length;
 
-		writeFile(filePath + file, files[file].content, files[file].openFile, function (err) {
+		eu.writeFile(filePath + file, files[file].content, files[file].openFile, function (err) {
 			if (err) {
 				//todo
 			}
@@ -317,10 +323,10 @@ function saveWidget(postedJson) {
 	requestRecords(requestJson);
 
 	var testUrls = [];
-	testUrls.push(postedJson.instance.url + nodePath.sep + "$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id + "*");
-	testUrls.push(postedJson.instance.url + nodePath.sep + "sp_config?id=" + postedJson.widget.id.displayValue + "*");
-	testUrls.push(postedJson.instance.url + nodePath.sep + "sp?id=" + postedJson.widget.id.displayValue + "*");
-	writeFileIfNotExists(filePath + "test_urls.txt", testUrls.join("\n"), false, function () { });
+	testUrls.push(postedJson.instance.url + "/$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id + "*");
+	testUrls.push(postedJson.instance.url + "/sp_config?id=" + postedJson.widget.id.displayValue + "*");
+	testUrls.push(postedJson.instance.url + "/sp?id=" + postedJson.widget.id.displayValue + "*");
+	eu.writeFileIfNotExists(filePath + "test_urls.txt", testUrls.join("\n"), false, function () { });
 
 	postedJson.widget = {};
 	postedJson.result = {};
@@ -339,8 +345,8 @@ function saveRequestResponse(responseJson) {
 	let filePath = responseJson.filePath + responseJson.tableName + nodePath.sep;
 	for (let result of responseJson.results) {
 		for (let field of responseJson.fields) {
-			writeFile(filePath +
-				field.name + '^' +
+			eu.writeFile(filePath +
+				field.name.replace(/\./g,'-') + '^' +
 				result[responseJson.displayValueField].replace(/\./, '') + '^' +
 				result.sys_id + '.' +
 				field.fileType,
@@ -389,7 +395,7 @@ function requestRecords(requestJson) {
 function saveFieldsToServiceNow(fileName): boolean {
 	let success: boolean = true;
 	try {
-		let scriptObj = fileNameToObject(fileName);
+		let scriptObj = eu.fileNameToObject(fileName);
 
 		if (!wss.clients.size) {
 			vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
@@ -415,9 +421,10 @@ function saveFieldAsFile(postedJson) {
 	let req = <any>{};
 	req.action = 'requestRecord';
 	req.actionGoal = 'saveCheck';
-	req.name = postedJson.name;
+	req.name = postedJson.name.replace(/\./g,'-');
 	req.instance = postedJson.instance;
 	req.tableName = postedJson.table;
+	req.fieldName = postedJson.field;
 	req.sys_id = postedJson.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + postedJson.field;
 	requestRecords(req);
 
@@ -432,15 +439,17 @@ function saveFieldAsFile(postedJson) {
 	else if (fieldType.includes("css"))
 		fileExtension = ".scss";
 	else if (postedJson.name.split(".").length == 2) {
-		fileExtension = "." + postedJson.name.split(".")[1];
-		postedJson.name = postedJson.name.split(".")[0];
+		if (postedJson.name.split(".")[1].length < 5){
+			fileExtension = "." + postedJson.name.split(".")[1];
+			postedJson.name = postedJson.name.split(".")[0];
+		}
 	}
 	else if (fieldType.includes("string") || fieldType == "conditions")
 		fileExtension = ".txt";
 
 	var fileName = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep + postedJson.table + nodePath.sep +
-		postedJson.field + '^' + postedJson.name + '^' + postedJson.sys_id + fileExtension;
-	writeFile(fileName, postedJson.content, true, function (err) {
+		postedJson.field + '^' + req.name + '^' + postedJson.sys_id + fileExtension;
+	eu.writeFile(fileName, postedJson.content, true, function (err) {
 		if (err) {
 			//console.log(err);
 			err.response = {};
@@ -468,114 +477,37 @@ function saveFieldAsFile(postedJson) {
 	});
 }
 
+vscode.commands.registerCommand('openFile', (meta) => {
 
-function writeInstanceSettings(instance) {
-	var path = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep + "settings.json";
-	mkdirp(getDirName(path), function (err) {
-		if (err) console.log(err);
-		fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
-	});
-	instanceSettings[instance.name] = instance;
-}
+    var fileName = workspace.rootPath + nodePath.sep + meta.instance.name + nodePath.sep + meta.tableName + nodePath.sep +
+        meta.fieldName + '^' + meta.name + '^' + meta.sys_id + '.' + meta.extension;
+    let opened = false;
 
-function getInstanceSettings(instanceName: string) {
-	if (typeof instanceSettings[instanceName] != 'undefined') { //from variable if available
-		return instanceSettings[instanceName];
-	}
-	else {
-		var path = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep + "settings.json";
-		return JSON.parse(fs.readFileSync(path)) || {};
-	}
-}
+    //if its open activate the window
+    let tds = vscode.workspace.textDocuments;
+    for (let td in tds) {
+        if (tds[td].fileName == fileName) {
+            vscode.window.showTextDocument(tds[td]);
+            opened = true;
+        }
+    }
 
-function getFileAsJson(path: string) {
-	return JSON.parse(fs.readFileSync(path)) || {};
-}
+	if (!opened) { //if not get the current version from the server.
+		
+		let req  = <any>{} ;
+		req.instance = meta.instance;
+		req.action = 'requestRecord';
+		req.actionGoal = 'getCurrent';
+		req.tableName = meta.tableName;
+		req.fieldName = meta.fieldName;
+		req.fileName = fileName;
+		req.name = meta.name;
+		req.sys_id = meta.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + req.fieldName;
+		requestRecords(req);
 
-function getFileAsArray(path: string) {
-	try {
-		return fs.readFileSync(path, { "encoding": "utf8" }).split("\n") || [];
-	}
-	catch{
-		return [];
-	}
-}
+    }
 
-function writeFile(path: string, contents: string, openFile, cb: Function) {
-
-	mkdirp(getDirName(path), function (err) {
-		if (err) return cb(err);
-		fs.writeFile(path, contents, (error) => { /* handle error */ });
-		vscode.workspace.openTextDocument(path).then(doc => {
-			if (openFile)
-				vscode.window.showTextDocument(doc, { "preview": false });
-		});
-		return cb();
-	});
-}
-
-function writeFileIfNotExists(path, contents, openFile, cb) {
-
-	mkdirp(getDirName(path), function (err) {
-		if (err) return cb(err);
-		fs.writeFile(path, contents, { "flag": "wx" }, (error) => { /* handle error */ });
-		vscode.workspace.openTextDocument(path).then(doc => {
-			if (openFile)
-				vscode.window.showTextDocument(doc, { "preview": false });
-		});
-		return cb();
-	});
-}
-
-function fileNameToObject(fileName) {
-
-	var fileNameUse = fileName.replace(workspace.rootPath, "");
-	var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
-	var basePath = workspace.rootPath + nodePath.sep + fileNameArr.slice(0, 2).join(nodePath.sep);
-
-	if (fileNameArr[5] === "ts") {
-		return true;
-	}
-
-	if (fileNameArr.length < 5) return true;
-	if (fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') return true; //must be the sys_id
-	var scriptObj = <any>{};
-	scriptObj.instance = getInstanceSettings(fileNameArr[0]);
-	scriptObj.tableName = fileNameArr[1];
-	if (fileNameArr[4].length == 32) {
-		scriptObj.name = fileNameArr[3];
-		scriptObj.fieldName = fileNameArr[2];
-		scriptObj.sys_id = fileNameArr[4];
-	}
-	else if (fileNameArr[1] == 'sp_widget') {
-		scriptObj.name = fileNameArr[2];
-		scriptObj.testUrls = getFileAsArray(basePath + nodePath.sep + scriptObj.name + nodePath.sep + "test_urls.txt");
-
-		if (fileNameArr[3] != 'sp_ng_template') {
-			var nameToField = {
-				"1 HTML Template": "template",
-				"2 SCSS": "css",
-				"3 Client Script": "client_script",
-				"4 Server Script": "script",
-				"5 Link function": "link",
-				"6 Option schema": "option_schema",
-				"7 Demo data": fileNameArr
-			}
-			scriptObj.fieldName = nameToField[fileNameArr[3]];
-			scriptObj.sys_id = getFileAsJson(basePath + nodePath.sep + scriptObj.name + nodePath.sep + "widget.json")['sys_id'];
-		}
-		else {
-			scriptObj.tableName = fileNameArr[3];
-			scriptObj.fieldName = fileNameArr[4];
-			scriptObj.sys_id = fileNameArr[6];
-		}
-	}
-	scriptObj.fileName = fileName;
-	scriptObj.content = window.activeTextEditor.document.getText();
-	return scriptObj;
-
-}
-
+});
 
 function updateScriptSyncStatusBarItem(message: string): void {
 	scriptSyncStatusBarItem.text = `$(megaphone) SN ScriptSync: ${message}`;

@@ -14,7 +14,11 @@
 		"url": "https://github.com/arnoudkooi/sn-scriptsync/issues",
 		"email": "apps@arnoudkooi.com"
 	},
-	"categories":["Linters", "Programming Languages", "Other"],
+	"categories": [
+		"Linters",
+		"Programming Languages",
+		"Other"
+	],
 	"engines": {
 		"vscode": "^1.25.0"
 	},
@@ -80,8 +84,7 @@
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
 		"compile": "tsc -p ./",
-		"watch": "tsc -watch -p ./",
-		"postinstall": "node ./node_modules/vscode/bin/install"
+		"watch": "tsc -watch -p ./"
 	},
 	"devDependencies": {
 		"@types/node": "^8.10.48",
@@ -92,7 +95,6 @@
 	"dependencies": {
 		"mkdirp": "^0.5.1",
 		"ws": "^6.2.1",
-		"sass": "^1.19.0",
-		"jsonc-parser": "^0.4.2"
+		"sass": "^1.19.0"
 	}
 }
