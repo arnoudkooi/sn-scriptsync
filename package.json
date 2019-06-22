@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "1.2.5",
+	"version": "1.5.0",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
@@ -10,11 +10,18 @@
 		"type": "git",
 		"url": "https://github.com/arnoudkooi/sn-scriptsync"
 	},
+	"bugs": {
+		"url": "https://github.com/arnoudkooi/sn-scriptsync/issues",
+		"email": "apps@arnoudkooi.com"
+	},
+	"categories":["Linters", "Programming Languages", "Other"],
 	"engines": {
 		"vscode": "^1.25.0"
 	},
-	"categories": [
-		"Other"
+	"keywords": [
+		"ServiceNow",
+		"sn-scriptsync",
+		"sn-utils"
 	],
 	"activationEvents": [
 		"*",
@@ -32,9 +39,9 @@
 				"title": "ServiceNow ScriptSync Disable"
 			},
 			{
-                "command": "extension.openJsonSelection",
-                "title": "Open Scope Files Selection"
-            }
+				"command": "extension.openJsonSelection",
+				"title": "Open Scope Files Selection"
+			}
 		],
 		"configuration": {
 			"type": "object",
