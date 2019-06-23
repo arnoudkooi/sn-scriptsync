@@ -19,7 +19,6 @@ export class ExtensionUtils {
         mkdirp(getDirName(path), function (err) {
             if (err) return cb(err);
             fs.copyFile(sourcePath, path, (error) => {
-                //console.log(error);
             });
             return cb();
         });
@@ -29,7 +28,6 @@ export class ExtensionUtils {
         mkdirp(getDirName(path), function (err) {
             if (err) return cb(err);
             fs.copyFile(sourcePath, path, { "flag": "wx" }, (error) => {
-                //console.log(error);
             });
             return cb();
         });

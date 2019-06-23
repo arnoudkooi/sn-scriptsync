@@ -49,39 +49,42 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 
-	let handle = setInterval(() => {
+	// let handle = setInterval(() => { //todo auto check for changes
 
-		let fileMeta = openFiles[window.activeTextEditor.document.fileName];
-		let currentTime = new Date().getTime()
-		if (fileMeta) {
-			if (currentTime - fileMeta.refreshed > (refresh * 1000)) {
-				let req = eu.fileNameToObject(window.activeTextEditor.document.fileName);
-				req.action = 'requestRecord';
-				req.actionGoal = 'updateCheck';
-				req.sys_id = req.sys_id + "?sysparm_query=sys_updated_on>" + fileMeta.sys_updated_on +
-					"&sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + req.fieldName;
-				requestRecords(req);
+	// 	let fileMeta = openFiles[window.activeTextEditor.document.fileName];
+	// 	let currentTime = new Date().getTime()
+	// 	if (fileMeta) {
+	// 		if (currentTime - fileMeta.refreshed > (refresh * 1000)) {
+	// 			let req = eu.fileNameToObject(window.activeTextEditor.document.fileName);
+	// 			req.action = 'requestRecord';
+	// 			req.actionGoal = 'updateCheck';
+	// 			req.sys_id = req.sys_id + "?sysparm_query=sys_updated_on>" + fileMeta.sys_updated_on +
+	// 				"&sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + req.fieldName;
+	// 			requestRecords(req);
 
-				openFiles[window.activeTextEditor.document.fileName].refreshed = currentTime;
-			}
-		}
-		else {
-			let fileMeta = {
-				"opened": currentTime,
-				"refreshed": currentTime,
-				"sys_updated_by": "",
-				"sys_updated_on": "",
-				"original_content": window.activeTextEditor.document.getText(),
-				"scope": ""
-			}
-			openFiles[window.activeTextEditor.document.fileName] = fileMeta;
-			//console.log("Added: " + window.activeTextEditor.document.fileName);
-		}
+	// 			openFiles[window.activeTextEditor.document.fileName].refreshed = currentTime;
+	// 		}
+	// 	}
+	// 	else {
+	// 		let fileMeta = {
+	// 			"opened": currentTime,
+	// 			"refreshed": currentTime,
+	// 			"sys_updated_by": "",
+	// 			"sys_updated_on": "",
+	// 			"original_content": window.activeTextEditor.document.getText(),
+	// 			"scope": ""
+	// 		}
+	// 		openFiles[window.activeTextEditor.document.fileName] = fileMeta;
+	// 	}
 
-	}, 1000);
+	// }, 1000);
 
 	vscode.commands.registerCommand('extension.snScriptSyncDisable', () => {
 		stopServers();
+	});
+
+	vscode.commands.registerCommand('extension.snScriptSyncEnable', () => {
+		startServers();
 	});
 
 	vscode.workspace.onDidCloseTextDocument(listener => {
@@ -183,8 +186,6 @@ function startServers() {
 			req.on('end', () => {
 				postedJson = JSON.parse(postedData);
 				eu.writeInstanceSettings(postedJson.instance);
-				//console.log(postedJson);
-
 				if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
 					saveFieldAsFile(postedJson);
 				else if (postedJson.action == 'saveWidget')
@@ -212,7 +213,6 @@ function startServers() {
 		}
 		ws.on('message', function incoming(message) {
 			let messageJson = JSON.parse(message)
-			console.log(messageJson);
 			if (messageJson.hasOwnProperty('error')) {
 				if (messageJson.error.detail.includes("ACL"))
 					messageJson.error.detail = "ACL Error, try changing scope in the browser";
@@ -451,7 +451,6 @@ function saveFieldAsFile(postedJson) {
 		postedJson.field + '^' + req.name + '^' + postedJson.sys_id + fileExtension;
 	eu.writeFile(fileName, postedJson.content, true, function (err) {
 		if (err) {
-			//console.log(err);
 			err.response = {};
 			err.response.result = {};
 			err.send = false;

@@ -81,10 +81,12 @@ export class ScopeTreeViewProvider implements vscode.TreeDataProvider<TreeItem> 
         }
         else if (childs[o].hasOwnProperty('artifacts')) {
           if (childs[o].hasOwnProperty('recordType') && childs[o]['artifacts'].length){
-            meta['type'] = 'table';
-            meta['tableName'] = childs[o]['recordType'];
-            meta['tableLabel'] = childs[o]['name'];
-            items.push(new TreeItem(name, childs[o]['helpText'], meta, null, childs[o]['artifacts']));
+            if (this.scriptFields.hasOwnProperty( childs[o]['recordType'])){
+              meta['type'] = 'table';
+              meta['tableName'] = childs[o]['recordType'];
+              meta['tableLabel'] = childs[o]['name'];
+              items.push(new TreeItem(name, childs[o]['helpText'], meta, null, childs[o]['artifacts']));
+            }
           }
         }
         else if (childs[o].hasOwnProperty('fieldName')) {
