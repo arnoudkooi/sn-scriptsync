@@ -24,6 +24,21 @@ let eu = new ExtensionUtils();
 
 export function activate(context: vscode.ExtensionContext) {
 
+	// let provider1 = vscode.languages.registerCompletionItemProvider('javascript', {
+
+	// 	provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext) {
+
+	// 		// a simple completion item which inserts `Hello World!`
+	// 		const simpleCompletion = new vscode.CompletionItem("Arnoud Kooi");
+
+	// 		// return all completion items as array
+	// 		return [
+	// 			simpleCompletion,
+	// 		];
+	// 	}
+	// });
+	// context.subscriptions.push(provider1);
+
 	//initialize statusbaritem and click events
 	const toggleSyncID = 'sample.toggleScriptSync';
 	vscode.commands.registerCommand(toggleSyncID, () => {
@@ -99,6 +114,8 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	vscode.workspace.onDidChangeTextDocument(listener => {
+		if (!serverRunning) return;
+
 		if (listener.document.fileName.endsWith('css') && listener.document.fileName.includes('sp_widget')) {
 			if (!wss.clients.size) {
 				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
@@ -132,9 +149,9 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() { }
 
 
-function setScopeTreeView(jsn?:any){
+function setScopeTreeView(jsn?: any) {
 	if (!scriptFields)
-		scriptFields = eu.getFileAsJson( path.join(__filename, '..', '..', 'resources', 'syncfields.json'));
+		scriptFields = eu.getFileAsJson(path.join(__filename, '..', '..', 'resources', 'syncfields.json'));
 
 	const scopeTreeViewProvider = new ScopeTreeViewProvider(jsn, scriptFields);
 	vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
@@ -169,7 +186,7 @@ function startServers() {
 	let targetDir = path.join(workspace.rootPath, 'autocomplete') + nodePath.sep;
 	eu.copyFile(sourceDir + 'client.d.ts.txt', targetDir + 'client.d.ts', function () { });
 	eu.copyFile(sourceDir + 'server.d.ts.txt', targetDir + 'server.d.ts', function () { });
-	targetDir = path.join(workspace.rootPath,'') + nodePath.sep;
+	targetDir = path.join(workspace.rootPath, '') + nodePath.sep;
 	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
 
 
@@ -191,7 +208,7 @@ function startServers() {
 				else if (postedJson.action == 'saveWidget')
 					saveWidget(postedJson);
 				else if (postedJson.action == 'linkAppToVSCode')
-					linkAppToVSCode(postedJson);					
+					linkAppToVSCode(postedJson);
 				//requestRecord(postedJson,wss);
 			});
 			res.setHeader("Access-Control-Allow-Origin", "*");
@@ -208,6 +225,8 @@ function startServers() {
 	wss = new WebSocket.Server({ port: 1978 });
 	wss.on('connection', (ws: WebSocket) => {
 
+		if (!serverRunning) return;
+
 		if (wss.clients.size > 1) {
 			ws.close(0, 'max connection');
 		}
@@ -221,7 +240,7 @@ function startServers() {
 
 				markFileAsDirty(window.activeTextEditor.document);
 			}
-			else if (messageJson.action == "requestAppMeta"){
+			else if (messageJson.action == "requestAppMeta") {
 				setScopeTreeView(messageJson);
 			}
 			else if (messageJson.hasOwnProperty('actionGoal')) {
@@ -233,8 +252,8 @@ function startServers() {
 					openFiles[messageJson.fileName].content = messageJson.result[messageJson.fieldName];
 				}
 				if (messageJson.actionGoal == 'getCurrent') {
-       				eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
-					
+					eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
+
 				}
 				else {
 					saveRequestResponse(messageJson);
@@ -346,7 +365,7 @@ function saveRequestResponse(responseJson) {
 	for (let result of responseJson.results) {
 		for (let field of responseJson.fields) {
 			eu.writeFile(filePath +
-				field.name.replace(/\./g,'-') + '^' +
+				field.name.replace(/\./g, '-') + '^' +
 				result[responseJson.displayValueField].replace(/\./, '') + '^' +
 				result.sys_id + '.' +
 				field.fileType,
@@ -376,6 +395,7 @@ function linkAppToVSCode(postedJson) {
 
 
 function requestRecords(requestJson) {
+	if (!serverRunning) return;
 
 	try {
 		if (!wss.clients.size) {
@@ -393,6 +413,8 @@ function requestRecords(requestJson) {
 }
 
 function saveFieldsToServiceNow(fileName): boolean {
+	if (!serverRunning) return;
+
 	let success: boolean = true;
 	try {
 		let scriptObj = eu.fileNameToObject(fileName);
@@ -421,7 +443,7 @@ function saveFieldAsFile(postedJson) {
 	let req = <any>{};
 	req.action = 'requestRecord';
 	req.actionGoal = 'saveCheck';
-	req.name = postedJson.name.replace(/\./g,'-');
+	req.name = postedJson.name.replace(/\./g, '-');
 	req.instance = postedJson.instance;
 	req.tableName = postedJson.table;
 	req.fieldName = postedJson.field;
@@ -439,7 +461,7 @@ function saveFieldAsFile(postedJson) {
 	else if (fieldType.includes("css"))
 		fileExtension = ".scss";
 	else if (postedJson.name.split(".").length == 2) {
-		if (postedJson.name.split(".")[1].length < 5){
+		if (postedJson.name.split(".")[1].length < 5) {
 			fileExtension = "." + postedJson.name.split(".")[1];
 			postedJson.name = postedJson.name.split(".")[0];
 		}
@@ -478,22 +500,22 @@ function saveFieldAsFile(postedJson) {
 
 vscode.commands.registerCommand('openFile', (meta) => {
 
-    var fileName = workspace.rootPath + nodePath.sep + meta.instance.name + nodePath.sep + meta.tableName + nodePath.sep +
-        meta.fieldName + '^' + meta.name + '^' + meta.sys_id + '.' + meta.extension;
-    let opened = false;
+	var fileName = workspace.rootPath + nodePath.sep + meta.instance.name + nodePath.sep + meta.tableName + nodePath.sep +
+		meta.fieldName + '^' + meta.name + '^' + meta.sys_id + '.' + meta.extension;
+	let opened = false;
 
-    //if its open activate the window
-    let tds = vscode.workspace.textDocuments;
-    for (let td in tds) {
-        if (tds[td].fileName == fileName) {
-            vscode.window.showTextDocument(tds[td]);
-            opened = true;
-        }
-    }
+	//if its open activate the window
+	let tds = vscode.workspace.textDocuments;
+	for (let td in tds) {
+		if (tds[td].fileName == fileName) {
+			vscode.window.showTextDocument(tds[td]);
+			opened = true;
+		}
+	}
 
 	if (!opened) { //if not get the current version from the server.
-		
-		let req  = <any>{} ;
+
+		let req = <any>{};
 		req.instance = meta.instance;
 		req.action = 'requestRecord';
 		req.actionGoal = 'getCurrent';
@@ -504,7 +526,7 @@ vscode.commands.registerCommand('openFile', (meta) => {
 		req.sys_id = meta.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + req.fieldName;
 		requestRecords(req);
 
-    }
+	}
 
 });
 

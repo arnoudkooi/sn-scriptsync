@@ -33,6 +33,18 @@ From the browser ScriptSync must be enabled once, by opening the popup and in th
 While using, be sure to keep the helper tab open. This will show logging and acts as a communication channel between ServiceNow and VS Code. This can be opened from the context menu.
 ![Helper tab](img/helpertab.png)
 
+# Studio integration
+In studio you can click Link VS Code via sn-scriptsync (requires version 3.3 or higher from SN Utils).
+It will show you the tree of artefacts in your app and all the scriptable fields.
+When clicking an field, it will be pulled from the server. If the file is already open, it will switch to that window.
+This is an alterbative to clicking each individual button in the platform. SP widgets are not jet supported at this point.
+Note this feature is in beta.
+![Helper tab](img/treeview.gif)
+
+
+# Intellisense
+Basic inteliisense is added to autocomplete the ServiceNow API's and functions.
+
 ## Forms
 After activating, in forms for appropriate fields, such as script, css and html a small save button will display.
 
