@@ -460,10 +460,11 @@ function saveFieldAsFile(postedJson) {
 		fileExtension = ".json";
 	else if (fieldType.includes("css"))
 		fileExtension = ".scss";
-	else if (postedJson.name.split(".").length == 2) {
-		if (postedJson.name.split(".")[1].length < 5) {
-			fileExtension = "." + postedJson.name.split(".")[1];
-			postedJson.name = postedJson.name.split(".")[0];
+	else if (req.name.lastIndexOf("-") > -1) {
+		var fileextens = req.name.substring(req.name.lastIndexOf("-")+1,req.name.length);
+		if (fileextens.length < 5) {
+			fileExtension = "." + fileextens;
+			req.name = req.name.substring(0,req.name.lastIndexOf("-"));
 		}
 	}
 	else if (fieldType.includes("string") || fieldType == "conditions")
