@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "1.5.4",
+	"version": "1.5.5",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
@@ -88,6 +88,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "^8.10.48",
+		"diff": ">=3.5.0",
 		"tslint": "^5.16.0",
 		"typescript": "^2.6.1",
 		"vscode": "^1.1.33"
