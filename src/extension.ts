@@ -130,8 +130,11 @@ export function activate(context: vscode.ExtensionContext) {
 				"outputStyle": "expanded"
 			});
 
-			scriptObj.testUrls = eu.getFileAsArray(filePath + nodePath.sep + "test_urls.txt");
-
+			var testUrls = eu.getFileAsArray(filePath + nodePath.sep + "test_urls.txt");
+			for (var testUrl in testUrls){
+				testUrls[testUrl] += "*";
+			}
+			scriptObj.testUrls = testUrls;
 
 			if (scriptObj.testUrls.length) {
 				scriptObj.css = cssObj.css.toString();
@@ -342,9 +345,9 @@ function saveWidget(postedJson) {
 	requestRecords(requestJson);
 
 	var testUrls = [];
-	testUrls.push(postedJson.instance.url + "/$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id + "*");
-	testUrls.push(postedJson.instance.url + "/sp_config?id=" + postedJson.widget.id.displayValue + "*");
-	testUrls.push(postedJson.instance.url + "/sp?id=" + postedJson.widget.id.displayValue + "*");
+	testUrls.push(postedJson.instance.url + "/$sp.do?id=sp-preview&sys_id=" + postedJson.sys_id);
+	testUrls.push(postedJson.instance.url + "/sp_config?id=" + postedJson.widget.id.displayValue);
+	testUrls.push(postedJson.instance.url + "/sp?id=" + postedJson.widget.id.displayValue);
 	eu.writeFileIfNotExists(filePath + "test_urls.txt", testUrls.join("\n"), false, function () { });
 
 	postedJson.widget = {};
@@ -361,6 +364,13 @@ function saveWidget(postedJson) {
 
 
 function saveRequestResponse(responseJson) {
+
+	if (!responseJson.hasOwnProperty("results")){
+		console.log("responseJson does not have property results")
+		//https://github.com/arnoudkooi/sn-scriptsync/issues/19
+		//need to look in this further..
+		return;
+	}
 	let filePath = responseJson.filePath + responseJson.tableName + nodePath.sep;
 	for (let result of responseJson.results) {
 		for (let field of responseJson.fields) {
@@ -502,7 +512,7 @@ function saveFieldAsFile(postedJson) {
 vscode.commands.registerCommand('openFile', (meta) => {
 
 	var fileName = workspace.rootPath + nodePath.sep + meta.instance.name + nodePath.sep + meta.tableName + nodePath.sep +
-		meta.fieldName + '^' + meta.name + '^' + meta.sys_id + '.' + meta.extension;
+		meta.fieldName + '^' + meta.name.replace(/\./g, '-') + '^' + meta.sys_id + '.' + meta.extension;
 	let opened = false;
 
 	//if its open activate the window

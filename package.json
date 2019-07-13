@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "1.5.2",
+	"version": "1.5.3",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
@@ -82,15 +82,20 @@
 		}
 	},
 	"scripts": {
-		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -p ./",
-		"watch": "tsc -watch -p ./"
-	},
+		"vscode:prepublish": "webpack --mode production",
+		"compile": "webpack --mode none",
+		"watch": "webpack --mode none --watch",
+		"test-compile": "tsc -p ./"
+	  },
 	"devDependencies": {
 		"@types/node": "^8.10.48",
+		"diff": ">=3.5.0",
+		"ts-loader": "^6.0.4",
 		"tslint": "^5.16.0",
 		"typescript": "^2.6.1",
-		"vscode": "^1.1.33"
+		"vscode": "^1.1.33",
+		"webpack": "^4.35.3",
+		"webpack-cli": "^3.3.5"
 	},
 	"dependencies": {
 		"mkdirp": "^0.5.1",
