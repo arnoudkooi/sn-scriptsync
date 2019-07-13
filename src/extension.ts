@@ -458,8 +458,8 @@ function saveFieldAsFile(postedJson) {
 	req.tableName = postedJson.table;
 	req.fieldName = postedJson.field;
 	req.sys_id = postedJson.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + postedJson.field;
-	requestRecords(req);
-
+	//requestRecords(req); // mmaybe implemt later to check changes with server version
+ 
 	var fileExtension = ".js";
 	var fieldType: string = postedJson.fieldType;
 	if (fieldType.includes("xml"))
