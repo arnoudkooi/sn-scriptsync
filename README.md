@@ -74,6 +74,13 @@ This will do some basic code checks.
 
 ![ESLint](img/eslint.png)
 
+## FAQs
+
+I'm using `<script>` tags in a widget HTML template, and they do not sync to my instance properly. How can I resolve this?
+
+**Solution** (See [#24](https://github.com/arnoudkooi/sn-scriptsync/issues/24)): In your ServiceNow instance, set the following system property:
+* **`glide.rest.sanitize_request_input`** = **`false`** 
+
 ## Issues
 Please report an issue on GitHub if you experience problems, or have a feature request.
 
