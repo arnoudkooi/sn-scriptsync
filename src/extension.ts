@@ -238,6 +238,9 @@ function startServers() {
 			if (messageJson.hasOwnProperty('error')) {
 				if (messageJson.error.detail.includes("ACL"))
 					messageJson.error.detail = "ACL Error, try changing scope in the browser";
+				else if (messageJson.error.detail.includes("Required to provide Auth information"))
+					messageJson.error.detail = "Could not sync file, no valid token. Try typing the slashcommand /token in a active browser session and retry.";
+				
 
 				vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
 
@@ -403,6 +406,22 @@ function linkAppToVSCode(postedJson) {
 	});
 }
 
+function refreshToken(){
+	if (!wss.clients.size) {
+		vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+	}
+	var scriptObj = <any>{};
+	scriptObj.refreshToken = true;
+
+	scriptObj.css = '';
+	wss.clients.forEach(function each(client) {
+		if (client.readyState === WebSocket.OPEN) {
+			client.send(JSON.stringify(scriptObj));
+		}
+	});
+
+}
+
 
 function requestRecords(requestJson) {
 	if (!serverRunning) return;
@@ -468,7 +487,7 @@ function saveFieldAsFile(postedJson) {
 		fileExtension = ".html";
 	else if (fieldType.includes("json"))
 		fileExtension = ".json";
-	else if (fieldType.includes("css"))
+	else if (fieldType.includes("css") || fieldType == "properties")
 		fileExtension = ".scss";
 	else if (req.name.lastIndexOf("-") > -1) {
 		var fileextens = req.name.substring(req.name.lastIndexOf("-")+1,req.name.length);
