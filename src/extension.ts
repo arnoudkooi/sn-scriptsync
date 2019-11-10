@@ -3,8 +3,8 @@ import * as http from 'http';
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { userInfo } from 'os';
-import { ScopeTreeViewProvider } from "../src/ScopeTree";
-import { ExtensionUtils } from "../src/ExtensionUtils";
+import { ScopeTreeViewProvider } from "./ScopeTreeViewProvider";
+import { ExtensionUtils } from "./ExtensionUtils";
 import * as path from "path";
 
 let sass = require('sass');
