@@ -1,6 +1,6 @@
 import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAlignment, StatusBarItem, TextDocument } from 'vscode';
 
-import { ExtensionUtils } from "./ExtensionUtils";
+import { ExtensionUtils } from "../src/ExtensionUtils";
 import * as path from "path";
 import * as vscode from "vscode";
 import { open } from 'fs';
