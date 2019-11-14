@@ -97,9 +97,9 @@ export class ExtensionUtils {
 
 
     //
-    fileNameToObject(fileName) {
+    fileNameToObject(listener : TextDocument) {
 
-        var fileNameUse = fileName.replace(workspace.rootPath, "");
+        var fileNameUse = listener.fileName.replace(workspace.rootPath, "");
         var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
         var basePath = workspace.rootPath + nodePath.sep + fileNameArr.slice(0, 2).join(nodePath.sep);
 
@@ -140,8 +140,8 @@ export class ExtensionUtils {
                 scriptObj.sys_id = fileNameArr[6];
             }
         }
-        scriptObj.fileName = fileName;
-        scriptObj.content = window.activeTextEditor.document.getText();
+        scriptObj.fileName = listener.fileName;
+        scriptObj.content = listener.getText();
         return scriptObj;
 
     }

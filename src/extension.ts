@@ -108,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
-		if (!saveFieldsToServiceNow(listener.fileName)) {
+		if (!saveFieldsToServiceNow(listener)) {
 			markFileAsDirty(listener)
 		}
 	});
@@ -119,7 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
 		if (listener.document.fileName.endsWith('css') && listener.document.fileName.includes('sp_widget')) {
 			if (!wss.clients.size) {
 				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
-			}
+			}  
 			var scriptObj = <any>{};
 			scriptObj.liveupdate = true;
 			var filePath = listener.document.fileName.substring(0, listener.document.fileName.lastIndexOf("/"));
@@ -248,6 +248,9 @@ function startServers() {
 			}
 			else if (messageJson.action == "requestAppMeta") {
 				setScopeTreeView(messageJson);
+			}
+			else if (messageJson.action == "writeInstanceSettings") {
+				eu.writeInstanceSettings(messageJson.instance);
 			}
 			else if (messageJson.hasOwnProperty('actionGoal')) {
 				if (messageJson.actionGoal == 'updateCheck') {
@@ -406,21 +409,6 @@ function linkAppToVSCode(postedJson) {
 	});
 }
 
-function refreshToken(){
-	if (!wss.clients.size) {
-		vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
-	}
-	var scriptObj = <any>{};
-	scriptObj.refreshToken = true;
-
-	scriptObj.css = '';
-	wss.clients.forEach(function each(client) {
-		if (client.readyState === WebSocket.OPEN) {
-			client.send(JSON.stringify(scriptObj));
-		}
-	});
-
-}
 
 
 function requestRecords(requestJson) {
