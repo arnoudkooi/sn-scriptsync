@@ -5,10 +5,10 @@ Easy Integration from ServiceNow to VS Code to be able to script in a full fledg
 
 ## [YouTube video demonstrating usage](https://www.youtube.com/watch?v=vCQ-PtQYnGU)
 
-# ServiceNow Utils
+# SN Utils
 Requires the latest version of
-[ServiceNow Utils for Chrome](https://chrome.google.com/webstore/detail/servicenow-utils/jgaodbdddndbaijmcljdbglhpdhnjobg) or 
-[ServiceNow Utils Firefox](https://addons.mozilla.org/nl/firefox/addon/servicenow-utils2/) 
+[SN Utils for Chrome](https://chrome.google.com/webstore/detail/servicenow-utils/jgaodbdddndbaijmcljdbglhpdhnjobg) or 
+[SN Utils Firefox](https://addons.mozilla.org/nl/firefox/addon/servicenow-utils2/) 
 
 **In case of issues, always check for the latest version of both the browser and VS Code extension, and update if needed!**
 
@@ -25,7 +25,7 @@ Default value for path: ~/Documents/sn-scriptsync
 The ScriptSync service can be manually started or stopped by clicking the Statusbar text in the bottom of the window.
 ![Use Extension](img/startstop.png)
 
-## Enable in ServiceNow Utils
+## Enable in SN Utils
 From the browser ScriptSync must be enabled once, by opening the popup and in the settings tab enable the checkbox 
 ![Use Extension](img/enablesnu.png)
 
