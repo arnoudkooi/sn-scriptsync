@@ -460,7 +460,7 @@ function saveFieldAsFile(postedJson) {
 	let req = <any>{};
 	req.action = 'requestRecord';
 	req.actionGoal = 'saveCheck';
-	req.name = postedJson.name.replace(/\./g, '-');
+	req.name = postedJson.name.replace(/[^a-z0-9 \.+]+/gi, '').replace(/\./g, '-');
 	req.instance = postedJson.instance;
 	req.tableName = postedJson.table;
 	req.fieldName = postedJson.field;
