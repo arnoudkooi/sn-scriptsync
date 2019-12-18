@@ -382,7 +382,7 @@ function saveRequestResponse(responseJson) {
 		for (let field of responseJson.fields) {
 			eu.writeFile(filePath +
 				field.name.replace(/\./g, '-') + '^' +
-				result[responseJson.displayValueField].replace(/[^a-z0-9 \.+]+/gi, '').replace(/\./, '') + '^' + //strip non alpahanumeric, then replace dot
+				result[responseJson.displayValueField].replace(/[^a-z0-9 \.\-+]+/gi, '').replace(/\./, '') + '^' + //strip non alpahanumeric, then replace dot
 				result.sys_id + '.' +
 				field.fileType,
 				result[field.name], false, function () { });
@@ -460,7 +460,7 @@ function saveFieldAsFile(postedJson) {
 	let req = <any>{};
 	req.action = 'requestRecord';
 	req.actionGoal = 'saveCheck';
-	req.name = postedJson.name.replace(/[^a-z0-9 \.+]+/gi, '').replace(/\./g, '-');
+	req.name = postedJson.name.replace(/[^a-z0-9 \.\-+]+/gi, '').replace(/\./g, '-');
 	req.instance = postedJson.instance;
 	req.tableName = postedJson.table;
 	req.fieldName = postedJson.field;
@@ -488,7 +488,7 @@ function saveFieldAsFile(postedJson) {
 		fileExtension = ".txt";
 
 	var fileName = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep + postedJson.table + nodePath.sep +
-		postedJson.field + '^' + req.name.replace(/[^a-z0-9 \.+]+/gi, '').replace(/\./g, '-') + '^' + postedJson.sys_id + fileExtension;
+		postedJson.field + '^' + req.name.replace(/[^a-z0-9 \.\-+]+/gi, '').replace(/\./g, '-') + '^' + postedJson.sys_id + fileExtension;
 	eu.writeFile(fileName, postedJson.content, true, function (err) {
 		if (err) {
 			err.response = {};
@@ -519,7 +519,7 @@ function saveFieldAsFile(postedJson) {
 vscode.commands.registerCommand('openFile', (meta) => {
 
 	var fileName = workspace.rootPath + nodePath.sep + meta.instance.name + nodePath.sep + meta.tableName + nodePath.sep +
-		meta.fieldName + '^' + meta.name.replace(/[^a-z0-9 \.+]+/gi, '').replace(/\./g, '-') + '^' + meta.sys_id + '.' + meta.extension;
+		meta.fieldName + '^' + meta.name.replace(/[^a-z0-9 \.\-+]+/gi, '').replace(/\./g, '-') + '^' + meta.sys_id + '.' + meta.extension;
 	let opened = false;
 
 	//if its open activate the window
