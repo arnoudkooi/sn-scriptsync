@@ -475,7 +475,7 @@ function saveFieldAsFile(postedJson) {
 		fileExtension = ".html";
 	else if (fieldType.includes("json"))
 		fileExtension = ".json";
-	else if (fieldType.includes("css") || fieldType == "properties")
+	else if (fieldType.includes("css") || fieldType == "properties" || req.fieldName == "css")
 		fileExtension = ".scss";
 	else if (req.name.lastIndexOf("-") > -1) {
 		var fileextens = req.name.substring(req.name.lastIndexOf("-")+1,req.name.length);

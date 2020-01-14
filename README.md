@@ -1,4 +1,4 @@
-# ServiceNow VS Code ScriptSync
+# VS Code ScriptSync for ServiceNow
 Easy Integration from ServiceNow to VS Code to be able to script in a full fledged editor, without any configuration.
 
 ![Use Extension](img/sn-scriptsync.gif)
