@@ -202,8 +202,6 @@ function startServers() {
 			let postedJson;
 			req.on('data', chunk => {
 				postedData += chunk.toString();
-			});
-			req.on('end', () => {
 				postedJson = JSON.parse(postedData);
 				eu.writeInstanceSettings(postedJson.instance);
 				if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
