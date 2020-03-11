@@ -1,5 +1,5 @@
 import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAlignment, StatusBarItem, TextDocument } from 'vscode';
-import * as http from 'http';
+
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { userInfo } from 'os';
@@ -7,13 +7,16 @@ import { ScopeTreeViewProvider } from "./ScopeTreeViewProvider";
 import { ExtensionUtils } from "./ExtensionUtils";
 import * as path from "path";
 
+let express = require("express");
+let bodyParser = require("body-parser");
+let app = express();
+
 let sass = require('sass');
 let scriptFields;
 
 const nodePath = require('path');
 
 let wss;
-let server;
 let serverRunning = false;
 let openFiles = {};
 
@@ -119,7 +122,7 @@ export function activate(context: vscode.ExtensionContext) {
 		if (listener.document.fileName.endsWith('css') && listener.document.fileName.includes('sp_widget')) {
 			if (!wss.clients.size) {
 				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
-			}  
+			}
 			var scriptObj = <any>{};
 			scriptObj.liveupdate = true;
 			var filePath = listener.document.fileName.substring(0, listener.document.fileName.lastIndexOf("/"));
@@ -131,7 +134,7 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 
 			var testUrls = eu.getFileAsArray(filePath + nodePath.sep + "test_urls.txt");
-			for (var testUrl in testUrls){
+			for (var testUrl in testUrls) {
 				testUrls[testUrl] += "*";
 			}
 			scriptObj.testUrls = testUrls;
@@ -193,34 +196,29 @@ function startServers() {
 	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
 
 
-
-	//start the webserver
-	server = http.createServer((req, res) => {
-		if (req.method === 'POST') {
-
-			let postedData = '';
-			let postedJson;
-			req.on('data', chunk => {
-				postedData += chunk.toString();
-				postedJson = JSON.parse(postedData);
-				eu.writeInstanceSettings(postedJson.instance);
-				if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
-					saveFieldAsFile(postedJson);
-				else if (postedJson.action == 'saveWidget')
-					saveWidget(postedJson);
-				else if (postedJson.action == 'linkAppToVSCode')
-					linkAppToVSCode(postedJson);
-				//requestRecord(postedJson,wss);
-			});
-			res.setHeader("Access-Control-Allow-Origin", "*");
-			res.setHeader('Access-Control-Allow-Methods', 'POST');
-			res.end('Data received');
-		}
-		else {
-			res.end('Please post data for ScriptSync to this enpoint');
-		}
+	//init the webserver
+	app.use(bodyParser.urlencoded({ extended: true }));
+	app.use(bodyParser.text({ limit: '200mb' }));
+	
+	app.get('/', function (req, res) {
+		res.end('Please post data for sn-scriptsync to this endpoint');
 	});
-	server.listen(1977);
+	app.post('/', function (req, res) {
+		var postedJson = JSON.parse(req.body);
+		eu.writeInstanceSettings(postedJson.instance);
+		if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
+			saveFieldAsFile(postedJson);
+		else if (postedJson.action == 'saveWidget')
+			saveWidget(postedJson);
+		else if (postedJson.action == 'linkAppToVSCode')
+			linkAppToVSCode(postedJson);
+		//requestRecord(postedJson,wss);
+
+		res.setHeader("Access-Control-Allow-Origin", "*");
+		res.setHeader('Access-Control-Allow-Methods', 'POST');
+		res.end('Data received');
+	});
+	app.listen(1977);
 
 	//Start WebSocket Server
 	wss = new WebSocket.Server({ port: 1978 });
@@ -238,7 +236,7 @@ function startServers() {
 					messageJson.error.detail = "ACL Error, try changing scope in the browser";
 				else if (messageJson.error.detail.includes("Required to provide Auth information"))
 					messageJson.error.detail = "Could not sync file, no valid token. Try typing the slashcommand /token in a active browser session and retry.";
-				
+
 
 				vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
 
@@ -282,7 +280,7 @@ function startServers() {
 }
 
 function stopServers() {
-	server.close()
+	app.close()
 	wss.close();
 	updateScriptSyncStatusBarItem('Stopped');
 	serverRunning = false;
@@ -369,7 +367,7 @@ function saveWidget(postedJson) {
 
 function saveRequestResponse(responseJson) {
 
-	if (!responseJson.hasOwnProperty("results")){
+	if (!responseJson.hasOwnProperty("results")) {
 		console.log("responseJson does not have property results")
 		//https://github.com/arnoudkooi/sn-scriptsync/issues/19
 		//need to look in this further..
@@ -464,7 +462,7 @@ function saveFieldAsFile(postedJson) {
 	req.fieldName = postedJson.field;
 	req.sys_id = postedJson.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + postedJson.field;
 	//requestRecords(req); // mmaybe implemt later to check changes with server version
- 
+
 	var fileExtension = ".js";
 	var fieldType: string = postedJson.fieldType;
 	if (fieldType.includes("xml"))
@@ -476,10 +474,10 @@ function saveFieldAsFile(postedJson) {
 	else if (fieldType.includes("css") || fieldType == "properties" || req.fieldName == "css")
 		fileExtension = ".scss";
 	else if (req.name.lastIndexOf("-") > -1) {
-		var fileextens = req.name.substring(req.name.lastIndexOf("-")+1,req.name.length);
+		var fileextens = req.name.substring(req.name.lastIndexOf("-") + 1, req.name.length);
 		if (fileextens.length < 5) {
 			fileExtension = "." + fileextens;
-			req.name = req.name.substring(0,req.name.lastIndexOf("-"));
+			req.name = req.name.substring(0, req.name.lastIndexOf("-"));
 		}
 	}
 	else if (fieldType.includes("string") || fieldType == "conditions")
