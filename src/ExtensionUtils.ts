@@ -40,8 +40,10 @@ export class ExtensionUtils {
             if (err) return cb(err);
             fs.writeFile(path, contents, (error) => { /* handle error */ });
             vscode.workspace.openTextDocument(path).then(doc => {
-                if (openFile)
+                if (openFile){
                     vscode.window.showTextDocument(doc, { "preview": false });
+                    
+                }
             });
             return cb();
         });
@@ -54,8 +56,11 @@ export class ExtensionUtils {
             if (err) return cb(err);
             fs.writeFile(path, contents, { "flag": "wx" }, (error) => { /* handle error */ });
             vscode.workspace.openTextDocument(path).then(doc => {
-                if (openFile)
+                if (openFile){
                     vscode.window.showTextDocument(doc, { "preview": false });
+                    vscode.commands.executeCommand("editor.action.formatDocument");
+                    
+                }
             });
             return cb();
         });
@@ -108,7 +113,7 @@ export class ExtensionUtils {
         }
 
         if (fileNameArr.length < 5) return true;
-        if (fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') return true; //must be the sys_id
+        if ((fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') && fileNameArr[1] != 'background') return true; //must be the sys_id
         var scriptObj = <any>{};
         scriptObj.instance = this.getInstanceSettings(fileNameArr[0]);
         scriptObj.tableName = fileNameArr[1];

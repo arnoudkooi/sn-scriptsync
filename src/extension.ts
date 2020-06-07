@@ -10,6 +10,7 @@ import * as path from "path";
 let express = require("express");
 let bodyParser = require("body-parser");
 let app = express();
+let expressListen;
 
 let sass = require('sass');
 let scriptFields;
@@ -105,6 +106,11 @@ export function activate(context: vscode.ExtensionContext) {
 		startServers();
 	});
 
+	vscode.commands.registerCommand('extension.bgScriptMirror', () => {
+		selectionToBG();
+	});
+
+
 	vscode.workspace.onDidCloseTextDocument(listener => {
 		delete openFiles[listener.fileName];
 	});
@@ -121,7 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		if (listener.document.fileName.endsWith('css') && listener.document.fileName.includes('sp_widget')) {
 			if (!wss.clients.size) {
-				vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+				vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils Helper tab in a browser");
 			}
 			var scriptObj = <any>{};
 			scriptObj.liveupdate = true;
@@ -147,6 +153,20 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 				});
 			}
+		}
+		else if (listener.document.fileName.includes('/background/')) {
+				if (!wss.clients.size) {
+					vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+				}
+
+				let scriptObj = eu.fileNameToObject(listener.document);
+				scriptObj.mirrorbgscript = true;
+				wss.clients.forEach(function each(client) {
+					if (client.readyState === WebSocket.OPEN) {
+						client.send(JSON.stringify(scriptObj));
+					}
+				});
+
 		}
 	});
 
@@ -218,7 +238,7 @@ function startServers() {
 		res.setHeader('Access-Control-Allow-Methods', 'POST');
 		res.end('Data received');
 	});
-	app.listen(1977);
+	expressListen = app.listen(1977);
 
 	//Start WebSocket Server
 	wss = new WebSocket.Server({ port: 1978 });
@@ -280,7 +300,7 @@ function startServers() {
 }
 
 function stopServers() {
-	app.close()
+	expressListen.close()
 	wss.close();
 	updateScriptSyncStatusBarItem('Stopped');
 	serverRunning = false;
@@ -412,7 +432,7 @@ function requestRecords(requestJson) {
 
 	try {
 		if (!wss.clients.size) {
-			vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser");
 		}
 		wss.clients.forEach(function each(client) {
 			if (client.readyState === WebSocket.OPEN) {
@@ -432,8 +452,10 @@ function saveFieldsToServiceNow(fileName): boolean {
 	try {
 		let scriptObj = eu.fileNameToObject(fileName);
 
+		if(scriptObj.tableName == 'background') return true; // do not save bg scripts to SN.
+
 		if (!wss.clients.size) {
-			vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
+			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser");
 			success = false;
 		}
 		wss.clients.forEach(function each(client) {
@@ -545,6 +567,37 @@ vscode.commands.registerCommand('openFile', (meta) => {
 });
 
 function updateScriptSyncStatusBarItem(message: string): void {
-	scriptSyncStatusBarItem.text = `$(megaphone) SN ScriptSync: ${message}`;
+	scriptSyncStatusBarItem.text = `$(megaphone) sn-scriptsync: ${message}`;
 	scriptSyncStatusBarItem.show();
 }
+
+async function selectionToBG() {
+
+	if (!serverRunning) {
+		vscode.window.showInformationMessage("sn-scriptsync server must be running")
+		return;
+	}
+
+	var date = new Date();
+	let my_id = ( date.getFullYear().toString() + pad2(date.getMonth() + 1) + pad2( date.getDate()) + '-' +  pad2( date.getHours() ) + pad2( date.getMinutes() ) + pad2( date.getSeconds() ) );
+
+
+	let editor = vscode.window.activeTextEditor;
+	let scriptObj = eu.fileNameToObject(editor.document);
+	const text = 
+
+	scriptObj.content = '// sn-scriptsync - Snippet received from: (delete file after usage.)\n// file://' + scriptObj.fileName + "\n\n" 
+						 + editor.document.getText(editor.selection);;
+	scriptObj.field = 'bg';
+	scriptObj.table = 'background'
+	scriptObj.sys_id = my_id;
+	scriptObj.fieldType = 'script';
+	scriptObj.name = 'script'; 
+	scriptObj.mirrorbgscript = true;
+
+	saveFieldAsFile(scriptObj)
+
+	function pad2(n) { return n < 10 ? '0' + n : n } //helper for date id
+
+
+};

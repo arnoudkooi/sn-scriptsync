@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "1.7.1",
+	"version": "1.8.0",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon128.png",
@@ -45,11 +45,26 @@
 			{
 				"command": "extension.openJsonSelection",
 				"title": "sn-scriptsync: Open Scope Files Selection"
+			},
+			{
+				"command": "extension.bgScriptMirror",
+				"title": "sn-scriptsync: Selection to Background Script Mirror",
+				"when": "editorLangId == javascript"
 			}
-		],
+			],
+			"menus": {
+			"editor/context": [
+				{
+				"command": "extension.bgScriptMirror",
+				"group": "sn-scriptsync: Selection to Background Script Mirror",
+				"when": "editorLangId == javascript"
+				}
+			]
+		}
+		,
 		"configuration": {
 			"type": "object",
-			"title": "SN ScriptSync",
+			"title": "sn-scriptsync",
 			"properties": {
 				"sn-scriptsync.path": {
 					"type": "string",
