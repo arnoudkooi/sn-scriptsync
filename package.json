@@ -51,17 +51,16 @@
 				"title": "sn-scriptsync: Selection to Background Script Mirror",
 				"when": "editorLangId == javascript"
 			}
-			],
-			"menus": {
+		],
+		"menus": {
 			"editor/context": [
 				{
-				"command": "extension.bgScriptMirror",
-				"group": "sn-scriptsync: Selection to Background Script Mirror",
-				"when": "editorLangId == javascript"
+					"command": "extension.bgScriptMirror",
+					"group": "sn-scriptsync: Selection to Background Script Mirror",
+					"when": "editorLangId == javascript"
 				}
 			]
-		}
-		,
+		},
 		"configuration": {
 			"type": "object",
 			"title": "sn-scriptsync",
@@ -102,17 +101,17 @@
 		"watch": "tsc -watch -p ./"
 	},
 	"devDependencies": {
-		"@types/node": "^8.10.59",
+		"@types/node": "^8.10.61",
 		"diff": ">=3.5.0",
 		"tslint": "^5.20.1",
 		"typescript": "^2.6.1",
-		"vscode": "^1.1.36"
+		"vscode": "^1.1.37"
 	},
 	"dependencies": {
 		"body-parser": "^1.19.0",
 		"express": "^4.17.1",
 		"mkdirp": "^0.5.1",
-		"sass": "^1.23.7",
+		"sass": "^1.26.9",
 		"ws": "^6.2.1"
 	}
 }
