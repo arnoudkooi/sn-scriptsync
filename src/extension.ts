@@ -154,7 +154,7 @@ export function activate(context: vscode.ExtensionContext) {
 				});
 			}
 		}
-		else if (listener.document.fileName.includes('/background/')) {
+		else if (listener.document.fileName.includes(path.sep + 'background' + path.sep)) {
 				if (!wss.clients.size) {
 					vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
 				}
