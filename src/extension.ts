@@ -16,6 +16,7 @@ let sass = require('sass');
 let scriptFields;
 
 const nodePath = require('path');
+const fs = require('fs'); 
 
 let wss;
 let serverRunning = false;
@@ -24,7 +25,7 @@ let openFiles = {};
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
 let eu = new ExtensionUtils();
 
-
+let lastSave = Math.floor(+new Date() / 1000); 
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -117,7 +118,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
-		if (!saveFieldsToServiceNow(listener)) {
+		if (!saveFieldsToServiceNow(listener, true)) {
 			markFileAsDirty(listener)
 		}
 	});
@@ -206,6 +207,15 @@ function startServers() {
 		vscode.window.showWarningMessage("Please open a folder, before running ScriptSync");
 		return;
 	}
+
+	fs.watch(workspace.rootPath, { recursive: true }, (eventType, filename) => { 
+		if (eventType == 'change' && serverRunning){
+			if ((Math.floor(+new Date() / 1000) - lastSave) > 3){
+				vscode.workspace.openTextDocument(workspace.rootPath + nodePath.sep +filename).then(
+					document => {saveFieldsToServiceNow(document, false)});
+			}
+		}
+	}); 
 
 
 	let sourceDir = path.join(__filename, '..', '..', 'autocomplete') + nodePath.sep;
@@ -445,8 +455,10 @@ function requestRecords(requestJson) {
 	}
 }
 
-function saveFieldsToServiceNow(fileName): boolean {
+function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
 	if (!serverRunning) return;
+
+	if (fromVsCode) lastSave = Math.floor(+new Date() / 1000);
 
 	let success: boolean = true;
 	try {

@@ -74,6 +74,11 @@ This will do some basic code checks.
 
 ![ESLint](img/eslint.png)
 
+## Editing outside VS Code
+While you have sn-scriptsync running, you can edit files outside VS Code as well.  
+In this case sn-scriptsync acts as a proxy and will pass the changes to the instance, when saving a file.  
+(New in version 1.9)
+
 ## FAQs
 
 I'm using `<script>` tags in a widget HTML template, and they do not sync to my instance properly. How can I resolve this?
