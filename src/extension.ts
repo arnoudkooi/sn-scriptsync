@@ -14,6 +14,7 @@ let expressListen;
 
 let sass = require('sass');
 let scriptFields;
+let watchFileSystem = true;
 
 const nodePath = require('path');
 const fs = require('fs'); 
@@ -62,6 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	let syncDir: string = settings.get('path');
 	let refresh: number = settings.get('refresh');
+	watchFileSystem = settings.get('watchFileSystem');
 	refresh = Math.max(refresh, 30);
 	syncDir = syncDir.replace('~', userInfo().homedir);
 	if (vscode.workspace.rootPath == syncDir) {
@@ -111,6 +113,10 @@ export function activate(context: vscode.ExtensionContext) {
 		selectionToBG();
 	});
 
+	vscode.commands.registerCommand('extension.toggleWatchFileSystem', () => {
+		watchFileSystem = !watchFileSystem;
+		settings.update('watchFileSystem',watchFileSystem);
+	});
 
 	vscode.workspace.onDidCloseTextDocument(listener => {
 		delete openFiles[listener.fileName];
@@ -122,6 +128,10 @@ export function activate(context: vscode.ExtensionContext) {
 			markFileAsDirty(listener)
 		}
 	});
+
+	vscode.workspace.onDidChangeConfiguration(event => {
+		watchFileSystem = settings.get('watchFileSystem');
+    })
 
 	vscode.workspace.onDidChangeTextDocument(listener => {
 		if (!serverRunning) return;
@@ -209,7 +219,7 @@ function startServers() {
 	}
 
 	fs.watch(workspace.rootPath, { recursive: true }, (eventType, filename) => { 
-		if (eventType == 'change' && serverRunning){
+		if (eventType == 'change' && serverRunning && watchFileSystem){
 			if ((Math.floor(+new Date() / 1000) - lastSave) > 3){
 				vscode.workspace.openTextDocument(workspace.rootPath + nodePath.sep +filename).then(
 					document => {saveFieldsToServiceNow(document, false)});
