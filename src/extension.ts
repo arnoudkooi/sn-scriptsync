@@ -60,7 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	updateScriptSyncStatusBarItem('click to start.');
 
-	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
+	let settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	let syncDir: string = settings.get('path');
 	let refresh: number = settings.get('refresh');
 	watchFileSystem = settings.get('watchFileSystem');
@@ -114,6 +114,7 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	vscode.commands.registerCommand('extension.toggleWatchFileSystem', () => {
+		settings = vscode.workspace.getConfiguration('sn-scriptsync');
 		watchFileSystem = !watchFileSystem;
 		settings.update('watchFileSystem',watchFileSystem);
 	});
@@ -125,11 +126,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
 		if (!saveFieldsToServiceNow(listener, true)) {
-			markFileAsDirty(listener)
+			if (listener.fileName.includes("^"))//only sn files
+				markFileAsDirty(listener);
 		}
 	});
 
 	vscode.workspace.onDidChangeConfiguration(event => {
+		settings = vscode.workspace.getConfiguration('sn-scriptsync');
 		watchFileSystem = settings.get('watchFileSystem');
     })
 
@@ -219,7 +222,7 @@ function startServers() {
 	}
 
 	fs.watch(workspace.rootPath, { recursive: true }, (eventType, filename) => { 
-		if (eventType == 'change' && serverRunning && watchFileSystem){
+		if (eventType == 'change' && serverRunning && watchFileSystem && filename.includes("^")){
 			if ((Math.floor(+new Date() / 1000) - lastSave) > 3){
 				vscode.workspace.openTextDocument(workspace.rootPath + nodePath.sep +filename).then(
 					document => {saveFieldsToServiceNow(document, false)});
@@ -253,6 +256,8 @@ function startServers() {
 		else if (postedJson.action == 'linkAppToVSCode')
 			linkAppToVSCode(postedJson);
 		//requestRecord(postedJson,wss);
+
+		lastSave = Math.floor(+new Date() / 1000); //prevent immediate postback of saved file
 
 		res.setHeader("Access-Control-Allow-Origin", "*");
 		res.setHeader('Access-Control-Allow-Methods', 'POST');
@@ -466,14 +471,14 @@ function requestRecords(requestJson) {
 }
 
 function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
-	if (!serverRunning) return;
+	if (!serverRunning || !fileName.fileName.includes("^")) return;
 
 	if (fromVsCode) lastSave = Math.floor(+new Date() / 1000);
 
 	let success: boolean = true;
 	try {
 		let scriptObj = eu.fileNameToObject(fileName);
-
+		scriptObj.saveSource = (fromVsCode) ? "VS Code" : "FileWatcher";
 		if(scriptObj.tableName == 'background') return true; // do not save bg scripts to SN.
 
 		if (!wss.clients.size) {
