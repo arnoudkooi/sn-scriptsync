@@ -247,6 +247,9 @@ function startServers() {
 		res.end('Please post data for sn-scriptsync to this endpoint');
 	});
 	app.post('/', function (req, res) {
+
+		lastSave = Math.floor(+new Date() / 1000); //prevent immediate postback of saved file
+
 		var postedJson = JSON.parse(req.body);
 		eu.writeInstanceSettings(postedJson.instance);
 		if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
@@ -257,7 +260,6 @@ function startServers() {
 			linkAppToVSCode(postedJson);
 		//requestRecord(postedJson,wss);
 
-		lastSave = Math.floor(+new Date() / 1000); //prevent immediate postback of saved file
 
 		res.setHeader("Access-Control-Allow-Origin", "*");
 		res.setHeader('Access-Control-Allow-Methods', 'POST');

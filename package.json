@@ -2,10 +2,10 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "1.9.2",
+	"version": "1.9.3",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
-	"icon": "img/icon128.png",
+	"icon": "img/icon256.png",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/arnoudkooi/sn-scriptsync"
