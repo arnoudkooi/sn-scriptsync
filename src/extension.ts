@@ -473,7 +473,7 @@ function requestRecords(requestJson) {
 }
 
 function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
-	if (!serverRunning || !fileName.fileName.includes("^")) return;
+	if (!serverRunning || (!fileName.fileName.includes("^") && !fileName.fileName.includes("sp_widget"))  ) return;
 
 	if (fromVsCode) lastSave = Math.floor(+new Date() / 1000);
 
