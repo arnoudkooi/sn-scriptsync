@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "1.9.4",
+	"version": "1.9.5",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
@@ -73,12 +73,7 @@
 					"type": "string",
 					"default": "~/Documents/sn-scriptsync",
 					"description": "Scripts folder (Extension will auto activate when opening this folder)"
-				},
-				"sn-scriptsync.watchFileSystem": {
-					"type": "boolean",
-					"default": true,
-					"description": "Watch the filesystem for changes outside VS Code"
-				},				
+				},			
 				"sn-scriptsync.refresh": {
 					"type": "integer",
 					"default": "60",

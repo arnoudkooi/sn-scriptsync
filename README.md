@@ -75,10 +75,7 @@ This will do some basic code checks.
 ![ESLint](img/eslint.png)
 
 ## Editing outside VS Code
-While you have sn-scriptsync running, you can edit files outside VS Code as well.  
-In this case sn-scriptsync acts as a proxy and will pass the changes to the instance, when saving a file.  
-This function can be disabled/enabled via the settings or command toggleWatchFileSystem 
-(New in version 1.9)
+This experimental feature is disabled in version 1.9.5
 
 ## FAQs
 
