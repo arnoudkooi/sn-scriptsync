@@ -14,7 +14,6 @@ let expressListen;
 
 let sass = require('sass');
 let scriptFields;
-//let watchFileSystem = true;
 
 const nodePath = require('path');
 //const fs = require('fs'); 
@@ -63,10 +62,13 @@ export function activate(context: vscode.ExtensionContext) {
 	let settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	let syncDir: string = settings.get('path');
 	let refresh: number = settings.get('refresh');
-	//watchFileSystem = settings.get('watchFileSystem');
 	refresh = Math.max(refresh, 30);
-	syncDir = syncDir.replace('~', userInfo().homedir);
-	if (vscode.workspace.rootPath == syncDir) {
+	syncDir = syncDir.replace('~', '');	
+	if (nodePath.sep == "\\"){ //reverse slash when windows.
+		syncDir = syncDir.replace(/\//g,'\\');
+	}
+									  
+	if (vscode.workspace.rootPath.endsWith(syncDir)) {
 		startServers();
 	}
 
@@ -113,11 +115,7 @@ export function activate(context: vscode.ExtensionContext) {
 		selectionToBG();
 	});
 
-	// vscode.commands.registerCommand('extension.toggleWatchFileSystem', () => {
-	// 	settings = vscode.workspace.getConfiguration('sn-scriptsync');
-	// 	watchFileSystem = !watchFileSystem;
-	// 	settings.update('watchFileSystem',watchFileSystem);
-	// });
+
 
 	vscode.workspace.onDidCloseTextDocument(listener => {
 		delete openFiles[listener.fileName];
@@ -133,7 +131,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 	vscode.workspace.onDidChangeConfiguration(event => {
 		settings = vscode.workspace.getConfiguration('sn-scriptsync');
-		//watchFileSystem = settings.get('watchFileSystem');
     })
 
 	vscode.workspace.onDidChangeTextDocument(listener => {
@@ -220,15 +217,6 @@ function startServers() {
 		vscode.window.showWarningMessage("Please open a folder, before running ScriptSync");
 		return;
 	}
-
-	// fs.watch(workspace.rootPath, { recursive: true }, (eventType, filename) => { 
-	// 	if (eventType == 'change' && serverRunning && watchFileSystem && filename.includes("^")){
-	// 		if ((Math.floor(+new Date() / 1000) - lastSave) > 3){
-	// 			vscode.workspace.openTextDocument(workspace.rootPath + nodePath.sep +filename).then(
-	// 				document => {saveFieldsToServiceNow(document, false)});
-	// 		}
-	// 	}
-	// }); 
 
 
 	let sourceDir = path.join(__filename, '..', '..', 'autocomplete') + nodePath.sep;
