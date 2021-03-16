@@ -240,12 +240,15 @@ function startServers() {
 
 		var postedJson = JSON.parse(req.body);
 		eu.writeInstanceSettings(postedJson.instance);
-		if (postedJson.action == 'saveFieldAsFile' || !postedJson.action)
+		if (postedJson.action == 'saveFieldAsFile')
 			saveFieldAsFile(postedJson);
 		else if (postedJson.action == 'saveWidget')
 			saveWidget(postedJson);
 		else if (postedJson.action == 'linkAppToVSCode')
 			linkAppToVSCode(postedJson);
+		else 
+			refreshedToken(postedJson);
+		
 		//requestRecord(postedJson,wss);
 
 
@@ -432,6 +435,17 @@ function linkAppToVSCode(postedJson) {
 	req.instance = postedJson.instance;
 	requestRecords(req);
 
+	wss.clients.forEach(function each(client) {
+		if (client.readyState === WebSocket.OPEN && !postedJson.send) {
+			client.send(JSON.stringify(postedJson));
+			postedJson.send = true;
+		}
+	});
+}
+
+function refreshedToken(postedJson) {
+	postedJson.refreshedtoken = true;
+	postedJson.response = "Refreshed token in VS Code via /token slashcommand. Instance: " + postedJson.instance.name;
 	wss.clients.forEach(function each(client) {
 		if (client.readyState === WebSocket.OPEN && !postedJson.send) {
 			client.send(JSON.stringify(postedJson));
