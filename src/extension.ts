@@ -67,8 +67,11 @@ export function activate(context: vscode.ExtensionContext) {
 	if (nodePath.sep == "\\"){ //reverse slash when windows.
 		syncDir = syncDir.replace(/\//g,'\\');
 	}
-									  
-	if (vscode.workspace.rootPath.endsWith(syncDir)) {
+	
+	if (typeof workspace.rootPath == 'undefined') {
+		//
+	}
+	else if (vscode.workspace.rootPath.endsWith(syncDir)) {
 		startServers();
 	}
 
@@ -327,8 +330,9 @@ function stopServers() {
 
 function saveWidget(postedJson) {
 	//lastsend = 0;
+	var cleanName = postedJson.name.replace(/[^a-z0-9 \.\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
 	var filePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep +
-		postedJson.tableName + nodePath.sep + postedJson.name + nodePath.sep;
+		postedJson.tableName + nodePath.sep + cleanName + nodePath.sep;
 
 	var files = {};
 
