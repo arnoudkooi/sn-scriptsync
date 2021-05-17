@@ -622,7 +622,7 @@ async function selectionToBG() {
 	const text = 
 
 	scriptObj.content = '// sn-scriptsync - Snippet received from: (delete file after usage.)\n// file://' + scriptObj.fileName + "\n\n" 
-						 + editor.document.getText(editor.selection);;
+						 + String.raw`${editor.document.getText(editor.selection)}`;;
 	scriptObj.field = 'bg';
 	scriptObj.table = 'background'
 	scriptObj.sys_id = my_id;
