@@ -19,15 +19,21 @@ export class ExtensionUtils {
         mkdirp(getDirName(path), function (err) {
             if (err) return cb(err);
             fs.copyFile(sourcePath, path, (error) => {
+                return cb(error);
             });
             return cb();
         });
     }
 
     copyFileIfNotExists(sourcePath: string, path: string, cb: Function) {
+
+        if (fs.existsSync(path)){
+            return cb("existst")
+        }
         mkdirp(getDirName(path), function (err) {
             if (err) return cb(err);
-            fs.copyFile(sourcePath, path, { "flag": "wx" }, (error) => {
+            fs.copyFile(sourcePath, path, (error) => {
+                return cb(error);
             });
             return cb();
         });

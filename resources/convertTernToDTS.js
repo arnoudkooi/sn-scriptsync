@@ -1,7 +1,8 @@
 /**
  * convert tern file to a .d.ts typescript stub
  * Get (server) json with this bg script set it to variable x in browser console and run the script
- new GlideScriptEditorManager().getApis('sys_script', 'script',null);
+gs.log( new GlideScriptEditorManager().getApis('sys_script', 'script',null)); //server.d.ts
+gs.log( new GlideScriptEditorManager().getApis('sys_script_client', 'script',null)); //client.d.ts
  */
 
 function itterateClass(clsName, cls, classOrVariable) {
@@ -95,4 +96,4 @@ for (api in x) {
     //}
 }
 
-outp
+console.log(outp);
