@@ -145,7 +145,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			var scriptObj = <any>{};
 			scriptObj.liveupdate = true;
-			var filePath = listener.document.fileName.substring(0, listener.document.fileName.lastIndexOf("/"));
+			var filePath = listener.document.fileName.substring(0, listener.document.fileName.lastIndexOf(nodePath.sep));
 			scriptObj.sys_id = eu.getFileAsJson(filePath + nodePath.sep + "widget.json")['sys_id'];
 			var scss = ".v" + scriptObj.sys_id + " { " + listener.document.getText() + " }";
 			var cssObj = sass.renderSync({
