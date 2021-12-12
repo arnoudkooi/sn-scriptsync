@@ -118,6 +118,14 @@ export class ExtensionUtils {
             return true;
         }
 
+        if (fileNameArr.length == 8){ //this is a variable stored in sys_variable_value use some creativity to support these files...
+            var fileNme = fileNameArr[2] + "." + fileNameArr[3] + "." + fileNameArr[4];
+            fileNameArr.splice(2, 1);
+            fileNameArr.splice(2, 1);
+            fileNameArr[2] = fileNme;
+        }
+
+
         if (fileNameArr.length < 5) return true;
         if ((fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') && fileNameArr[1] != 'background') return true; //must be the sys_id
         var scriptObj = <any>{};
