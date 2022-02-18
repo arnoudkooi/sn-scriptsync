@@ -1,0 +1,199 @@
+{
+	"Glide Evaluate": {
+		"scope": "xml",
+		"prefix": ["<g:e", "g:e", "<g:evaluate", "g:evaluate", "evaluate"],
+		"body": [
+			"<g:evaluate var=\"jvar_$1\" object=\"${2:true}\" jelly=\"${3:true}\">",
+			"\t$0",
+			"</g:evaluate>"
+		],
+		"description": "Create a Jelly Glide Evaluate tag"
+	},
+	"Glide Message": {
+		"scope": "xml",
+		"prefix": ["<g:m", "g:m", "<g:message", "g:message", "message"],
+		"body": [
+			"<g:message>",
+			"\t$0",
+			"</g:message>"
+		],
+		"description": "Create a Jelly Glide Message tag, used for translations"
+	},
+
+	"Glide Breakpoint": {
+		"scope": "xml",
+		"prefix": ["<g:b", "g:b", "<g:breakpoint", "g:breakpoint", "breakpoint"],
+		"body": [
+			"<g:breakpoint />"
+		],
+		"description": "When the breakpoint tag is called, it prints a list of all the variables in Jelly at the current moment"
+	},
+
+	"Glide NoEscape": {
+		"scope": "xml",
+		"prefix": ["<g:n", "g:n", "<g:no_escape", "g:no_escape", "no_escape"],
+		"body": [
+			"<g:no_escape>",
+			"\t${jvar_${1:raw_html_data}}",
+			"</g:no_escape>"
+		],
+		"description": " Output placed inside of no_escape tags is not escaped before output."
+	},
+
+	"Glide MacroInvoke": {
+		"scope": "xml",
+		"prefix": ["<g:macro", "g:macro", "macro"],
+		"body": [
+			"<!-- Will invoke the contents of the UI macro named \"${1:sample_macro}\", which will have the variable jvar_${2:message} available within it-->",
+			"<g:macro_invoke macro=\"${1:sample_macro}\" ${2:message}=\"${3:This is a sample macro variable.}\" />"
+		],
+		"description": "The macro_invoke tag calls a UI macro that you have specified in the database"
+	},
+
+	"Glide Insert" :{
+		"scope": "xml",
+		"prefix": ["<g:insert","g:insert","insert"],
+		"body": [
+			"<g:insert template=\"${1:get_target_form_function.xml}\" />"
+		],
+		"description": "Inserts another jelly script into a new context."
+	},
+
+	"Glide Inline": {
+		"scope": "xml",
+		"prefix": ["<g:inline", "g:inline", "inline"],
+		"body": [
+			"<g:inline template=\"${1:get_target_form_function.xml}\" />$0"
+		],
+		"description": "Inserts another jelly script into this context."
+	},
+
+	"Glide Call": {
+		"scope": "xml",
+		"prefix": ["<g:call", "g:call", "call"],
+		"body": [
+			"<g:call function=\"${1:get_target_form_function.xml}\" />$0"
+		],
+		"description": "Calls another Jelly file, passing in parameters as tag attributes."
+	},
+
+	"Glide UI Form": {
+		"scope": "xml",
+		"prefix": ["<g:ui_form", "g:ui_form", "ui_form", "form"],
+		"body": [
+			"<g:ui_form>",
+			"\t$1",
+			"\t<g:dialog_buttons_ok_cancel ok=\"return true\"/>",
+			"</g:ui_form>$0"
+		],
+		"description": "Inserts boilerplate UI Form tags."
+	},
+
+	"Glide UI Input Filed": {
+		"scope": "xml",
+		"prefix": ["<g:ui_input_field", "g:ui_input_field", "ui_input_field", "input_field"],
+		"body": [
+			"<g:ui_input_field label=\"${1:sys_id}\" name=\"${2:sysid}\" value=\"${3:9d385017c611228701d22104cc95c371}\" size=\"${4:50}\"/>$0"
+		],
+		"description": "Inserts an Input field"
+	},
+
+	"Glide UI Checkbox": {
+		"scope": "xml",
+		"prefix": ["<g:ui_checkbox", "g:ui_checkbox", "ui_checkbox","checkbox"],
+		"body": [
+			"<g:ui_checkbox name=\"${1:timecard_active}\" value=\"${${2:sysparm_timecard_active}}\" />$0"
+		],
+		"description": "Inserts a checkbox onto the form"
+	},
+
+	"Glide UI Reference": {
+		"scope": "xml",
+		"prefix": ["<g:ui_reference", "g:ui_reference", "ui_reference", "reference"],
+		"body": [
+			"<g:ui_reference name=\"${1:parent_id}\" id=\"${2:parent_id}\" table=\"${3:pm_project}\"",
+			"query=\"${4:active=true}\"",
+			"completer=\"AJAXTableCompleter\"",
+			"columns=\"${5:project_manager;short_description}\"/>$0"
+		],
+		"description": "Inserts a reference field on the form"
+	},
+
+	"Jelly If": {
+		"scope": "xml",
+		"prefix": ["<j:if", "j:if", "if"],
+		"body": [
+			"<j:if test=\"${jvar_$1}\">",
+			"\t$0",
+			"</j:if>"
+		],
+		"description": "Jelly If Statement"
+	},
+
+	"Jelly If/Else": {
+		"scope": "xml",
+		"prefix": ["<j:ifelse", "j:ifelse", "ifelse"],
+		"body": [
+			"<j:if test=\"${jvar_$1}\">",
+			"\t$2",
+			"</j:if>",
+			"\n",
+			"<j:if test=\"${!jvar_$1}\">",
+			"\t$0",
+			"</j:if>"
+		],
+		"description": "Jelly If Statement"
+	},
+
+	"Jelly Set": {
+		"scope": "xml",
+		"prefix": ["<j:set", "j:set", "set"],
+		"body": [
+			"<j:set var=\"jvar_$1\" value=\"${jvar_$2}\"/>"
+		],
+		"description": ["Jelly If Statement"]
+	},
+
+	"Jelly Set if": {
+		"scope": "xml",
+		"prefix": ["<j:setif", "j:setif", "setif"],
+		"body": [
+			"<j:set_if var=\"jvar_$1\" test=\"${jvar_$2}\" true=\"$3\" false=\"$4\"/>"
+		],
+		"description": "The set_if tag sets a variable based on a test."
+	},
+
+	"Jelly While": {
+		"scope": "xml",
+		"prefix": ["<j:while", "j:while", "while"],
+		"body": [
+			"<j:while test=\"${jvar_$1}\">",
+			"\t$0",
+			"</j:while>"
+		],
+		"description": "Jelly while loop"
+	},
+
+	"Jelly Choose" : {
+		"scope": "xml",
+		"prefix": ["<j:choose", "j:choose", "choose"],
+		"body": [
+			"<j:choose>",
+			"\t<j:when test=\"${jvar_$1}\">$2</j:when>",
+			"\t<j:when test=\"${jvar_$2}\">$2</j:when>",
+			"\t<j:otherwise>$0</j:otherwise>",
+			"</j:choose>"
+		],
+		"description": "Jelly Choose statement, similar to Switch"
+		
+	},
+
+	"Jelly When": {
+		"scope": "xml",
+		"prefix": ["<j:when", "j:when", "when"],
+		"body": [
+			"<j:when test=\"${jvar_$1}\">$2</j:when>$0"
+		],
+		"description": "Jelly When statement, used inside a Choose statement"
+	}
+}

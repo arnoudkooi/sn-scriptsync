@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.1.0",
+	"version": "2.1.5",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
@@ -93,7 +93,13 @@
 					"name": "Scoped App Files"
 				}
 			]
-		}
+		},
+		"snippets": [
+			{
+				"language": "xml",
+				"path": "./autocomplete/jelly.json"
+			}
+		]
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",

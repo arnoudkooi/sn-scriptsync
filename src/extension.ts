@@ -16,7 +16,15 @@ let sass = require('sass');
 let scriptFields;
 
 const nodePath = require('path');
-//const fs = require('fs'); 
+// const fs = require('fs'); 
+// todo, see if we can run a wss websocket server locally
+// const https = require('https');
+// let securityDir = path.join(__filename, '..', '..', 'security') + nodePath.sep;
+// const httpsOptions = {
+//     key: fs.readFileSync(securityDir + 'key.pem'),
+//     cert: fs.readFileSync(securityDir + 'cert.pem')
+// }
+
 
 let wss;
 let serverRunning = false;
@@ -260,6 +268,11 @@ function startServers() {
 		res.end('Data received');
 	});
 	expressListen = app.listen(1977);
+
+	// https.createServer(httpsOptions, app)
+    // .listen(1977, () => {
+    //     console.log('server running at ' + 3000)
+    // })
 
 	//Start WebSocket Server
 	wss = new WebSocket.Server({ port: 1978 });
