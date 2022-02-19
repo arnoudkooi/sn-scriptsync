@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.3.0",
+	"version": "2.3.1",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
@@ -60,6 +60,18 @@
 				"title": "sn-scriptsync: Retrieve current version from Instance"
 			}
 		],
+		"keybindings": [
+            {
+                "command": "extension.openInInstance",
+                "key": "ctrl+alt+i",
+                "mac": "ctrl+cmd+i"
+            },
+            {
+                "command": "extension.refreshFromInstance",
+                "key": "ctrl+alt+r",
+                "mac": "ctrl+cmd+r"
+            }
+        ],
 		"menus": {
 			"editor/context": [
 				{
