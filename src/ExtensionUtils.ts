@@ -48,6 +48,7 @@ export class ExtensionUtils {
             vscode.workspace.openTextDocument(path).then(doc => {
                 if (openFile){
                     vscode.window.showTextDocument(doc, { "preview": false });
+                    vscode.window.showInformationMessage("Current file content loaded from Instance")
                     
                 }
             });

@@ -126,6 +126,14 @@ export function activate(context: vscode.ExtensionContext) {
 		selectionToBG();
 	});
 
+	vscode.commands.registerCommand('extension.openInInstance', (context) => {
+		openInInstance();
+	});
+
+	vscode.commands.registerCommand('extension.refreshFromInstance', (context) => {
+		refreshFromInstance();
+	});
+
 
 
 	vscode.workspace.onDidCloseTextDocument(listener => {
@@ -149,7 +157,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		if (listener.document.fileName.endsWith('css') && listener.document.fileName.includes('sp_widget')) {
 			if (!wss.clients.size) {
-				vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils Helper tab in a browser");
+				vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils Helper tab in a browser via slashcommand /token");
 			}
 			var scriptObj = <any>{};
 			scriptObj.liveupdate = true;
@@ -313,7 +321,6 @@ function startServers() {
 				}
 				if (messageJson.actionGoal == 'getCurrent') {
 					eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
-
 				}
 				else {
 					saveRequestResponse(messageJson);
@@ -479,7 +486,7 @@ function requestRecords(requestJson) {
 
 	try {
 		if (!wss.clients.size) {
-			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser");
+			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
 		}
 		wss.clients.forEach(function each(client) {
 			if (client.readyState === WebSocket.OPEN) {
@@ -504,7 +511,7 @@ function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
 		if(scriptObj.tableName == 'background') return true; // do not save bg scripts to SN.
 
 		if (!wss.clients.size) {
-			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser");
+			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
 			success = false;
 		}
 		wss.clients.forEach(function each(client) {
@@ -648,5 +655,38 @@ async function selectionToBG() {
 
 	function pad2(n) { return n < 10 ? '0' + n : n } //helper for date id
 
+
+};
+
+async function openInInstance() {
+	if (!serverRunning) {
+		vscode.window.showInformationMessage("sn-scriptsync server must be running")
+		return;
+	}
+	let editor = vscode.window.activeTextEditor;
+	let scriptObj = eu.fileNameToObject(editor.document);
+	let url = scriptObj.instance.url + "/";
+
+	if (scriptObj.tableName == 'sp_widget'){
+		url += 'sp_config?id=widget_editor&sys_id=' + scriptObj.sys_id;
+	}
+	else {
+		url += scriptObj.tableName + '.do?sys_id=' + scriptObj.sys_id;
+	}
+	vscode.env.openExternal(vscode.Uri.parse(url));
+};
+
+async function refreshFromInstance() {
+	if (!serverRunning) {
+		vscode.window.showInformationMessage("sn-scriptsync server must be running")
+		return;
+	}
+	let editor = vscode.window.activeTextEditor;
+	let scriptObj = eu.fileNameToObject(editor.document);
+
+	scriptObj.action = 'requestRecord';
+	scriptObj.actionGoal = 'getCurrent';
+	scriptObj.sys_id = scriptObj.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + scriptObj.fieldName;
+	requestRecords(scriptObj);
 
 };
