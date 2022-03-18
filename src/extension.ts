@@ -126,6 +126,10 @@ export function activate(context: vscode.ExtensionContext) {
 		selectionToBG();
 	});
 
+	vscode.commands.registerCommand('extension.bgScriptExecute', () => {
+		bgScriptExecute();
+	});
+
 	vscode.commands.registerCommand('extension.openInInstance', (context) => {
 		openInInstance();
 	});
@@ -655,6 +659,27 @@ async function selectionToBG() {
 
 	function pad2(n) { return n < 10 ? '0' + n : n } //helper for date id
 
+
+};
+
+async function bgScriptExecute() {
+	if (!serverRunning) {
+		vscode.window.showInformationMessage("sn-scriptsync server must be running")
+		return;
+	}
+	let editor = vscode.window.activeTextEditor;
+	let scriptObj = eu.fileNameToObject(editor.document);
+	if(!editor.document.fileName.includes(path.sep + 'background' + path.sep)){
+		vscode.window.showInformationMessage("Only files in /background directory can be executed")
+		return;
+	}
+	scriptObj.mirrorbgscript = true;
+	scriptObj.executeScript = true;
+	wss.clients.forEach(function each(client) {
+		if (client.readyState === WebSocket.OPEN) {
+			client.send(JSON.stringify(scriptObj));
+		}
+	});
 
 };
 

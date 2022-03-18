@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.3.1",
+	"version": "2.3.2",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
@@ -58,6 +58,10 @@
 			{
 				"command": "extension.refreshFromInstance",
 				"title": "sn-scriptsync: Retrieve current version from Instance"
+			},
+			{
+				"command": "extension.bgScriptExecute",
+				"title": "sn-scriptsync: Execute Backgroundscipt (.js files in /background folder only)"
 			}
 		],
 		"keybindings": [
@@ -70,6 +74,12 @@
                 "command": "extension.refreshFromInstance",
                 "key": "ctrl+alt+r",
                 "mac": "ctrl+cmd+r"
+            },
+			{
+                "command": "extension.bgScriptExecute",
+                "key": "ctrl+enter",
+                "mac": "cmd+enter",
+				"when": "editorLangId == javascript && resourceFilename =~ background"
             }
         ],
 		"menus": {
@@ -89,6 +99,11 @@
 					"command": "extension.refreshFromInstance",
 					"group": "sn-scriptsync",
 					"title": "Retrieve current version from Instance"
+				},				{
+					"command": "extension.bgScriptExecute",
+					"group": "sn-scriptsync",
+					"title": "Execute Background Script in Instance",
+					"when": "editorLangId == javascript && resourceDirname =~ /background/"
 				}
 			]
 		},
