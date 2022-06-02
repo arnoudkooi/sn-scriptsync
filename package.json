@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.3.2",
+	"version": "2.3.3",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
@@ -65,23 +65,23 @@
 			}
 		],
 		"keybindings": [
-            {
-                "command": "extension.openInInstance",
-                "key": "ctrl+alt+i",
-                "mac": "ctrl+cmd+i"
-            },
-            {
-                "command": "extension.refreshFromInstance",
-                "key": "ctrl+alt+r",
-                "mac": "ctrl+cmd+r"
-            },
 			{
-                "command": "extension.bgScriptExecute",
-                "key": "ctrl+enter",
-                "mac": "cmd+enter",
+				"command": "extension.openInInstance",
+				"key": "ctrl+alt+i",
+				"mac": "ctrl+cmd+i"
+			},
+			{
+				"command": "extension.refreshFromInstance",
+				"key": "ctrl+alt+r",
+				"mac": "ctrl+cmd+r"
+			},
+			{
+				"command": "extension.bgScriptExecute",
+				"key": "ctrl+enter",
+				"mac": "cmd+enter",
 				"when": "editorLangId == javascript && resourceFilename =~ background"
-            }
-        ],
+			}
+		],
 		"menus": {
 			"editor/context": [
 				{
@@ -89,7 +89,7 @@
 					"group": "sn-scriptsync",
 					"title": "Selection to Background Script Mirror",
 					"when": "editorLangId == javascript"
-				},      
+				},
 				{
 					"command": "extension.openInInstance",
 					"group": "sn-scriptsync",
@@ -99,7 +99,8 @@
 					"command": "extension.refreshFromInstance",
 					"group": "sn-scriptsync",
 					"title": "Retrieve current version from Instance"
-				},				{
+				},
+				{
 					"command": "extension.bgScriptExecute",
 					"group": "sn-scriptsync",
 					"title": "Execute Background Script in Instance",
@@ -165,5 +166,8 @@
 		"mkdirp": "^0.5.1",
 		"sass": "^1.34.0",
 		"ws": "^7.4.6"
+	},
+	"resolutions": {
+		"minimist": "1.2.6"
 	}
 }
