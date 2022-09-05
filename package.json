@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.3.3",
+	"version": "2.4.0",
 	"license": "MIT",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
@@ -41,10 +41,6 @@
 			{
 				"command": "extension.snScriptSyncDisable",
 				"title": "sn-scriptsync: Disable"
-			},
-			{
-				"command": "extension.openJsonSelection",
-				"title": "sn-scriptsync: Open Scope Files Selection"
 			},
 			{
 				"command": "extension.bgScriptMirror",

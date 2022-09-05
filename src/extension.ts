@@ -282,10 +282,6 @@ function startServers() {
 	});
 	expressListen = app.listen(1977);
 
-	// https.createServer(httpsOptions, app)
-    // .listen(1977, () => {
-    //     console.log('server running at ' + 3000)
-    // })
 
 	//Start WebSocket Server
 	wss = new WebSocket.Server({ port: 1978 });
@@ -309,6 +305,20 @@ function startServers() {
 
 				markFileAsDirty(window.activeTextEditor.document);
 			}
+
+			// start new methods to replace webserver with websocket
+			if (messageJson?.instance) 
+				eu.writeInstanceSettings(messageJson.instance);
+			if (messageJson?.action == 'saveFieldAsFile')
+				saveFieldAsFile(messageJson);
+			else if (messageJson?.action == 'saveWidget')
+				saveWidget(messageJson);
+			else if (messageJson?.action == 'linkAppToVSCode')
+				linkAppToVSCode(messageJson);
+			else if (message.instance && !message?.action)
+				refreshedToken(messageJson);
+			// end new methods to replace webserver with websocket
+
 			else if (messageJson.action == "requestAppMeta") {
 				setScopeTreeView(messageJson);
 			}

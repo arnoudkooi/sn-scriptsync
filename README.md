@@ -3,7 +3,7 @@ Easy Integration from ServiceNow to VS Code to be able to script in a full fledg
 
 ![Use Extension](img/sn-scriptsync.gif)
 
-## [YouTube video demonstrating usage](https://www.youtube.com/watch?v=vCQ-PtQYnGU)
+## [YouTube video demonstrating usage (2022 update)](https://www.youtube.com/watch?v=ZDDminMjGTA)
 
 # SN Utils
 Requires the latest version of
