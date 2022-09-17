@@ -2,29 +2,14 @@ import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAli
 
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
-import { userInfo } from 'os';
 import { ScopeTreeViewProvider } from "./ScopeTreeViewProvider";
 import { ExtensionUtils } from "./ExtensionUtils";
 import * as path from "path";
-
-let express = require("express");
-let bodyParser = require("body-parser");
-let app = express();
-let expressListen;
 
 let sass = require('sass');
 let scriptFields;
 
 const nodePath = require('path');
-// const fs = require('fs'); 
-// todo, see if we can run a wss websocket server locally
-// const https = require('https');
-// let securityDir = path.join(__filename, '..', '..', 'security') + nodePath.sep;
-// const httpsOptions = {
-//     key: fs.readFileSync(securityDir + 'key.pem'),
-//     cert: fs.readFileSync(securityDir + 'cert.pem')
-// }
-
 
 let wss;
 let serverRunning = false;
@@ -36,21 +21,6 @@ let eu = new ExtensionUtils();
 let lastSave = Math.floor(+new Date() / 1000); 
 
 export function activate(context: vscode.ExtensionContext) {
-
-	// let provider1 = vscode.languages.registerCompletionItemProvider('javascript', {
-
-	// 	provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext) {
-
-	// 		// a simple completion item which inserts `Hello World!`
-	// 		const simpleCompletion = new vscode.CompletionItem("Arnoud Kooi");
-
-	// 		// return all completion items as array
-	// 		return [
-	// 			simpleCompletion,
-	// 		];
-	// 	}
-	// });
-	// context.subscriptions.push(provider1);
 
 	//initialize statusbaritem and click events
 	const toggleSyncID = 'sample.toggleScriptSync';
@@ -250,48 +220,20 @@ function startServers() {
 	targetDir = path.join(workspace.rootPath, '') + nodePath.sep;
 	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
 
-
-	//init the webserver
-	app.use(bodyParser.urlencoded({ extended: true }));
-	app.use(bodyParser.text({ limit: '200mb' }));
-	
-	app.get('/', function (req, res) {
-		res.end('Please post data for sn-scriptsync to this endpoint');
-	});
-	app.post('/', function (req, res) {
-
-		lastSave = Math.floor(+new Date() / 1000); //prevent immediate postback of saved file
-
-		var postedJson = JSON.parse(req.body);
-		eu.writeInstanceSettings(postedJson.instance);
-		if (postedJson.action == 'saveFieldAsFile')
-			saveFieldAsFile(postedJson);
-		else if (postedJson.action == 'saveWidget')
-			saveWidget(postedJson);
-		else if (postedJson.action == 'linkAppToVSCode')
-			linkAppToVSCode(postedJson);
-		else 
-			refreshedToken(postedJson);
-		
-		//requestRecord(postedJson,wss);
-
-
-		res.setHeader("Access-Control-Allow-Origin", "*");
-		res.setHeader('Access-Control-Allow-Methods', 'POST');
-		res.end('Data received');
-	});
-	expressListen = app.listen(1977);
-
-
 	//Start WebSocket Server
 	wss = new WebSocket.Server({ port: 1978 });
-	wss.on('connection', (ws: WebSocket) => {
+	wss.on('connection', (ws: WebSocket, req) => {
 
 		if (!serverRunning) return;
 
-		if (wss.clients.size > 1) {
-			ws.close(0, 'max connection');
+		if (req.headers.origin.startsWith('http')) { // only allow via extension pages like chrome-extension://;
+			ws.close(0, 'Not allowed');
 		}
+
+		if (wss.clients.size > 1) {
+			ws.close(0, 'Max connection');
+		}
+
 		ws.on('message', function incoming(message) {
 			let messageJson = JSON.parse(message)
 			if (messageJson.hasOwnProperty('error')) {
@@ -356,12 +298,10 @@ function startServers() {
 }
 
 function stopServers() {
-	expressListen.close()
 	wss.close();
 	updateScriptSyncStatusBarItem('Stopped');
 	serverRunning = false;
 }
-
 
 function saveWidget(postedJson) {
 	//lastsend = 0;
@@ -620,7 +560,6 @@ vscode.commands.registerCommand('openFile', (meta) => {
 	}
 
 	if (!opened) { //if not get the current version from the server.
-
 		let req = <any>{};
 		req.instance = meta.instance;
 		req.action = 'requestRecord';
@@ -631,7 +570,6 @@ vscode.commands.registerCommand('openFile', (meta) => {
 		req.name = meta.name;
 		req.sys_id = meta.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + req.fieldName;
 		requestRecords(req);
-
 	}
 
 });

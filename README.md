@@ -6,9 +6,8 @@ Easy Integration from ServiceNow to VS Code to be able to script in a full fledg
 ## [YouTube video demonstrating usage (2022 update)](https://www.youtube.com/watch?v=ZDDminMjGTA)
 
 # SN Utils
-Requires the latest version of
-[SN Utils for Chrome](https://chrome.google.com/webstore/detail/servicenow-utils/jgaodbdddndbaijmcljdbglhpdhnjobg) or 
-[SN Utils Firefox](https://addons.mozilla.org/nl/firefox/addon/servicenow-utils2/) 
+Requires the latest version of SN Utils, links via: 
+[arnoudkooi.com](https://arnoudkooi.com)  
 
 **In case of issues, always check for the latest version of both the browser and VS Code extension, and update if needed!**
 
@@ -80,6 +79,16 @@ I'm using `<script>` tags in a widget HTML template, and they do not sync to my 
 
 **Solution** (See [#24](https://github.com/arnoudkooi/sn-scriptsync/issues/24)): In your ServiceNow instance, set the following system property:
 * **`glide.rest.sanitize_request_input`** = **`false`** 
+
+
+I get an error when using in Safari: "User Not Authenticated"
+
+**Solution** Disable "User Not Authenticated" in Safari Privacy settings
+
+sn-scriptsync does not work in Brave browser
+
+**Solution** Shield down your instance in Brave browser
+
 
 ## Issues
 Please report an issue on GitHub if you experience problems, or have a feature request.
