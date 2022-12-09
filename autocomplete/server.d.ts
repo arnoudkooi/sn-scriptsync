@@ -2107,3 +2107,15 @@ class XMLNodeIterator {
 
 }
 
+/** Scoped TemplatePrinter handles printing from a mail script to the email message.
+class TemplatePrinter {
+    
+    constructor() { };
+    
+    /** Prints the string to the email body. */
+    print(string: string) { };
+    
+    /** Adds non-breaking spaces to the email body. */
+    space(spaces: number) { };
+    
+}
