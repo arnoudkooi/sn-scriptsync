@@ -2107,7 +2107,7 @@ class XMLNodeIterator {
 
 }
 
-/** Scoped TemplatePrinter handles printing from a mail script to the email message.
+/** Scoped TemplatePrinter handles printing from a mail script to the email message. */
 class TemplatePrinter {
     
     constructor() { };
