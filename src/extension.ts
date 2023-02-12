@@ -108,6 +108,10 @@ export function activate(context: vscode.ExtensionContext) {
 		refreshFromInstance();
 	});
 
+	vscode.commands.registerCommand('extension.requestInstanceMetaData', (context) => {
+		requestInstanceMetaData();
+	});
+
 
 
 	vscode.workspace.onDidCloseTextDocument(listener => {
@@ -278,6 +282,9 @@ function startServers() {
 				if (messageJson.actionGoal == 'getCurrent') {
 					eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
 				}
+				if (messageJson.actionGoal == 'writeInstanceMetaData') {
+					writeInstanceMetaData(messageJson);
+				}
 				else {
 					saveRequestResponse(messageJson);
 				}
@@ -301,6 +308,50 @@ function stopServers() {
 	wss.close();
 	updateScriptSyncStatusBarItem('Stopped');
 	serverRunning = false;
+}
+
+
+function requestInstanceMetaData() {
+
+	let editor = vscode.window.activeTextEditor;
+	let scriptObj = eu.fileNameToObject(editor.document);
+
+	if (scriptObj === true) return; //not a valid file 
+
+	var filePath = workspace.rootPath + nodePath.sep + scriptObj.instance.name + nodePath.sep;
+
+	//first request tablemnames
+	let requestJson = <any>{};
+	requestJson.action = 'requestRecords';
+	requestJson.actionGoal = 'writeInstanceMetaData'
+	requestJson.instance = scriptObj.instance;
+	requestJson.filePath = filePath + 'tablenames.d.ts';
+	requestJson.tableName = 'sys_db_object';
+	requestJson.displayValueField = 'name';
+	requestJson.queryString = 'sysparm_query=nameNOT LIKE00^sys_update_nameISNOTEMPTY^ORDERBYname&sysparm_fields=name';
+	requestRecords(requestJson);
+
+	//second properies
+	requestJson.filePath = filePath + 'properties.d.ts';
+	requestJson.tableName = 'sys_properties';
+	requestJson.queryString = 'sysparm_query=ORDERBYname&sysparm_fields=name';
+	requestRecords(requestJson);
+
+
+}
+
+function writeInstanceMetaData(messageJson) {
+
+	let tableToType = {
+		"sys_db_object" : "InstanceTableNames",
+		"sys_properties" : "InstanceProperties"
+	}
+
+	let content = "declare type " + (tableToType[messageJson.tableName] || "unknown") + " = \n";
+	for (let row of messageJson.results) {
+		content += ` | "${row.name}" ` + '\n';
+	}
+	eu.writeFile(messageJson.filePath, content, false, function () { });
 }
 
 function saveWidget(postedJson) {

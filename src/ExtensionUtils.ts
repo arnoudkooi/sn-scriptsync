@@ -48,7 +48,7 @@ export class ExtensionUtils {
             vscode.workspace.openTextDocument(path).then(doc => {
                 if (openFile){
                     vscode.window.showTextDocument(doc, { "preview": false });
-                    vscode.window.showInformationMessage("Current file content loaded from Instance")
+                    vscode.window.showInformationMessage("Data loaded from Instance and written to file")
                     
                 }
             });
@@ -127,7 +127,10 @@ export class ExtensionUtils {
         }
 
 
-        if (fileNameArr.length < 5) return true;
+        if (fileNameArr.length < 5) {
+            vscode.window.showWarningMessage("This command can only be executed from a synced file.")
+            return true;
+        }
         if ((fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') && fileNameArr[1] != 'background') return true; //must be the sys_id
         var scriptObj = <any>{};
         scriptObj.instance = this.getInstanceSettings(fileNameArr[0]);

@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.5.1",
+	"version": "2.6.0",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -55,6 +55,10 @@
 				"title": "sn-scriptsync: Retrieve current version from Instance"
 			},
 			{
+				"command": "extension.requestInstanceMetaData",
+				"title": "sn-scriptsync: Load instance tablenames and properties for IntelliSense"
+			},
+			{
 				"command": "extension.bgScriptExecute",
 				"title": "sn-scriptsync: Execute Backgroundscipt (.js files in /background folder only)"
 			}
@@ -94,6 +98,11 @@
 					"command": "extension.refreshFromInstance",
 					"group": "sn-scriptsync",
 					"title": "Retrieve current version from Instance"
+				},
+				{
+					"command": "extension.requestInstanceMetaData",
+					"group": "sn-scriptsync",
+					"title": "Load instance tablenames and properties for IntelliSense"
 				},
 				{
 					"command": "extension.bgScriptExecute",
