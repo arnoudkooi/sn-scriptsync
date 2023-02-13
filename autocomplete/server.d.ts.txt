@@ -250,7 +250,7 @@ getAccessToken() : string {};
 /** Scoped GlideRecord is used for database operations instead of writing SQL queries. Provides data access APIs to retrieve, update, and delete records from a table */
 class GlideRecord{
 
-constructor(tableName: string){};
+constructor(tableName: InstanceTableNames){};
 
 /** Retrieves the last error message */
 getLastErrorMessage() : string {};
@@ -609,7 +609,7 @@ setRequestBody(body: string) {};
 getRequestHeaders() : Object {};
 
 /** Setup the response body to be saved into the specified attachment when the request is sent. encryptCtxSysId is optional */
-saveResponseBodyAsAttachment(tableName: string, recordSysId: string, filename: string, encryptCtxSysId: string) {};
+saveResponseBodyAsAttachment(tableName: InstanceTableNames, recordSysId: string, filename: string, encryptCtxSysId: string) {};
 
 /** Set a REST message function variable to the specified value */
 setStringParameter(name: string, value: string) {};
@@ -814,7 +814,7 @@ getDurationValue() : string {};
 /** The scoped GlideAggregate class is an extension of GlideRecord and allows database aggregation (COUNT, SUM, MIN, MAX, AVG) queries to be done. This can be helpful in creating customized reports or in calculations for calculated fields. The GlideAggregate class works only on number fields. Since currency fields are strings, you can't use the GlideAggregate class on currency fields */
 class GlideAggregate{
 
-constructor(tableName: string){};
+constructor(tableName: InstanceTableNames){};
 
 /** Moves to the next record in the GlideAggregate */
 next() : bool {};

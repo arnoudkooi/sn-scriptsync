@@ -1,9 +1,11 @@
 # CHANGELOG.md
 
+## 2.6.1 (2023-02-13)
+Fixes / changes:
+  - bugfix new intellisense function
 
-  
 
-## 6.2.0.0 (2023-02-13)
+## 2.6.0 (2023-02-13)
 
 Features:
   - generate types with tablenames and properties to support intellisense for those (Issue #77)

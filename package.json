@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.6.0",
+	"version": "2.6.1",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -64,6 +64,11 @@
 			}
 		],
 		"keybindings": [
+			{
+				"command": "extension.requestInstanceMetaData",
+				"key": "ctrl+alt+j",
+				"mac": "ctrl+cmd+j"
+			},
 			{
 				"command": "extension.openInInstance",
 				"key": "ctrl+alt+i",
