@@ -295,54 +295,6 @@ toggleList() {};
 }
 
 var g_list = new g_list_proto();
-/** Client-side GlideRecord enables the use of some GlideRecord functionality inside client-side scripts, such as client scripts and UI policy scripts. Note: Precautions should be made to ensure that queries are optimized and that they do not run synchronously */
-class GlideRecord{
-
-constructor(tableName: string){};
-
-/** Moves to the next record in the GlideRecord */
-next() : bool {};
-
-/** Gets the limit of records to be returned by the GlideRecord query */
-getLimit() : integer {};
-
-/** Retrieves the table name associated with this GlideRecord */
-getTableName() : string {};
-
-/** Runs the query against the table based on the addQuery() filter */
-query(responseFunction) {};
-
-/** Inserts a new record using the field values that have been set for the current record */
-insert(responseFunction) : string {};
-
-/** Specifies and orderBy column (this may be called more than once to order by multiple columns) */
-orderBy(column: string) {};
-
-/** Update the record with an optional responseFunction handler */
-update(responseFunction: string) {};
-
-/** Determines if there are any more records in the GlideRecord */
-hasNext() : bool {};
-
-/** Gets the encoded query as a string */
-getEncodedQuery() : string {};
-
-/** Adds a column to order by in the query */
-addOrderBy(column: string) {};
-
-/** Adds a filter to return records based on 1,2 or 3 arguments */
-addQuery(fieldName: string, operator: string, value: string) {};
-
-/** Sets the limit for how many records will be returned by the GlideRecord query */
-setLimit(maxQuery: integer) {};
-
-/** Executes a GlideRecord query for a record with the specified sys_id */
-get(sys_id: string) : bool {};
-
-/** Deletes a single record */
-deleteRecord(responseFunction: string) : bool {};
-
-}
 
 /** g_user is a global object used in client-side scripts, to get current user information */
 class g_user_proto{

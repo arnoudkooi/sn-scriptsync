@@ -1,6 +1,6 @@
 # CHANGELOG.md
 
-## 2.6.1 (2023-02-13)
+## 2.6.1 and 2.6.2 (2023-02-13)
 Fixes / changes:
   - bugfix new intellisense function
 
