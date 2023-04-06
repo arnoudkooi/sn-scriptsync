@@ -1,12 +1,16 @@
 # CHANGELOG.md
 
+## 2.7.0 (2023-04-07)
+Features:
+  - Save files when instances has a diffrent scope selected, requires SN Utils >= 6.4.0.0
+
 ## 2.6.1 and 2.6.2 (2023-02-13)
 Fixes / changes:
   - bugfix new intellisense function
+  
 
 
 ## 2.6.0 (2023-02-13)
-
 Features:
   - generate types with tablenames and properties to support intellisense for those (Issue #77)
   - added CHANGELOG.md to maintain a changelog 

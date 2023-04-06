@@ -566,8 +566,9 @@ function saveFieldAsFile(postedJson) {
 	else if (fieldType.includes("string") || fieldType == "conditions")
 		fileExtension = ".txt";
 
-	var fileName = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep + postedJson.table + nodePath.sep +
-		postedJson.field + '^' + req.name.replace(/[^a-z0-9 \.\-+]+/gi, '').replace(/\./g, '-') + '^' + postedJson.sys_id + fileExtension;
+	var basePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep + postedJson.table + nodePath.sep 
+	var fileName = basePath + postedJson.field + '^' + req.name.replace(/[^a-z0-9 \.\-+]+/gi, '').replace(/\./g, '-') + '^' + postedJson.sys_id + fileExtension;
+
 	eu.writeFile(fileName, postedJson.content, true, function (err) {
 		if (err) {
 			err.response = {};
@@ -593,6 +594,10 @@ function saveFieldAsFile(postedJson) {
 			});
 		}
 	});
+
+	var scopeMappingFile = basePath + 'zz_map.json';
+	eu.writeOrReadMapping(scopeMappingFile, postedJson.sys_id, postedJson.scope);
+
 }
 
 vscode.commands.registerCommand('openFile', (meta) => {
@@ -625,6 +630,8 @@ vscode.commands.registerCommand('openFile', (meta) => {
 
 });
 
+
+
 function updateScriptSyncStatusBarItem(message: string): void {
 	scriptSyncStatusBarItem.text = `$(megaphone) sn-scriptsync: ${message}`;
 	scriptSyncStatusBarItem.show();
@@ -643,7 +650,6 @@ async function selectionToBG() {
 
 	let editor = vscode.window.activeTextEditor;
 	let scriptObj = eu.fileNameToObject(editor.document);
-	const text = 
 
 	scriptObj.content = '// sn-scriptsync - Snippet received from: (delete file after usage.)\n// file://' + scriptObj.fileName + "\n\n" 
 						 + String.raw`${editor.document.getText(editor.selection)}`;;

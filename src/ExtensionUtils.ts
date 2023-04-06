@@ -139,6 +139,12 @@ export class ExtensionUtils {
             scriptObj.name = fileNameArr[3];
             scriptObj.fieldName = fileNameArr[2];
             scriptObj.sys_id = fileNameArr[4];
+
+            try { //try to get the scope sysid from current record from the zz_map.json file
+                var jsn = this.writeOrReadMapping(basePath + nodePath.sep + 'zz_map.json');
+                scriptObj.scope = jsn[fileNameArr[4]];
+            } catch (ex) {}
+
         }
         else if (fileNameArr[1] == 'sp_widget') {
             scriptObj.name = fileNameArr[2];
@@ -154,8 +160,11 @@ export class ExtensionUtils {
                     "6 Option schema": "option_schema",
                     "7 Demo data": fileNameArr
                 }
+                var widgetjson = this.getFileAsJson(basePath + nodePath.sep + scriptObj.name + nodePath.sep + "widget.json");
                 scriptObj.fieldName = nameToField[fileNameArr[3]];
-                scriptObj.sys_id = this.getFileAsJson(basePath + nodePath.sep + scriptObj.name + nodePath.sep + "widget.json")['sys_id'];
+                scriptObj.sys_id = widgetjson['sys_id'];
+                scriptObj.scope = widgetjson.widget.sys_scope.value;
+
             }
             else {
                 scriptObj.tableName = fileNameArr[3];
@@ -167,6 +176,21 @@ export class ExtensionUtils {
         scriptObj.content = listener.getText();
         return scriptObj;
 
+    }
+
+    writeOrReadMapping(path:string, sysid:string = null, scope:string = null){
+        
+        let data = '{}';
+        try {
+            data = fs.readFileSync(path);
+        }catch (x) {}
+        let jsn = JSON.parse(data || '{}');
+
+        if (sysid && scope){
+            jsn[sysid] = scope;        
+            fs.writeFileSync(path, JSON.stringify(jsn));
+        }
+        return jsn;
     }
 
 }
