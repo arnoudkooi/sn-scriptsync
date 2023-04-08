@@ -7,7 +7,6 @@ import { open } from 'fs';
 let idx = 0;
 
 let fs = require('fs');
-let mkdirp = require('mkdirp');
 let getDirName = require('path').dirname;
 const nodePath = require('path');
 let eu = new ExtensionUtils();

@@ -6,7 +6,6 @@ import { open } from 'fs';
 let idx = 0;
 
 let fs = require('fs');
-let mkdirp = require('mkdirp');
 let getDirName = require('path').dirname;
 const nodePath = require('path');
 let instanceSettings = {};
@@ -16,7 +15,7 @@ let instanceSettings = {};
 export class ExtensionUtils {
 
     copyFile(sourcePath: string, path: string, cb: Function) {
-        mkdirp(getDirName(path), function (err) {
+        fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             fs.copyFile(sourcePath, path, (error) => {
                 return cb(error);
@@ -30,7 +29,7 @@ export class ExtensionUtils {
         if (fs.existsSync(path)){
             return cb("existst")
         }
-        mkdirp(getDirName(path), function (err) {
+        fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             fs.copyFile(sourcePath, path, (error) => {
                 return cb(error);
@@ -42,7 +41,7 @@ export class ExtensionUtils {
 
     writeFile(path: string, contents: string, openFile, cb: Function) {
 
-        mkdirp(getDirName(path), function (err) {
+        fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             fs.writeFile(path, contents, (error) => { /* handle error */ });
             vscode.workspace.openTextDocument(path).then(doc => {
@@ -59,7 +58,7 @@ export class ExtensionUtils {
 
     writeFileIfNotExists(path, contents, openFile, cb) {
 
-        mkdirp(getDirName(path), function (err) {
+        fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             fs.writeFile(path, contents, { "flag": "wx" }, (error) => { /* handle error */ });
             vscode.workspace.openTextDocument(path).then(doc => {
@@ -77,7 +76,7 @@ export class ExtensionUtils {
 
     writeInstanceSettings(instance) {
         var path = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep + "settings.json";
-        mkdirp(getDirName(path), function (err) {
+        fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) console.log(err);
             fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
         });

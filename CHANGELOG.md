@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## 2.7.1 (2023-04-)
+Fixes / changes:
+  - Upgrade Node dependencies
+  - Remove mkdirp package use in favor of fs.mdir recursive option
+
 ## 2.7.0 (2023-04-07)
 Features:
   - Save files when instances has a diffrent scope selected, requires SN Utils >= 6.4.0.0
@@ -8,8 +13,6 @@ Features:
 Fixes / changes:
   - bugfix new intellisense function
   
-
-
 ## 2.6.0 (2023-02-13)
 Features:
   - generate types with tablenames and properties to support intellisense for those (Issue #77)
