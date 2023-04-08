@@ -13,7 +13,7 @@ const nodePath = require('path');
 
 let wss;
 let serverRunning = false;
-let openFiles = {};
+//let openFiles = {};
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
 let eu = new ExtensionUtils();
@@ -114,9 +114,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 
-	vscode.workspace.onDidCloseTextDocument(listener => {
-		delete openFiles[listener.fileName];
-	});
+	// vscode.workspace.onDidCloseTextDocument(listener => {
+	// 	delete openFiles[listener.fileName];
+	// });
 
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
@@ -273,11 +273,12 @@ function startServers() {
 			}
 			else if (messageJson.hasOwnProperty('actionGoal')) {
 				if (messageJson.actionGoal == 'updateCheck') {
+					// todo track open files for auto refresh when changed
 
-					openFiles[messageJson.fileName].sys_updated_on = messageJson.result.sys_updated_on;
-					openFiles[messageJson.fileName].sys_updated_by = messageJson.result.sys_updated_by;
-					openFiles[messageJson.fileName].scope = messageJson.result['sys_scope.scope'];
-					openFiles[messageJson.fileName].content = messageJson.result[messageJson.fieldName];
+					// openFiles[messageJson.fileName].sys_updated_on = messageJson.result.sys_updated_on;
+					// openFiles[messageJson.fileName].sys_updated_by = messageJson.result.sys_updated_by;
+					// openFiles[messageJson.fileName].scope = messageJson.result['sys_scope.scope'];
+					// openFiles[messageJson.fileName].content = messageJson.result[messageJson.fieldName];
 				}
 				if (messageJson.actionGoal == 'getCurrent') {
 					eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
