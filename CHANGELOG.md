@@ -1,10 +1,11 @@
 # CHANGELOG.md
 
-## 2.7.2 (2023-04-)
+## 2.7.2 (2023-04-08)
 Fixes / changes:
   - Upgrade Node dependencies
   - Remove mkdirp package use in favor of fs.mdir recursive option
   - Remove /dist directory
+  - Activated CodeQL repository scanning and applied fixes
 
 ## 2.7.0 (2023-04-07)
 Features:
