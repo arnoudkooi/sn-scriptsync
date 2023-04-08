@@ -1,9 +1,10 @@
 # CHANGELOG.md
 
-## 2.7.1 (2023-04-)
+## 2.7.2 (2023-04-)
 Fixes / changes:
   - Upgrade Node dependencies
   - Remove mkdirp package use in favor of fs.mdir recursive option
+  - Remove /dist directory
 
 ## 2.7.0 (2023-04-07)
 Features:
