@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 2.7.3 (2023-06-15)
+Fixes / changes:
+  - Explicit bind websocket to 127.0,0.1 (SN Utils Issue #405)
+
 ## 2.7.2 (2023-04-08)
 Fixes / changes:
   - Upgrade Node dependencies

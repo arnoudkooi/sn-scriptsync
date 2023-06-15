@@ -225,7 +225,7 @@ function startServers() {
 	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
 
 	//Start WebSocket Server
-	wss = new WebSocket.Server({ port: 1978 });
+	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});
 	wss.on('connection', (ws: WebSocket, req) => {
 
 		if (!serverRunning) return;
