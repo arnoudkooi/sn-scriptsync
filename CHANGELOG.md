@@ -1,7 +1,8 @@
 # CHANGELOG.md
 
-## 3.0.0 (2023-07-)
+## 3.0.0 (2023-08-15)
 Features:
+  - Check https://youtu.be/cpyasfe93kQ for intro to version 3.0
   - New way of storing files in the structure instamce/scope/table/name.fieldtype.extension
   - Option to pull in all artefacts from current scope
   - Behind the scenes magic to determine all code fields in current instance as well as mapping files to map names to sys_id
