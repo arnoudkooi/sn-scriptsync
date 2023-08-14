@@ -1,5 +1,13 @@
 # CHANGELOG.md
 
+## 3.0.0 (2023-07-)
+Features:
+  - New way of storing files in the structure instamce/scope/table/name.fieldtype.extension
+  - Option to pull in all artefacts from current scope
+  - Behind the scenes magic to determine all code fields in current instance as well as mapping files to map names to sys_id
+Fixes / changes:
+  - Add /esc (Employee Center) to test_urls for widget development (Issue: #80)
+
 ## 2.7.3 (2023-06-15)
 Fixes / changes:
   - Explicit bind websocket to 127.0,0.1 (SN Utils Issue #405)

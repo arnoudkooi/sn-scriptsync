@@ -3,6 +3,8 @@ import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAli
 import * as path from "path";
 import * as vscode from "vscode";
 import { open } from 'fs';
+import { Constants } from "./constants";
+
 let idx = 0;
 
 let fs = require('fs');
@@ -39,7 +41,7 @@ export class ExtensionUtils {
     }
 
 
-    writeFile(path: string, contents: string, openFile, cb: Function) {
+    writeFile(path: string, contents: string, openFile, cb: Function, myThis = this) {
 
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
@@ -47,13 +49,16 @@ export class ExtensionUtils {
             vscode.workspace.openTextDocument(path).then(doc => {
                 if (openFile){
                     vscode.window.showTextDocument(doc, { "preview": false });
-                    vscode.window.showInformationMessage("Data loaded from Instance and written to file")
+                    //vscode.window.showInformationMessage("Data loaded from Instance and written to file")
+                    myThis.showMessage("Data loaded from Instance and written to file");
                     
                 }
             });
             return cb();
         });
+        
     }
+
 
 
     writeFileIfNotExists(path, contents, openFile, cb) {
@@ -94,7 +99,13 @@ export class ExtensionUtils {
     }
 
     getFileAsJson(path: string) {
-        return JSON.parse(fs.readFileSync(path)) || {};
+        try {
+            return JSON.parse(fs.readFileSync(path)) || {};
+        }
+        catch(ex){
+            console.log(ex);
+            return {};
+        }
     }
 
     getFileAsArray(path: string) {
@@ -106,13 +117,28 @@ export class ExtensionUtils {
         }
     }
 
+    showMessage(msg: string, duration: number = 3000) {
+        vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: 'sn-scriptsync',
+                cancellable: false,
+            },
+            async (progress, token) => {
+                for (let i = 0; i < 100; i++) {
+                    await new Promise(resolve => setTimeout(resolve, duration/100));
+                    progress.report({ increment: i , message: msg })
+                }
+            })
+    }
 
     //
     fileNameToObject(listener : TextDocument) {
 
         var fileNameUse = listener.fileName.replace(workspace.rootPath, "");
         var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
-        var basePath = workspace.rootPath + nodePath.sep + fileNameArr.slice(0, 2).join(nodePath.sep);
+        var basePath = workspace.rootPath + nodePath.sep + fileNameArr[0]+ nodePath.sep;
+        let fullPath = basePath + fileNameArr[1]+ nodePath.sep + fileNameArr[2]+ nodePath.sep
 
         if (fileNameArr[5] === "ts") {
             return true;
@@ -130,6 +156,36 @@ export class ExtensionUtils {
             vscode.window.showWarningMessage("This command can only be executed from a synced file.")
             return true;
         }
+
+        if (fileNameArr.length == 6){ //new 2023 way: instance/scope/table/name.fieldname.extension
+
+            let scopes = {"global" : "global"};
+            if (fileNameArr[1] != "global") scopes = this.getFileAsJson(basePath + 'scopes.json');
+            let objNameToSysId = this.writeOrReadNameToSysIdMapping(fullPath + '_map.json');
+
+            var scriptObj = <any>{};
+            scriptObj.instance = this.getInstanceSettings(fileNameArr[0]);
+            scriptObj.tableName = fileNameArr[2];
+            scriptObj.name = fileNameArr[3];
+            scriptObj.fieldName = fileNameArr[4];
+            scriptObj.sys_id = objNameToSysId[fileNameArr[3]] || '';
+            scriptObj.scopeName = fileNameArr[1];
+            if (scopes.hasOwnProperty(fileNameArr[1])) 
+                scriptObj.scope = scopes[fileNameArr[1]];
+
+            scriptObj.fileName = listener.fileName;
+            scriptObj.content = listener.getText();
+
+            if (fileNameArr[2] == 'sp_widget')
+                scriptObj.testUrls = this.getFileAsArray(path.dirname(scriptObj.fileName) + nodePath.sep + "_test_urls.txt");
+
+
+            return scriptObj;
+
+        }
+
+
+
         if ((fileNameArr[4].length != 32 && fileNameArr[1] != 'sp_widget') && fileNameArr[1] != 'background') return true; //must be the sys_id
         var scriptObj = <any>{};
         scriptObj.instance = this.getInstanceSettings(fileNameArr[0]);
@@ -138,11 +194,6 @@ export class ExtensionUtils {
             scriptObj.name = fileNameArr[3];
             scriptObj.fieldName = fileNameArr[2];
             scriptObj.sys_id = fileNameArr[4];
-
-            try { //try to get the scope sysid from current record from the zz_map.json file
-                var jsn = this.writeOrReadMapping(basePath + nodePath.sep + 'zz_map.json');
-                scriptObj.scope = jsn[fileNameArr[4]];
-            } catch (ex) {}
 
         }
         else if (fileNameArr[1] == 'sp_widget') {
@@ -177,7 +228,7 @@ export class ExtensionUtils {
 
     }
 
-    writeOrReadMapping(path:string, sysid:string = null, scope:string = null){
+    writeOrReadNameToSysIdMapping(path:string, mappingObject:object = null){
         
         let data = '{}';
         try {
@@ -185,11 +236,17 @@ export class ExtensionUtils {
         }catch (x) {}
         let jsn = JSON.parse(data || '{}');
 
-        if (sysid && scope){
-            jsn[sysid] = scope;        
-            fs.writeFileSync(path, JSON.stringify(jsn));
+        if (mappingObject){
+            Object.keys(mappingObject).forEach(objKey =>{
+                jsn[objKey] = mappingObject[objKey];
+            })       
+            this.writeFile(path, JSON.stringify(jsn),false,function(){});
         }
         return jsn;
+    }
+
+    fileExsists(path:string){
+        return fs.existsSync(path)
     }
 
 }

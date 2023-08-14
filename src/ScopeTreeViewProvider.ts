@@ -3,7 +3,7 @@ import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAli
 import { ExtensionUtils } from "./ExtensionUtils";
 import * as path from "path";
 import * as vscode from "vscode";
-import { open } from 'fs';
+import { Constants } from './constants';
 let idx = 0;
 
 let fs = require('fs');
@@ -11,42 +11,36 @@ let getDirName = require('path').dirname;
 const nodePath = require('path');
 let eu = new ExtensionUtils();
 
+let cnt = 0;
 
 
 export class ScopeTreeViewProvider implements vscode.TreeDataProvider<TreeItem> {
   onDidChangeTreeData?: vscode.Event<TreeItem | null | undefined> | undefined;
 
   data: TreeItem[];
-  scriptFields: {};
-  scriptFieldMeta: {}
+  scriptFields : any;
+  instance : any;
+  scope : any;
+  scopeTree : any;
 
-  constructor(dta: any, scriptFields: any) {
+  constructor(tree: any, scriptFields: any, instance : any) {
+
+    let scopeTree = tree.scopeTree;
 
     let items: TreeItem[] = new Array<TreeItem>();
-    let artf: object = dta.result.artifacts;
-    for (let o in artf) {
-      if (["Forms & UI", "Server Development", "Client Development", "Inbound Integrations", "Outbound Integrations"].indexOf(artf[o]['id']) > -1) {
-        var meta = {
-          "instance" : dta.instance
+    Object.keys(scopeTree || {}).forEach(group => {
+        let tablesData = scopeTree[group];
+        let groupName = scriptFields.tableGroups[group] || "Other";
+        let meta = {
+          "group" : group
         };
-        items.push(new TreeItem(artf[o].name, artf[o]['helpText'], meta ,null, artf[o].types));
-      }
-    }
+        items.push(new TreeItem(groupName, "", meta ,null, tablesData));
+    })
     this.data = items;
     this.scriptFields = scriptFields;
-
-    this.scriptFieldMeta = {
-      "css": { "order": 10, "extension": "scss" },
-      "email_script": { "order": 5, "extension": "js" },
-      "html": { "order": 6, "extension": "html" },
-      "html_script": { "order": 7, "extension": "html" },
-      "html_template": { "order": 8, "extension": "html" },
-      "script": { "order": 1, "extension": "js" },
-      "script_plain": { "order": 2, "extension": "js" },
-      "script_server": { "order": 3, "extension": "js" },
-      "translated_html": { "order": 4, "extension": "html" },
-      "xml": { "order": 9, "extension": "xml" }
-    }
+    this.instance = instance;
+    this.scope = tree.scopeMeta
+    this.scopeTree = tree.scopeTree;
 
   }
 
@@ -55,50 +49,117 @@ export class ScopeTreeViewProvider implements vscode.TreeDataProvider<TreeItem> 
   }
 
   getChildren(element?: TreeItem | undefined): vscode.ProviderResult<TreeItem[]> {
+    let meta = JSON.parse(JSON.stringify(element?.meta || {}));
+    // if (idx ==160 || meta?.sysIdParent == '0cb994324fc9bf009881c5c18110c741'){
+    //   let x =1;
+    // }
     let items: TreeItem[] = new Array<TreeItem>();
     if (element === undefined) {
       return this.data;
     }
-    else if (element.children.length > 0) {
-      
-      let childs: Array<Object> = element.children;
-      for (let o in childs) {
-        let meta = JSON.parse(JSON.stringify(element.meta));
-        if (!childs[o].hasOwnProperty('metadata')) childs[o]['metadata'] = [];
-
-        let name: string = childs[o]['name'] + '';
-        if (childs[o].hasOwnProperty('sysId')) {
-          if (!name.includes('var__m')) {
-            name = name.replace(/[^a-z0-9_\-+]+/gi, ' ');
-            let table = childs[o]['id'].split(".")[0];
-            let fields = this.scriptFields[table];
-            meta['type'] = 'record';
-            meta['name'] = name;
-            meta['sys_id'] = childs[o]['sysId'];
-            items.push(new TreeItem(name, childs[o]['sysId'], meta, null, fields));
-          }
+    else if (Object.keys(element.children || {}).length) {
+      let meta = JSON.parse(JSON.stringify(element.meta));
+      let children: any = element.children;
+      Object.keys(children[children?.type] || {}).forEach(child => {
+        meta = JSON.parse(JSON.stringify(meta));
+        if (children?.type == 'tables' ) {
+            let tableName = this.scriptFields.tableFields[child].label
+            let records = children.tables[child];
+            meta.tableName = child;
+            children.type = 'tables';
+            items.push(new TreeItem(tableName, child, meta, null, records));
         }
-        else if (childs[o].hasOwnProperty('artifacts')) {
-          if (childs[o].hasOwnProperty('recordType') && childs[o]['artifacts'].length){
-            if (this.scriptFields.hasOwnProperty( childs[o]['recordType'])){
-              meta['type'] = 'table';
-              meta['tableName'] = childs[o]['recordType'];
-              meta['tableLabel'] = childs[o]['name'];
-              items.push(new TreeItem(name, childs[o]['helpText'], meta, null, childs[o]['artifacts']));
+        else if (children?.type == 'records') {
+          if (meta.tableName == 'sp_container'){
+            let x =1;
+          }
+          let recordName = children.records[child].name || 'SysId: ' + child; 
+          let fields: any =  {
+            type: 'fields',
+            fields : {
+              codeFields: children.records[child].codeFields,
+              referenceFields: children.records[child].referenceFields,
+              codeChildReferences: this.scriptFields.tableFields[meta.tableName]?.codeChildReferences
             }
           }
+          meta.sysId = child;
+          meta.sysIdParent = child;
+          meta.name = children.records[child].name || child;
+          items.push(new TreeItem(recordName, children.records[child].updated , meta, null, fields));
         }
-        else if (childs[o].hasOwnProperty('fieldName')) {
-          var extension = this.scriptFieldMeta[childs[o]['type']].extension;
-            meta['type'] = 'field';
-            meta['fieldName'] = childs[o]['fieldName'];
-            meta['extension'] = extension;
-          items.push(new TreeItem(childs[o]['label'], JSON.stringify(meta), meta, extension));
+        else if (children?.type == 'fields') {
+
+
+          if (child == 'codeFields'){
+
+            Object.keys(children.fields?.codeFields || {}).forEach(child => {
+              let fieldLabel = children?.fields?.codeFields[child]?.label
+              meta.fieldName = child + '';
+              meta.fieldLabel = fieldLabel;
+              meta.fieldType = children.fields?.codeFields[child]?.type;
+              meta.extension = Constants.FIELDTYPES[meta.fieldType].extension;
+              meta.instance = this.instance;
+              meta.scope = this.scope;
+              items.push(new TreeItem(child + meta.extension, fieldLabel, meta, meta.extension , []));
+            });
+          }
+          else if (child == 'referenceFields' && children.fields?.referenceFields){
+
+            let referenceFields = children.fields.referenceFields;
+            Object.keys(referenceFields || {}).forEach(tbl => {
+                let group = this.scriptFields.tableFields[meta.tableName].group || 'other';
+                let subrecords = this.scopeTree[group]?.tables[tbl]?.records;
+                if (subrecords){
+
+                    //items.push(new TreeItem("No code fields", "None", meta, null, []));
+                  
+                }
+
+            });
+            
+          }
+          else if (child == 'codeChildReferences' && children.fields?.codeChildReferences){
+
+            let codeChildReferences = children.fields.codeChildReferences;
+            Object.keys(codeChildReferences || {}).forEach(tbl => {
+
+                let group = this.scriptFields.tableFields[meta.tableName].group || 'other';
+                let subrecords = this.scopeTree[group]?.tables[tbl]?.records;
+                let matchedSubRecords = {};
+                if (subrecords){
+                  Object.keys(codeChildReferences[tbl] || {}).forEach(field => {
+
+                    Object.keys(subrecords || {}).forEach(subrecordId =>{
+                      if (subrecords[subrecordId]?.referenceFields && subrecords[subrecordId]?.referenceFields[field] == meta.sysIdParent)
+                          matchedSubRecords[subrecordId] = subrecords[subrecordId];
+                    })
+                    
+                  })
+
+                  if (Object.keys(matchedSubRecords || {}).length){
+
+                    if (meta.tableName == 'sp_container'){
+                      let x =1;
+                    }
+          
+                    let tableObj = this.scriptFields.tableFields[tbl];
+                    let records : any = {
+                      type : 'records',
+                      records : matchedSubRecords
+                    }
+                    meta.tableName = tbl;
+                    items.push(new TreeItem(tableObj.label, "Related List", meta, null, records));
+                  }
+                }
+
+            });
+            
+          }
         }
         else {
           //var x = 2; //for debugging
         }
-      }
+      });
       return items;
     }
     return null;
@@ -112,18 +173,26 @@ class TreeItem extends vscode.TreeItem {
   extension : string;
   meta : {};
 
-  constructor(label: string, tooltip: string, meta:{}, extension, children?: object[]) {
+  constructor(label: string, tooltip: string, meta:any, extension, children?: any) {
+    meta = JSON.parse(JSON.stringify(meta));
+    if (meta?.tableName == 'sp_widget'){
+      let x = 1;
+    }
+
     super(
       label,
-      children === undefined || children.length == 0 ?
-        vscode.TreeItemCollapsibleState.None :
-        vscode.TreeItemCollapsibleState.Expanded);
+      children === undefined || children.length == 0 ? 
+      vscode.TreeItemCollapsibleState.None : 
+      vscode.TreeItemCollapsibleState.Expanded);
     this.children = children;
     this.tooltip = tooltip;
     this.extension = extension;
     this.meta = meta;
     if (extension) {
-      this.iconPath = path.join(__filename, '..', '..', 'resources', 'images', extension + '.svg');
+      this.iconPath = {
+        light: path.join(__filename, '..', '..', 'resources', 'images', extension.replace('.','') + '.svg'),
+        dark: path.join(__filename, '..', '..', 'resources', 'images', extension.replace('.','') + '.svg')
+      };
       this.command = {command: 'openFile', title: 'Open file',  arguments: [meta]}
     }
   }

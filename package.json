@@ -1,8 +1,8 @@
 {
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
-	"description": "ServiceNow ScriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "2.7.3",
+	"description": "SN Utils sn-riptSync for VS Code. (Personal work of Arnoud Kooi)",
+	"version": "3.0.0",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -55,6 +55,14 @@
 				"title": "sn-scriptsync: Retrieve current version from Instance"
 			},
 			{
+				"command": "extension.requestScopeArtifacts",
+				"title": "sn-scriptsync: Load/Refresh artifacts from scope"
+			},
+			{
+				"command": "extension.requestScopeArtifactsAll",
+				"title": "sn-scriptsync: Load/Refresh artifacts from scope (include empty)"
+			},
+			{
 				"command": "extension.requestInstanceMetaData",
 				"title": "sn-scriptsync: Load instance tablenames and properties for IntelliSense"
 			},
@@ -68,6 +76,16 @@
 				"command": "extension.requestInstanceMetaData",
 				"key": "ctrl+alt+j",
 				"mac": "ctrl+cmd+j"
+			},
+			{
+				"command": "extension.requestScopeArtifacts",
+				"key": "ctrl+alt+a",
+				"mac": "ctrl+cmd+a"
+			},
+			{
+				"command": "extension.requestScopeArtifactsAll",
+				"key": "ctrl+alt+e",
+				"mac": "ctrl+cmd+e"
 			},
 			{
 				"command": "extension.openInInstance",
@@ -103,6 +121,16 @@
 					"command": "extension.refreshFromInstance",
 					"group": "sn-scriptsync",
 					"title": "Retrieve current version from Instance"
+				},
+				{
+					"command": "extension.requestScopeArtifacts",
+					"group": "sn-scriptsync",
+					"title": "Load/Refresh artifacts from scope"
+				},
+				{
+					"command": "extension.requestScopeArtifactsAll",
+					"group": "sn-scriptsync",
+					"title": "Load/Refresh artifacts from scope (include empty)"
 				},
 				{
 					"command": "extension.requestInstanceMetaData",
@@ -147,9 +175,19 @@
 				{
 					"id": "scopeTreeView",
 					"name": "Scoped App Files"
+				},
+				{
+					"id": "infoTreeView",
+					"name": "Info"
 				}
 			]
 		},
+		"viewsWelcome": [
+			{
+			  "view": "scopeTreeView",
+			  "contents": "Please load scope via right click context menu."
+			}
+		],
 		"snippets": [
 			{
 				"language": "xml",

@@ -1,9 +1,28 @@
 # VS Code ScriptSync for ServiceNow
 Easy Integration from ServiceNow to VS Code to be able to script in a full fledged editor, without any configuration.
 
+# Important 3.0 update
+In August 2023 the 3.0 update is released.
+This update requieres a resync of your file.
+It is recommended to delete all artefacts save via the 2.x version
+
+Reason is that this vesion changes the way the files are stored.
+Files are now stored in the stucture:
+
+`instancename\scopename\tablename\recordname.field.extension`
+
+Tables like sp_widget are stored as:
+
+`instancename\scopename\tablename\recordname\field.extension`
+
+In the scriptsync view, available in the left pane you can now pull in all artefacts fron the current scope!
+This also can show your artefacts in a virtuak way, with "Related List"
+Please let me know if you exoerience issues, preferable via a GitHub Issue.
+
+
 ![Use Extension](img/sn-scriptsync.gif)
 
-## [YouTube video demonstrating usage (2022 update)](https://www.youtube.com/watch?v=ZDDminMjGTA)
+## [YouTube quick 3.0 demo (August 2023)](https://www.youtube.com/watch?v=cpyasfe93kQ)
 
 # SN Utils
 Requires the latest version of SN Utils, links via: 
@@ -29,7 +48,7 @@ From the browser ScriptSync must be enabled once, by opening the popup and in th
 ![Use Extension](img/enablesnu.png)
 
 # Usage
-While using, be sure to keep the helper tab open. This will show logging and acts as a communication channel between ServiceNow and VS Code. This can be opened from the context menu.
+While using, be sure to keep the helper tab open. This will show logging and acts as a communication channel between ServiceNow and VS Code. This will be automaticly opened when clicking a scriptsync button in your instance.
 ![Helper tab](img/helpertab.png)
 
 ## Forms
@@ -56,7 +75,7 @@ Widget SCSS can be live edited, each change can immediate be previewed in the br
 ![Use Extension](img/sn-scriptsync-css.gif)
 
 ## Studio integration
-In studio you can click Link VS Code via sn-scriptsync (requires version 3.3 or higher from SN Utils).
+In studio you can click Link VS Code via sn-scriptsync.
 It will show you the tree of artefacts in your app and all the scriptable fields.
 When clicking an field, it will be pulled from the server. If the file is already open, it will switch to that window.
 This is an alterbative to clicking each individual button in the platform. SP widgets are not jet supported at this point.
@@ -79,7 +98,7 @@ I'm using `<script>` tags in a widget HTML template, and they do not sync to my 
 
 **Solution** (See [#24](https://github.com/arnoudkooi/sn-scriptsync/issues/24)): In your ServiceNow instance, set the following system property:
 * **`glide.rest.sanitize_request_input`** = **`false`** 
-
+(This may also apply to UI Macro's and other places where tags get escaped)
 
 I get an error when using in Safari: "User Not Authenticated"
 
@@ -94,8 +113,8 @@ sn-scriptsync does not work in Brave browser
 Please report an issue on GitHub if you experience problems, or have a feature request.
 
 ## Warranty
-This tool cmes as is with no warranty.
-Not allowed to copy or republish this extension
+This tool comes as is with no warranty.
+Not allowed to copy or republish this extension or it's code.
 
 
 
