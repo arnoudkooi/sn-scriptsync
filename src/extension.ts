@@ -371,7 +371,7 @@ function startServers() {
 
 		//send immediatly a feedback to the incoming connection    
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
-		ws.send(JSON.stringify({ action : 'bannerMessage', message : 'You are using the 3.0 version of sn-scriptsync!', class: 'alert alert-danger' }), function () { });
+		ws.send(JSON.stringify({ action : 'bannerMessage', message : 'You are using the 3.0 version of sn-scriptsync! Files are now stored in a new structure. <a href="https://youtu.be/cpyasfe93kQ" target="_blank">[Intro Video]</a>', class: 'alert alert-primary' }), function () { });
 
 	});
 	updateScriptSyncStatusBarItem('Running');
@@ -505,10 +505,10 @@ function writeInstanceMetaDataScope(messageJson){
 	let uniqueScopeTables = [...new Set(messageJson.results.map(item => item.sys_class_name + ''))];
 
 	//for now only load tables with direct code fields in the tree, this function removes all table that dont have the .codeFields key
-	// metaDataRelations.tableFields = Object.keys(metaDataRelations.tableFields).filter(key => metaDataRelations.tableFields[key]?.codeFields)
-	// .reduce((obj, key) => { obj[key] = metaDataRelations.tableFields[key];
-	//   return obj;
-	// }, {});
+	metaDataRelations.tableFields = Object.keys(metaDataRelations.tableFields).filter(key => metaDataRelations.tableFields[key]?.codeFields)
+	.reduce((obj, key) => { obj[key] = metaDataRelations.tableFields[key];
+	  return obj;
+	}, {});
 
 
 	let allCodeTables = Object.keys(metaDataRelations.tableFields);
@@ -810,6 +810,12 @@ function saveWidget(postedJson, retry = 0) {
 		if (++retry <= 2) setTimeout(() =>{ saveWidget(postedJson, retry)}, 2500);
 		return;
 	}
+
+	let scopeMappingFile = basePath + scope + nodePath.sep + postedJson.tableName + nodePath.sep + '_map.json';
+	let nameToSysId = { };
+	nameToSysId[cleanName] = postedJson.sys_id + '';
+	eu.writeOrReadNameToSysIdMapping(scopeMappingFile, nameToSysId);
+
 
 	let filePath = basePath + scope + nodePath.sep + postedJson.tableName + nodePath.sep + cleanName + nodePath.sep;
 
