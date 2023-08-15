@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "SN Utils sn-riptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "3.0.1",
+	"version": "3.0.2",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {

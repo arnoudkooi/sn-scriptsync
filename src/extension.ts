@@ -505,10 +505,10 @@ function writeInstanceMetaDataScope(messageJson){
 	let uniqueScopeTables = [...new Set(messageJson.results.map(item => item.sys_class_name + ''))];
 
 	//for now only load tables with direct code fields in the tree, this function removes all table that dont have the .codeFields key
-	metaDataRelations.tableFields = Object.keys(metaDataRelations.tableFields).filter(key => metaDataRelations.tableFields[key]?.codeFields)
-	.reduce((obj, key) => { obj[key] = metaDataRelations.tableFields[key];
-	  return obj;
-	}, {});
+	// metaDataRelations.tableFields = Object.keys(metaDataRelations.tableFields).filter(key => metaDataRelations.tableFields[key]?.codeFields)
+	// .reduce((obj, key) => { obj[key] = metaDataRelations.tableFields[key];
+	//   return obj;
+	// }, {});
 
 
 	let allCodeTables = Object.keys(metaDataRelations.tableFields);
@@ -614,13 +614,16 @@ function writeTableFields(messageJson) {
 	if (!metaDataRelations)
 		metaDataRelations = eu.getFileAsJson(path.join(__filename, '..', '..', 'resources', 'metaDataRelations.json'));
 	let scopeMappingFile = messageJson.filePath + '_map.json';
-	let nameToSysId = {};
+	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
 
 	messageJson.results.forEach(record =>{
 
 
 		
 		let cleanName = record.sys_name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || record.sys_id + '';
+		if (nameToSysId[cleanName] && nameToSysId[cleanName] != record.sys_id){
+			cleanName = cleanName + ("-" + record.sys_id.slice(0,2) + record.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
+		}
 		let dispVal = record.sys_name.toLowerCase().replaceAll(" ","_"); //must be checked..
 		
 		//the configured tables will get a distinct folder containing the files.
@@ -791,11 +794,7 @@ function writeInstanceScope(messageJson) {
 
 function saveWidget(postedJson, retry = 0) {
 	//lastsend = 0;
-	var cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
-
 	let basePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep;
-
-
 	let scope:string;
 	if (postedJson.widget.sys_scope.value == 'global') 
 		scope = 'global';
@@ -811,11 +810,14 @@ function saveWidget(postedJson, retry = 0) {
 		return;
 	}
 
+	var cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
 	let scopeMappingFile = basePath + scope + nodePath.sep + postedJson.tableName + nodePath.sep + '_map.json';
-	let nameToSysId = { };
+	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
+	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
+		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
+	}
 	nameToSysId[cleanName] = postedJson.sys_id + '';
 	eu.writeOrReadNameToSysIdMapping(scopeMappingFile, nameToSysId);
-
 
 	let filePath = basePath + scope + nodePath.sep + postedJson.tableName + nodePath.sep + cleanName + nodePath.sep;
 
@@ -1013,10 +1015,44 @@ function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
 
 function saveFieldAsFile(postedJson, retry = 0) {
 
+	
+	let basePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep;
+	
+	let scope:string;
+	if (postedJson.scope == 'global') 
+		scope = 'global';
+	else {
+		let scopes = eu.getFileAsJson(basePath + "scopes.json");
+		scopes = Object.entries(scopes).reduce((acc, [key, value]) => (acc[value + ''] = key, acc), {}); //invert object to have sys_id as key;
+		scope = scopes[postedJson.scope];
+	}
+
+	if (!scope) { //if scope could not be determined, request the scopes via websocket, abort current try and try again in a few seconds.
+		requestInstanceScope(postedJson.instance, postedJson.scope);
+		if (++retry <= 2) setTimeout(() =>{ saveFieldAsFile(postedJson, retry)}, 2500);
+		return;
+	}
+
+	//the configured tables will get a distinct folder containing the files.
+	let isFolderRecordTable = Constants.FOLDERRECORDTABLES.includes(postedJson.table);
+	let separtorCharacter = (isFolderRecordTable) ? nodePath.sep : ".";
+	let fullPath = basePath + scope + nodePath.sep + postedJson.table + nodePath.sep;
+
+	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
+	let scopeMappingFile = fullPath + '_map.json';
+	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
+	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
+		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
+	}
+
+
+	nameToSysId[cleanName] = postedJson.sys_id;
+	eu.writeOrReadNameToSysIdMapping(scopeMappingFile, nameToSysId);
+
 	let req = <any>{};
 	req.action = 'requestRecord';
 	req.actionGoal = 'saveCheck';
-	req.name = postedJson.name.replace(/[^a-z0-9 \._\-+]+/gi, '').replace(/\./g, '-');
+	req.name = cleanName;
 	req.instance = postedJson.instance;
 	req.tableName = postedJson.table;
 	req.fieldName = postedJson.field;
@@ -1027,8 +1063,6 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	var fieldType: string = postedJson.fieldType;
 
 	fileExtension = Constants.FIELDTYPES[fieldType]?.extension;
-
-
 
 	if (fieldType.includes("xml"))
 		fileExtension = ".xml";
@@ -1048,30 +1082,6 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	else if (fieldType.includes("string") || fieldType == "conditions")
 		fileExtension = ".txt";
 
-
-	let basePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep;
-	
-	let scope:string;
-	if (postedJson.scope == 'global') 
-		scope = 'global';
-	else {
-		let scopes = eu.getFileAsJson(basePath + "scopes.json");
-		scopes = Object.entries(scopes).reduce((acc, [key, value]) => (acc[value + ''] = key, acc), {}); //invert object to have sys_id as key;
-		scope = scopes[postedJson.scope];
-	}
-
-	if (!scope) { //if scope could not be determined, request the scopes via websocket, abort current try and try again in a few seconds.
-		requestInstanceScope(postedJson.instance, postedJson.scope);
-		if (++retry <= 2) setTimeout(() =>{ saveFieldAsFile(postedJson, retry)}, 2500);
-		return;
-	}
-	
-	//the configured tables will get a distinct folder containing the files.
-	let isFolderRecordTable = Constants.FOLDERRECORDTABLES.includes(postedJson.table);
-	let separtorCharacter = (isFolderRecordTable) ? nodePath.sep : ".";
-	let cleanName = req.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || req.sys_id + '';
-
-	let fullPath = basePath + scope + nodePath.sep + postedJson.table + nodePath.sep;
 	let fileName = fullPath + cleanName + separtorCharacter + postedJson.field + fileExtension;
 
 	eu.writeFile(fileName, postedJson.content, true, function (err) {
@@ -1100,9 +1110,7 @@ function saveFieldAsFile(postedJson, retry = 0) {
 		}
 	});
 
-	var scopeMappingFile = fullPath + '_map.json';
-	let nameToSysId = {};
-	nameToSysId[req.name] = postedJson.sys_id; 
+
 	eu.writeOrReadNameToSysIdMapping(scopeMappingFile, nameToSysId);
 
 }
