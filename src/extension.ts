@@ -505,10 +505,10 @@ function writeInstanceMetaDataScope(messageJson){
 	let uniqueScopeTables = [...new Set(messageJson.results.map(item => item.sys_class_name + ''))];
 
 	//for now only load tables with direct code fields in the tree, this function removes all table that dont have the .codeFields key
-	// metaDataRelations.tableFields = Object.keys(metaDataRelations.tableFields).filter(key => metaDataRelations.tableFields[key]?.codeFields)
-	// .reduce((obj, key) => { obj[key] = metaDataRelations.tableFields[key];
-	//   return obj;
-	// }, {});
+	metaDataRelations.tableFields = Object.keys(metaDataRelations.tableFields).filter(key => metaDataRelations.tableFields[key]?.codeFields)
+	.reduce((obj, key) => { obj[key] = metaDataRelations.tableFields[key];
+	  return obj;
+	}, {});
 
 
 	let allCodeTables = Object.keys(metaDataRelations.tableFields);
