@@ -980,6 +980,8 @@ function requestRecords(requestJson) {
 
 function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
 
+	if (!serverRunning) return;
+
 	let scriptObj = eu.fileNameToObject(fileName);
 
 	if (scriptObj.fieldName == '_test_urls') return; //helper file, dont save to instance
