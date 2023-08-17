@@ -15,6 +15,9 @@ let instanceSettings = {};
 
 
 export class ExtensionUtils {
+    isFilesystemSafe(fileName: string) {
+        return fileName && /^[0-9a-zA-Z_\-. ]+$/.test(fileName);
+    }
 
     copyFile(sourcePath: string, path: string, cb: Function) {
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {

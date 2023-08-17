@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "SN Utils sn-riptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "3.0.4",
+	"version": "3.0.5",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -158,6 +158,11 @@
 					"type": "integer",
 					"default": "60",
 					"description": "Update check (Not in use"
+				},
+				"sn-scriptsync.promptForFileNameOnColision": {
+					"type": "boolean",
+					"default": true,
+					"description": "If true and a record with an identical name is synced, the user will be forced to enter a custom name"
 				}
 			}
 		},
