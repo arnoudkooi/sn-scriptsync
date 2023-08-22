@@ -1023,6 +1023,8 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	let scope:string;
 	if (postedJson.scope == 'global') 
 		scope = 'global';
+	else if (postedJson.scope == '')  //sync a none metadata file
+		scope = 'no_scope';
 	else {
 		let scopes = eu.getFileAsJson(basePath + "scopes.json");
 		scopes = Object.entries(scopes).reduce((acc, [key, value]) => (acc[value + ''] = key, acc), {}); //invert object to have sys_id as key;

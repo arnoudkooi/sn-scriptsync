@@ -1,11 +1,13 @@
 # CHANGELOG.md
 
+## 3.0.7 (2023-08-22)
+Fixes / changes:
+  - Fix to allow non scoped files again (will be stored in folder no_scope)
+
 ## 3.0.4 (2023-08-15)
 Features:
   - Fixe to allow duplicate filename
   - Minor fixes for the 3.x update
-
-
 
 ## 3.0.0 (2023-08-15)
 Features:
