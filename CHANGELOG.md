@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 3.0.8 (2023-08-22)
+Fixes / changes:
+  - Fix support for saving variables back to instance in the 3.x series
+
 ## 3.0.7 (2023-08-22)
 Fixes / changes:
   - Fix to allow non scoped files again (will be stored in folder no_scope)

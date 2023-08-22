@@ -995,6 +995,11 @@ function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
 		scriptObj.saveSource = (fromVsCode) ? "VS Code" : "FileWatcher";
 		if(scriptObj.tableName == 'background') return true; // do not save bg scripts to SN.
 
+		if (scriptObj.fieldName.startsWith('variable-')) {
+			scriptObj.fieldName = scriptObj.fieldName.substring(9);
+			scriptObj.action = "updateVar";
+		}
+
 		if (!wss.clients.size) {
 			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
 			success = false;
@@ -1059,7 +1064,7 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	req.name = cleanName;
 	req.instance = postedJson.instance;
 	req.tableName = postedJson.table;
-	req.fieldName = postedJson.field;
+	req.fieldName = (postedJson.field.split(".").length == 3 ) ? "variable-" + postedJson.field.split(".")[2] : postedJson.field; //check if is a variable like 'inputs.var__m_atf_input_variable_41de4a935332120028bc29cac2dc349a.script'
 	req.sys_id = postedJson.sys_id + "?sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + postedJson.field;
 	//requestRecords(req); // mmaybe implemt later to check changes with server version
 
@@ -1086,7 +1091,7 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	else if (fieldType.includes("string") || fieldType == "conditions")
 		fileExtension = ".txt";
 
-	let fileName = fullPath + cleanName + separtorCharacter + postedJson.field + fileExtension;
+	let fileName = fullPath + cleanName + separtorCharacter + req.fieldName + fileExtension;
 
 	eu.writeFile(fileName, postedJson.content, true, function (err) {
 		if (err) {
