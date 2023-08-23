@@ -16,6 +16,10 @@ let instanceSettings = {};
 
 export class ExtensionUtils {
 
+    renamePath(oldPath: string, newPath: string) : void {
+        fs.renameSync(oldPath, newPath);
+    }
+
     copyFile(sourcePath: string, path: string, cb: Function) {
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
@@ -228,25 +232,61 @@ export class ExtensionUtils {
 
     }
 
-    writeOrReadNameToSysIdMapping(path:string, mappingObject:object = null){
-        
-        let data = '{}';
-        try {
-            data = fs.readFileSync(path);
-        }catch (x) {}
-        let jsn = JSON.parse(data || '{}');
+    writeOrReadNameToSysIdMapping(path:string, mappingObject?: object, overwriteExistingMap : boolean = false) : object {
+        let mergedMappingObject = {};
 
-        if (mappingObject){
-            Object.keys(mappingObject).forEach(objKey =>{
-                jsn[objKey] = mappingObject[objKey];
-            })       
-            this.writeFile(path, JSON.stringify(jsn),false,function(){});
+        if(!overwriteExistingMap) {
+            try {
+                mergedMappingObject = JSON.parse(fs.readFileSync(path))
+            } catch(_) {}
         }
-        return jsn;
+
+        if(mappingObject) {
+            mergedMappingObject = {...mergedMappingObject, ...mappingObject};
+            this.writeFile(path, JSON.stringify(mergedMappingObject),false,function(){});
+        }
+
+        return mergedMappingObject;
     }
 
     fileExsists(path:string){
         return fs.existsSync(path)
     }
 
+    isFile(path: string) : boolean {
+        return this.fileExsists(path) && fs.lstatSync(path).isFile();
+    }
+
+    pathOfBaseDirectory(path: string) : string {
+        return nodePath.dirname(path)
+    }
+
+    fileOrDirectoryName(path: string) : string {
+        return nodePath.basename(path)
+    }
+
+    joinPaths(...pathParts) : string {
+        return nodePath.join(...pathParts);
+    }
+
+    dissasembleFilePath(path: string, isFolderRecordTable : boolean = false) : {recordName: string, fieldName: string, fileExtension: string} | undefined {
+        const fsName = this.fileOrDirectoryName(path);
+        
+        if(isFolderRecordTable) {
+            return {
+                recordName: fsName,
+                fieldName: undefined,
+                fileExtension: undefined
+            }
+        }
+
+        const match = /^(?<recordName>[^.]+)\.(?<fieldName>[^.]+)\.(?<fileExtension>[^.]+)$/.exec(fsName);
+
+        if(!match) {
+            return;
+        }
+
+        const {recordName, fieldName, fileExtension} = match.groups;
+        return {recordName, fieldName, fileExtension};
+    }
 }

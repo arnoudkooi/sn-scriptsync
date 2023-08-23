@@ -137,6 +137,76 @@ export function activate(context: vscode.ExtensionContext) {
 	// 	delete openFiles[listener.fileName];
 	// });
 
+	vscode.workspace.onDidRenameFiles(fileRenameEvent => {
+		if (!serverRunning) {
+			return;
+		}
+
+		const modifiedMapFiles = new Map<string, object>();
+
+		fileRenameEvent.files.forEach(file => {
+			const newPath = file.newUri.fsPath;
+			const oldPath = file.oldUri.fsPath;
+			const isFolderRecordTable = !eu.isFile(newPath)
+
+			const mapFilePath = eu.joinPaths(eu.pathOfBaseDirectory(newPath), "_map.json");
+
+			// Map file not present. File is not a synced file.
+			if(!eu.fileExsists(mapFilePath)) {
+				return;
+			}
+
+			const oldRecordInfo = eu.dissasembleFilePath(oldPath, isFolderRecordTable);
+			const newRecordInfo = eu.dissasembleFilePath(newPath, isFolderRecordTable);
+
+			// Old file name does not follow a known format. Probably not a synced file. Abort.
+			if(!oldRecordInfo) {
+				return;
+			}
+
+			// The new file name is invalid. Revert and abort.
+			if(!newRecordInfo) {
+				vscode.window.showInformationMessage(
+					`Invalid file name:\n
+					File name needs to be in the format "[name of your choosing].${oldRecordInfo.fieldName}.${oldRecordInfo.fileExtension}".`
+				);
+				eu.renamePath(newPath, oldPath);
+				return;
+			}
+
+			// File extension and field name cannot change. If they changed, revert and abort.
+			if(
+				oldRecordInfo.fileExtension !== newRecordInfo.fileExtension ||
+				oldRecordInfo.fieldName !== newRecordInfo.fieldName
+			) {
+				vscode.window.showInformationMessage(
+					`Invalid file name:\n
+					File name needs to be in the format "[name of your choosing].${oldRecordInfo.fieldName}.${oldRecordInfo.fileExtension}".`
+				);
+				eu.renamePath(newPath, oldPath);
+				return;
+			}
+
+			// Cache the map file, if not done already
+			if(!modifiedMapFiles.has(mapFilePath)) {
+				modifiedMapFiles.set(mapFilePath, eu.writeOrReadNameToSysIdMapping(mapFilePath));
+			}
+
+			const map = modifiedMapFiles.get(mapFilePath);
+				
+			// File is not in _map.json, so it's unknown to us.
+			if(!map.hasOwnProperty(oldRecordInfo.recordName)) {
+				return;
+			}
+
+			const sysId = map[oldRecordInfo.recordName];
+			delete map[oldRecordInfo.recordName];
+			map[newRecordInfo.recordName] = sysId;
+		});
+
+		modifiedMapFiles.forEach((map, path) => eu.writeOrReadNameToSysIdMapping(path, map, true));
+	});
+
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
 		if (!saveFieldsToServiceNow(listener, true)) {
