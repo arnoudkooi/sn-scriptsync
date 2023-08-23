@@ -621,6 +621,8 @@ function writeTableFields(messageJson) {
 
 		
 		let cleanName = record.sys_name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || record.sys_id + '';
+		// If this file was synced before, use whatever name is in the _map.json
+		cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === record.sys_id) ?? cleanName
 		if (nameToSysId[cleanName] && nameToSysId[cleanName] != record.sys_id){
 			cleanName = cleanName + ("-" + record.sys_id.slice(0,2) + record.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 		}
@@ -810,9 +812,11 @@ function saveWidget(postedJson, retry = 0) {
 		return;
 	}
 
-	var cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
 	let scopeMappingFile = basePath + scope + nodePath.sep + postedJson.tableName + nodePath.sep + '_map.json';
 	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
+	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
+	// If this file was synced before, use whatever name is in the _map.json
+	cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === postedJson.sys_id) ?? cleanName
 	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
 		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 	}
@@ -1047,9 +1051,11 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	let separtorCharacter = (isFolderRecordTable) ? nodePath.sep : ".";
 	let fullPath = basePath + scope + nodePath.sep + postedJson.table + nodePath.sep;
 
-	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
 	let scopeMappingFile = fullPath + '_map.json';
 	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
+	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
+	// If this file was synced before, use whatever name is in the _map.json
+	cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === postedJson.sys_id) ?? cleanName
 	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
 		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 	}
