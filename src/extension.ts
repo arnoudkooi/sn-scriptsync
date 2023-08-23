@@ -137,6 +137,76 @@ export function activate(context: vscode.ExtensionContext) {
 	// 	delete openFiles[listener.fileName];
 	// });
 
+	vscode.workspace.onDidRenameFiles(fileRenameEvent => {
+		if (!serverRunning) {
+			return;
+		}
+
+		const modifiedMapFiles = new Map<string, object>();
+
+		fileRenameEvent.files.forEach(file => {
+			const newPath = file.newUri.fsPath;
+			const oldPath = file.oldUri.fsPath;
+			const isFolderRecordTable = !eu.isFile(newPath)
+
+			const mapFilePath = eu.joinPaths(eu.pathOfBaseDirectory(newPath), "_map.json");
+
+			// Map file not present. File is not a synced file.
+			if(!eu.fileExsists(mapFilePath)) {
+				return;
+			}
+
+			const oldRecordInfo = eu.dissasembleFilePath(oldPath, isFolderRecordTable);
+			const newRecordInfo = eu.dissasembleFilePath(newPath, isFolderRecordTable);
+
+			// Old file name does not follow a known format. Probably not a synced file. Abort.
+			if(!oldRecordInfo) {
+				return;
+			}
+
+			// The new file name is invalid. Revert and abort.
+			if(!newRecordInfo) {
+				vscode.window.showInformationMessage(
+					`Invalid file name:\n
+					File name needs to be in the format "[name of your choosing].${oldRecordInfo.fieldName}.${oldRecordInfo.fileExtension}".`
+				);
+				eu.renamePath(newPath, oldPath);
+				return;
+			}
+
+			// File extension and field name cannot change. If they changed, revert and abort.
+			if(
+				oldRecordInfo.fileExtension !== newRecordInfo.fileExtension ||
+				oldRecordInfo.fieldName !== newRecordInfo.fieldName
+			) {
+				vscode.window.showInformationMessage(
+					`Invalid file name:\n
+					File name needs to be in the format "[name of your choosing].${oldRecordInfo.fieldName}.${oldRecordInfo.fileExtension}".`
+				);
+				eu.renamePath(newPath, oldPath);
+				return;
+			}
+
+			// Cache the map file, if not done already
+			if(!modifiedMapFiles.has(mapFilePath)) {
+				modifiedMapFiles.set(mapFilePath, eu.writeOrReadNameToSysIdMapping(mapFilePath));
+			}
+
+			const map = modifiedMapFiles.get(mapFilePath);
+				
+			// File is not in _map.json, so it's unknown to us.
+			if(!map.hasOwnProperty(oldRecordInfo.recordName)) {
+				return;
+			}
+
+			const sysId = map[oldRecordInfo.recordName];
+			delete map[oldRecordInfo.recordName];
+			map[newRecordInfo.recordName] = sysId;
+		});
+
+		modifiedMapFiles.forEach((map, path) => eu.writeOrReadNameToSysIdMapping(path, map, true));
+	});
+
 
 	vscode.workspace.onDidSaveTextDocument(listener => {
 		if (!saveFieldsToServiceNow(listener, true)) {
@@ -621,6 +691,8 @@ function writeTableFields(messageJson) {
 
 		
 		let cleanName = record.sys_name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || record.sys_id + '';
+		// If this file was synced before, use whatever name is in the _map.json
+		cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === record.sys_id) ?? cleanName
 		if (nameToSysId[cleanName] && nameToSysId[cleanName] != record.sys_id){
 			cleanName = cleanName + ("-" + record.sys_id.slice(0,2) + record.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 		}
@@ -810,9 +882,11 @@ function saveWidget(postedJson, retry = 0) {
 		return;
 	}
 
-	var cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
 	let scopeMappingFile = basePath + scope + nodePath.sep + postedJson.tableName + nodePath.sep + '_map.json';
 	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
+	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
+	// If this file was synced before, use whatever name is in the _map.json
+	cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === postedJson.sys_id) ?? cleanName
 	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
 		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 	}
@@ -1047,9 +1121,11 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	let separtorCharacter = (isFolderRecordTable) ? nodePath.sep : ".";
 	let fullPath = basePath + scope + nodePath.sep + postedJson.table + nodePath.sep;
 
-	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
 	let scopeMappingFile = fullPath + '_map.json';
 	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
+	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
+	// If this file was synced before, use whatever name is in the _map.json
+	cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === postedJson.sys_id) ?? cleanName
 	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
 		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 	}
