@@ -1,4 +1,8 @@
 # CHANGELOG.md
+## 3.0.9 (2023-08-23)
+Fixes / changes:
+  - Allow filename change, that updates the _map.json file (Issue #85 PR #90 Blenderpics )
+  - Moved initializing of treeview to startServers method, so that it loads more consistent.
 
 ## 3.0.8 (2023-08-22)
 Fixes / changes:

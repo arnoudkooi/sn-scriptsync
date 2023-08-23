@@ -57,10 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 	else if (vscode.workspace.rootPath.endsWith(syncDir)) {
 		startServers();
-		setScopeTree();
 
-		const infoTreeViewProvider = new InfoTreeViewProvider();
-		vscode.window.registerTreeDataProvider("infoTreeView", infoTreeViewProvider);
 	}
 
 
@@ -183,7 +180,15 @@ export function activate(context: vscode.ExtensionContext) {
 					`Invalid file name:\n
 					File name needs to be in the format "[name of your choosing].${oldRecordInfo.fieldName}.${oldRecordInfo.fileExtension}".`
 				);
-				eu.renamePath(newPath, oldPath);
+
+				vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+				setTimeout(()=>{ //in a timeout to prevnt fileonotfounderror
+					eu.renamePath(newPath, oldPath); 
+					vscode.workspace.openTextDocument(oldPath).then(doc => {
+						vscode.window.showTextDocument(doc, { "preview": false });
+					});
+				},300);
+				
 				return;
 			}
 
@@ -446,6 +451,10 @@ function startServers() {
 	});
 	updateScriptSyncStatusBarItem('Running');
 	serverRunning = true;
+
+	setScopeTree();
+	const infoTreeViewProvider = new InfoTreeViewProvider();
+	vscode.window.registerTreeDataProvider("infoTreeView", infoTreeViewProvider);
 
 }
 
