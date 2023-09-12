@@ -1111,7 +1111,7 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	let scope:string;
 	if (postedJson.scope == 'global') 
 		scope = 'global';
-	else if (postedJson.scope == '')  //sync a none metadata file
+	else if (postedJson.scope == '' || !postedJson.hasOwnProperty('scope'))  //sync a none metadata file
 		scope = 'no_scope';
 	else {
 		let scopes = eu.getFileAsJson(basePath + "scopes.json");

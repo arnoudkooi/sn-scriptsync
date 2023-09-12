@@ -1,4 +1,8 @@
 # CHANGELOG.md
+## 3.1.0 (2023-09-12)
+Fixes / changes:
+  - Fix for Miiror in sn-scriptsync
+
 ## 3.0.9 (2023-08-23)
 Fixes / changes:
   - Allow filename change, that updates the _map.json file (Issue #85 PR #90 Blenderpics )
