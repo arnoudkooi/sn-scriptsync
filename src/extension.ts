@@ -1005,8 +1005,8 @@ function linkAppToVSCode(postedJson) {
 	req.action = 'requestAppMeta';
 	req.actionGoal = 'saveCheck';
 	req.scope = postedJson.appId;
-	req.scopeName = postedJson.appName;
-	req.scopeLabel = postedJson.appScope;
+	req.scopeLabel = postedJson.appName;
+	req.scopeName = postedJson.appScope;
 	req.instance = postedJson.instance;
 
 

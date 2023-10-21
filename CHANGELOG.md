@@ -1,4 +1,8 @@
 # CHANGELOG.md
+## 3.1.0 (2023-10-21)
+Fixes / changes:
+  - Fix mixing up scope name and label in Link VS COde function in Studio
+
 ## 3.1.0 (2023-09-12)
 Fixes / changes:
   - Fix for Miiror in sn-scriptsync
