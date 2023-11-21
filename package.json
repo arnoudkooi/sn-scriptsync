@@ -101,7 +101,7 @@
 				"command": "extension.bgScriptExecute",
 				"key": "ctrl+enter",
 				"mac": "cmd+enter",
-				"when": "editorLangId == javascript && resourceFilename =~ /background/"
+				"when": "editorLangId == javascript && resourceDirname =~ /background/"
 			}
 		],
 		"menus": {
