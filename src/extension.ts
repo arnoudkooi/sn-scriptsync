@@ -1067,7 +1067,7 @@ function saveFieldsToServiceNow(fileName, fromVsCode:boolean): boolean {
 
 	let scriptObj = eu.fileNameToObject(fileName);
 
-	if (scriptObj.fieldName == '_test_urls') return; //helper file, dont save to instance
+	if (scriptObj.fieldName == '_test_urls') return true; //helper file, dont save to instance
 	if (!serverRunning || !scriptObj?.sys_id ) return true; //r server is off or this was not a recognized file (probably metadata)
 
 	if (fromVsCode) lastSave = Math.floor(+new Date() / 1000);

@@ -1,4 +1,9 @@
 # CHANGELOG.md
+## 3.1.2 (2024-01-30)
+Fixes / changes:
+  - Backgroundscript matching. (#issue 91)
+  - Fix not being able to save _test_urls.txt for Widgets.
+
 ## 3.1.0 (2023-10-21)
 Fixes / changes:
   - Fix mixing up scope name and label in Link VS COde function in Studio
