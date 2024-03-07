@@ -9,6 +9,7 @@ import { Constants } from "./constants";
 import * as path from "path";
 import nodePath = require('path');
 import * as fs from 'fs';
+import * as he from 'he';
 
 
 
@@ -285,6 +286,13 @@ function setScopeTreeView(jsn?: any) {
 	//vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
 }
 
+function writeResponseToTab(jsn: any) {
+    const outputChannel = vscode.window.createOutputChannel('sn-scriptsync - Background');
+    outputChannel.clear();
+    outputChannel.appendLine(he.decode(jsn.response));
+    outputChannel.show();
+}
+
 
 function setScopeTree(showWarning = false) {
 
@@ -404,6 +412,9 @@ function startServers() {
 			else if (messageJson.action == "writeInstanceSettings") {
 				eu.writeInstanceSettings(messageJson.instance);
 			}
+            else if (messageJson.action == "writeResponseToTab") {
+                writeResponseToTab(messageJson);
+            }
 			else if (messageJson.hasOwnProperty('actionGoal')) {
 				if (messageJson.actionGoal == 'updateCheck') {
 					// todo track open files for auto refresh when changed
