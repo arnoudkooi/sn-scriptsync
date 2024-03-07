@@ -286,8 +286,9 @@ function setScopeTreeView(jsn?: any) {
 	//vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
 }
 
+
+const outputChannel = vscode.window.createOutputChannel('sn-scriptsync - Background');
 function writeResponseToTab(jsn: any) {
-    const outputChannel = vscode.window.createOutputChannel('sn-scriptsync - Background');
     outputChannel.clear();
     outputChannel.appendLine(he.decode(jsn.response));
     outputChannel.show();
