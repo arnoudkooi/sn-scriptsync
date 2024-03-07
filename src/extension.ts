@@ -9,7 +9,6 @@ import { Constants } from "./constants";
 import * as path from "path";
 import nodePath = require('path');
 import * as fs from 'fs';
-import * as he from 'he';
 
 
 
@@ -287,11 +286,9 @@ function setScopeTreeView(jsn?: any) {
 }
 
 
-const outputChannel = vscode.window.createOutputChannel('sn-scriptsync - Background');
 function writeResponseToTab(jsn: any) {
-    outputChannel.clear();
-    outputChannel.appendLine(he.decode(jsn.response));
-    outputChannel.show();
+    const panel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
+    panel.webview.html = jsn.response;
 }
 
 
