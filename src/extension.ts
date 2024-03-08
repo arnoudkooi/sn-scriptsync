@@ -285,17 +285,17 @@ function setScopeTreeView(jsn?: any) {
 	//vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
 }
 
-let panel: vscode.WebviewPanel | null = null;
+let webViewPanel: vscode.WebviewPanel | null = null;
 let updateInterval = null;
 const updateIntervalTime = 100;
-function initializePanelIfNotExists() {
+function initializeWebViewPanelIfNotExists() {
 	clearInterval(updateInterval);
 	updateInterval = null;
 
-	if (panel === null) {
-		panel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
-		panel.onDidDispose(() => {
-			panel = null;
+	if (webViewPanel === null) {
+		webViewPanel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
+		webViewPanel.onDidDispose(() => {
+			webViewPanel = null;
 			clearInterval(updateInterval);
 		});
 		clearInterval(updateInterval);
@@ -303,12 +303,12 @@ function initializePanelIfNotExists() {
 	}
 }
 
-function writeBGScriptStartToTab(scriptObj: any) {
-	initializePanelIfNotExists();
+function writeBGScriptStartToWebViewPanel(scriptObj: any) {
+	initializeWebViewPanelIfNotExists();
 	let transactionTime = 0;
 	updateInterval = setInterval(() => {
 		transactionTime += updateIntervalTime;
-		panel.webview.html = `
+		webViewPanel.webview.html = `
 		<head>
 			<base href="${scriptObj.instance.url}">
 		</head>	
@@ -318,10 +318,10 @@ function writeBGScriptStartToTab(scriptObj: any) {
 	}, updateIntervalTime);
 }
 
-function writeResponseToTab(jsn: any) {
-	initializePanelIfNotExists();
+function writeResponseToWebViewPanel(jsn: any) {
+	initializeWebViewPanelIfNotExists();
 	const html = `<HEAD><BASE HREF="${jsn.instance?.url}"></HEAD>${jsn.data}` 
-	panel.webview.html = html;
+	webViewPanel.webview.html = html;
 }
 
 
@@ -444,7 +444,7 @@ function startServers() {
 				eu.writeInstanceSettings(messageJson.instance);
 			}
             else if (messageJson.action == "responseFromBackgroundScript") {
-                writeResponseToTab(messageJson);
+                writeResponseToWebViewPanel(messageJson);
             }
 			else if (messageJson.hasOwnProperty('actionGoal')) {
 				if (messageJson.actionGoal == 'updateCheck') {
@@ -1378,11 +1378,12 @@ async function bgScriptExecute(showWarning = true) {
 	}
 
 	editor.document.save();
+    // Uncomment mirrorbgscript since the condition on scriptsync.js:182 will prevent execution
 	// scriptObj.mirrorbgscript = true;
 	scriptObj.executeScript = true;
 
 	scriptObj.action = 'executeBackgroundScript';
-	writeBGScriptStartToTab(scriptObj);
+    writeBGScriptStartToWebViewPanel(scriptObj);
 
 	wss.clients.forEach(function each(client) {
 		if (client.readyState === WebSocket.OPEN) {
