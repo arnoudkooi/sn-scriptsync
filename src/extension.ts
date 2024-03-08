@@ -1344,7 +1344,7 @@ async function bgScriptExecute(showWarning = true) {
 		vscode.window.showInformationMessage("Only files in /background directory can be executed")
 		return;
 	}
-	scriptObj.mirrorbgscript = true;
+	// scriptObj.mirrorbgscript = true;
 	scriptObj.executeScript = true;
 	scriptObj.action = 'executeBackgroundScript';
 	wss.clients.forEach(function each(client) {
