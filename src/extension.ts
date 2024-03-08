@@ -288,7 +288,8 @@ function setScopeTreeView(jsn?: any) {
 
 function writeResponseToTab(jsn: any) {
     const panel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
-    panel.webview.html = jsn.response;
+	const html = `<HEAD><BASE HREF="${jsn.instance?.url}"></HEAD>${jsn.data}` 
+	panel.webview.html = html;
 }
 
 
@@ -410,7 +411,7 @@ function startServers() {
 			else if (messageJson.action == "writeInstanceSettings") {
 				eu.writeInstanceSettings(messageJson.instance);
 			}
-            else if (messageJson.action == "writeResponseToTab") {
+            else if (messageJson.action == "responseFromBackgroundScript") {
                 writeResponseToTab(messageJson);
             }
 			else if (messageJson.hasOwnProperty('actionGoal')) {
@@ -1345,6 +1346,7 @@ async function bgScriptExecute(showWarning = true) {
 	}
 	scriptObj.mirrorbgscript = true;
 	scriptObj.executeScript = true;
+	scriptObj.action = 'executeBackgroundScript';
 	wss.clients.forEach(function each(client) {
 		if (client.readyState === WebSocket.OPEN) {
 			client.send(JSON.stringify(scriptObj));
