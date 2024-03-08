@@ -285,9 +285,41 @@ function setScopeTreeView(jsn?: any) {
 	//vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
 }
 
+let panel: vscode.WebviewPanel | null = null;
+let updateInterval = null;
+const updateIntervalTime = 100;
+function initializePanelIfNotExists() {
+	clearInterval(updateInterval);
+	updateInterval = null;
+
+	if (panel === null) {
+		panel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
+		panel.onDidDispose(() => {
+			panel = null;
+			clearInterval(updateInterval);
+		});
+		clearInterval(updateInterval);
+		updateInterval = null;
+	}
+}
+
+function writeBGScriptStartToTab(scriptObj: any) {
+	initializePanelIfNotExists();
+	let transactionTime = 0;
+	updateInterval = setInterval(() => {
+		transactionTime += updateIntervalTime;
+		panel.webview.html = `
+		<head>
+			<base href="${scriptObj.instance.url}">
+		</head>	
+		<span id="timer">${(transactionTime / 1000).toFixed(3)}</span> - Background script running... 
+		<a href="/cancel_my_transactions.do" target="_blank" title="Cancel running this backgroundscript">cancel</a>
+		<hr>`;
+	}, updateIntervalTime);
+}
 
 function writeResponseToTab(jsn: any) {
-    const panel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
+	initializePanelIfNotExists();
 	const html = `<HEAD><BASE HREF="${jsn.instance?.url}"></HEAD>${jsn.data}` 
 	panel.webview.html = html;
 }
@@ -1344,9 +1376,14 @@ async function bgScriptExecute(showWarning = true) {
 		vscode.window.showInformationMessage("Only files in /background directory can be executed")
 		return;
 	}
+
+	editor.document.save();
 	// scriptObj.mirrorbgscript = true;
 	scriptObj.executeScript = true;
+
 	scriptObj.action = 'executeBackgroundScript';
+	writeBGScriptStartToTab(scriptObj);
+
 	wss.clients.forEach(function each(client) {
 		if (client.readyState === WebSocket.OPEN) {
 			client.send(JSON.stringify(scriptObj));
