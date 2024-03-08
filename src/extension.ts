@@ -285,6 +285,45 @@ function setScopeTreeView(jsn?: any) {
 	//vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);
 }
 
+let webViewPanel: vscode.WebviewPanel | null = null;
+let updateInterval = null;
+const updateIntervalTime = 100;
+function initializeWebViewPanelIfNotExists() {
+	clearInterval(updateInterval);
+	updateInterval = null;
+
+	if (webViewPanel === null) {
+		webViewPanel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
+		webViewPanel.onDidDispose(() => {
+			webViewPanel = null;
+			clearInterval(updateInterval);
+		});
+		clearInterval(updateInterval);
+		updateInterval = null;
+	}
+}
+
+function writeBGScriptStartToWebViewPanel(scriptObj: any) {
+	initializeWebViewPanelIfNotExists();
+	let transactionTime = 0;
+	updateInterval = setInterval(() => {
+		transactionTime += updateIntervalTime;
+		webViewPanel.webview.html = `
+		<head>
+			<base href="${scriptObj.instance.url}">
+		</head>	
+		<span id="timer">${(transactionTime / 1000).toFixed(3)}</span> - Background script running... 
+		<a href="/cancel_my_transactions.do" target="_blank" title="Cancel running this backgroundscript">cancel</a>
+		<hr>`;
+	}, updateIntervalTime);
+}
+
+function writeResponseToWebViewPanel(jsn: any) {
+	initializeWebViewPanelIfNotExists();
+	const html = `<HEAD><BASE HREF="${jsn.instance?.url}"></HEAD>${jsn.data}` 
+	webViewPanel.webview.html = html;
+}
+
 
 function setScopeTree(showWarning = false) {
 
@@ -404,6 +443,9 @@ function startServers() {
 			else if (messageJson.action == "writeInstanceSettings") {
 				eu.writeInstanceSettings(messageJson.instance);
 			}
+            else if (messageJson.action == "responseFromBackgroundScript") {
+                writeResponseToWebViewPanel(messageJson);
+            }
 			else if (messageJson.hasOwnProperty('actionGoal')) {
 				if (messageJson.actionGoal == 'updateCheck') {
 					// todo track open files for auto refresh when changed
@@ -1334,8 +1376,15 @@ async function bgScriptExecute(showWarning = true) {
 		vscode.window.showInformationMessage("Only files in /background directory can be executed")
 		return;
 	}
-	scriptObj.mirrorbgscript = true;
+
+	editor.document.save();
+    // Uncomment mirrorbgscript since the condition on scriptsync.js:182 will prevent execution
+	// scriptObj.mirrorbgscript = true;
 	scriptObj.executeScript = true;
+
+	scriptObj.action = 'executeBackgroundScript';
+    writeBGScriptStartToWebViewPanel(scriptObj);
+
 	wss.clients.forEach(function each(client) {
 		if (client.readyState === WebSocket.OPEN) {
 			client.send(JSON.stringify(scriptObj));
