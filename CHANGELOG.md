@@ -1,4 +1,9 @@
 # CHANGELOG.md
+
+## 3.2.0 (2024-03-09)
+Features:
+  - Execute Background Scripts in VS Code (SN Utils discussion #480, credit abhishekg999)
+
 ## 3.1.2 (2024-01-30)
 Fixes / changes:
   - Backgroundscript matching. (#issue 91)
