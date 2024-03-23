@@ -99,10 +99,12 @@ export function activate(context: vscode.ExtensionContext) {
 		startServers();
 	});
 
-	vscode.commands.registerCommand('extension.bgScriptMirror', () => {
-		selectionToBG();
+	vscode.commands.registerCommand('extension.bgScriptGlobal', (context) => {
+		selectionToBG(true);
 	});
-
+	vscode.commands.registerCommand('extension.bgScriptScope', (context) => {
+		selectionToBG(false);
+	});
 	vscode.commands.registerCommand('extension.bgScriptExecute', () => {
 		bgScriptExecute();
 	});
@@ -256,20 +258,6 @@ export function activate(context: vscode.ExtensionContext) {
 				});
 			}
 		}
-		else if (listener.document.fileName.includes(path.sep + 'background' + path.sep)) {
-				if (!wss.clients.size) {
-					vscode.window.showErrorMessage("No WebSocket connection. Please open SN ScriptSync in a browser");
-				}
-
-				let scriptObj = eu.fileNameToObject(listener.document);
-				scriptObj.mirrorbgscript = true;
-				wss.clients.forEach(function each(client) {
-					if (client.readyState === WebSocket.OPEN) {
-						client.send(JSON.stringify(scriptObj));
-					}
-				});
-
-		}
 	});
 
 }
@@ -320,7 +308,9 @@ function writeBGScriptStartToWebViewPanel(scriptObj: any) {
 
 function writeResponseToWebViewPanel(jsn: any) {
 	initializeWebViewPanelIfNotExists();
-	const html = `<HEAD><BASE HREF="${jsn.instance?.url}"></HEAD>${jsn.data}` 
+	if (jsn.data == "not authorized") jsn.data = `Not authorized<br /> 
+	please run /token in a <a href='/' target='_blank'>browser session</a> to refresh token`;
+	const html = `<HEAD><BASE HREF="${jsn.instance?.url}"></HEAD>${jsn.data}`;
 	webViewPanel.webview.html = html;
 }
 
@@ -488,7 +478,7 @@ function startServers() {
 
 		//send immediatly a feedback to the incoming connection    
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
-		ws.send(JSON.stringify({ action : 'bannerMessage', message : 'You are using the 3.0 version of sn-scriptsync! Files are now stored in a new structure. <a href="https://youtu.be/cpyasfe93kQ" target="_blank">[Intro Video]</a>', class: 'alert alert-primary' }), function () { });
+		ws.send(JSON.stringify({ action : 'bannerMessage', message : 'Update: You can now create and run BG Scripts via the contextmenu in VS Code!', class: 'alert alert-primary' }), function () { });
 
 	});
 	updateScriptSyncStatusBarItem('Running');
@@ -1263,6 +1253,10 @@ vscode.commands.registerCommand('infoTreeCommand', (arg) => {
 	else if (arg.action == "openInInstance"){
 		openInInstance();
 	}
+	else if (arg.action == "selectionToBG"){
+		console.log("selectionToBG", arg);
+		selectionToBG(arg.global);
+	}
 });
 
 
@@ -1327,7 +1321,7 @@ function updateScriptSyncStatusBarItem(message: string): void {
 	scriptSyncStatusBarItem.show();
 }
 
-async function selectionToBG() {
+async function selectionToBG(global = true) {
 
 	if (!serverRunning) {
 		vscode.window.showInformationMessage("sn-scriptsync server must be running")
@@ -1339,16 +1333,24 @@ async function selectionToBG() {
 
 
 	let editor = vscode.window.activeTextEditor;
+	if (!editor) {
+		vscode.window.showInformationMessage("Please open a script file first.")
+		return;
+	}
 	let scriptObj = eu.fileNameToObject(editor.document);
 
-	scriptObj.content = '// sn-scriptsync - Snippet received from: (delete file after usage.)\n// file://' + scriptObj.fileName + "\n\n" 
-						 + String.raw`${editor.document.getText(editor.selection)}`;;
+	if (global){
+		scriptObj.scope = 'global';
+		scriptObj.scopeName = 'global';
+	}
+
+	scriptObj.content = `gs.info("// sn-scriptsync BG Script - scope: ${scriptObj?.scopeName}");\n\n`
+						 + String.raw`${editor.document.getText(editor.selection)}`;
 	scriptObj.field = 'bg';
 	scriptObj.table = 'background'
 	scriptObj.sys_id = my_id;
 	scriptObj.fieldType = 'script';
 	scriptObj.name = 'script'; 
-	scriptObj.mirrorbgscript = true;
 
 	saveFieldAsFile(scriptObj)
 
@@ -1377,9 +1379,8 @@ async function bgScriptExecute(showWarning = true) {
 		return;
 	}
 
+	scriptObj.instance.scope = scriptObj.scope; //expected like this in SN Utils scriptsync.js
 	editor.document.save();
-    // Uncomment mirrorbgscript since the condition on scriptsync.js:182 will prevent execution
-	// scriptObj.mirrorbgscript = true;
 	scriptObj.executeScript = true;
 
 	scriptObj.action = 'executeBackgroundScript';

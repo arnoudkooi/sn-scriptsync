@@ -1,9 +1,12 @@
 # CHANGELOG.md
 
+## 3.3.0 (2024-03-23)
+Features:
+  - Improved BG Script execution, you can now select to run it in current or global scope.
+
 ## 3.2.1 (2024-03-09)
 Features:
   - Execute Background Scripts in VS Code (SN Utils discussion #480, credit abhishekg999)
-
 
 ## 3.1.2 (2024-01-30)
 Fixes / changes:

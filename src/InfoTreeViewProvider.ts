@@ -10,7 +10,9 @@ export class InfoTreeViewProvider implements vscode.TreeDataProvider<TreeItem> {
       new TreeItem('Actions',{},[
         new TreeItem('Load / Refresh Tree', { action : 'refreshTree'}),
         new TreeItem('Load Scope', { action : 'loadScope'}),
-        new TreeItem('Open in Instance', { action : 'openInInstance'})
+        new TreeItem('Open in Instance', { action : 'openInInstance'}),
+        new TreeItem('New Background Script (global)', { action : 'selectionToBG', global : true}),
+        new TreeItem('New Background Script (scope)', { action : 'selectionToBG', global : false})
       ]),
       new TreeItem('Links',{},[
       new TreeItem('arnoudkooi.com', { action : 'openUrl', url : 'https://www.arnoudkooi.com' }),
@@ -43,7 +45,7 @@ class TreeItem extends vscode.TreeItem {
                                  vscode.TreeItemCollapsibleState.Expanded);
     this.children = children;
     if (children === undefined)
-      this.command = {command: "infoTreeCommand"  , title: 'Open page',  arguments: [{ action: args.action, url : args.url }]};
+      this.command = {command: "infoTreeCommand"  , title: 'Open page',  arguments: [{ action: args.action, url : args.url, global : args.global }]};
   }
 }
 
