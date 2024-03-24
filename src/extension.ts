@@ -281,7 +281,7 @@ function initializeWebViewPanelIfNotExists() {
 	updateInterval = null;
 
 	if (webViewPanel === null) {
-		webViewPanel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: false });
+		webViewPanel = vscode.window.createWebviewPanel("sn-scriptsync Background", "Background Script", vscode.ViewColumn.Beside, { enableScripts: true });
 		webViewPanel.onDidDispose(() => {
 			webViewPanel = null;
 			clearInterval(updateInterval);
@@ -293,25 +293,61 @@ function initializeWebViewPanelIfNotExists() {
 
 function writeBGScriptStartToWebViewPanel(scriptObj: any) {
 	initializeWebViewPanelIfNotExists();
-	let transactionTime = 0;
-	updateInterval = setInterval(() => {
-		transactionTime += updateIntervalTime;
-		webViewPanel.webview.html = `
+	
+	webViewPanel.webview.html = `
+	<!DOCTYPE html>
+	<html>
 		<head>
+			<meta charset="UTF-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<title>Background Script</title>
 			<base href="${scriptObj.instance.url}">
-		</head>	
-		<span id="timer">${(transactionTime / 1000).toFixed(3)}</span> - Background script running... 
-		<a href="/cancel_my_transactions.do" target="_blank" title="Cancel running this backgroundscript">cancel</a>
-		<hr>`;
-	}, updateIntervalTime);
+
+			<style>
+				body { font-family: monospace; }
+			</style>
+
+		</head>
+		<body>
+			
+			[<span id="timer">[0.000]</span>] - Background script running... 
+			<a href="/cancel_my_transactions.do" target="_blank" title="Cancel running this backgroundscript">cancel</a>
+
+			<script>
+				let transactionTime = 0;
+				updateInterval = setInterval(() => {
+					transactionTime += ${updateIntervalTime};
+					document.getElementById("timer").innerText = (transactionTime / 1000).toFixed(3);
+				}, ${updateIntervalTime});
+			</script>
+		</body>
+	</html>
+	`;
 }
 
 function writeResponseToWebViewPanel(jsn: any) {
 	initializeWebViewPanelIfNotExists();
 	if (jsn.data == "not authorized") jsn.data = `Not authorized<br /> 
 	please run /token in a <a href='/' target='_blank'>browser session</a> to refresh token`;
-	const html = `<HEAD><BASE HREF="${jsn.instance?.url}"></HEAD>${jsn.data}`;
-	webViewPanel.webview.html = html;
+	webViewPanel.webview.html = `
+	<!DOCTYPE html>
+	<html>
+		<head>
+			<meta charset="UTF-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<title>Background Script</title>
+			<base href="${jsn?.instance?.url}">
+
+			<style>
+				pre { font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-width: 99%; }
+			</style>
+
+		</head>
+		<body>
+			${jsn.data}
+		</body>
+	</html>`
+
 }
 
 
@@ -1376,6 +1412,10 @@ async function bgScriptExecute(showWarning = true) {
 	} 
 	if(!editor.document.fileName.includes(path.sep + 'background' + path.sep)){
 		vscode.window.showInformationMessage("Only files in /background directory can be executed")
+		return;
+	}
+	if (wss.clients.size == 0) {
+		vscode.window.showInformationMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
 		return;
 	}
 

@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 3.3.1 (2024-03-25)
+Fixes / changes:
+ - Improvements to the BG script execution.
+
 ## 3.3.0 (2024-03-23)
 Features:
   - Improved BG Script execution, you can now select to run it in current or global scope.
