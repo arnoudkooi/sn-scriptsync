@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 3.3.2 (2024-04-15)
+Fixes / changes:
+ - Support for Inline PowerShell script from Flow Designer Actions (Discussion #492)
+
 ## 3.3.1 (2024-03-25)
 Fixes / changes:
  - Improvements to the BG script execution.

@@ -1243,6 +1243,8 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	}
 	else if (fieldType.includes("string") || fieldType == "conditions")
 		fileExtension = ".txt";
+	else if (req.fieldName == "PowerShell")
+		fileExtension = ".ps1";
 
 	let fileName = fullPath + cleanName + separtorCharacter + req.fieldName + fileExtension;
 
