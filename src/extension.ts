@@ -990,7 +990,7 @@ function saveWidget(postedJson, retry = 0) {
 		files = {
 			"template.html": { "content": postedJson.widget.template.value, "openFile": true },
 			"css.scss": { "content": postedJson.widget.css.value, "openFile": true },
-			"client_cript.js": { "content": postedJson.widget.client_script.value, "openFile": true },
+			"client_script.js": { "content": postedJson.widget.client_script.value, "openFile": true },
 			"script.js": { "content": postedJson.widget.script.value, "openFile": true },
 			"link.js": { "content": postedJson.widget.link.value, "openFile": false },
 			"_widget.json": { "content": JSON.stringify(postedJson, null, 4), "openFile": false },
