@@ -840,7 +840,10 @@ function writeTableFields(messageJson) {
 		let referenceFields = Object.keys(metaDataRelations.tableFields[messageJson.tableName]?.referenceFields || {}); 
 		referenceFields.forEach(field => {
 			let cat = metaDataRelations.tableFields[messageJson.tableName]?.group || 'other';
-			scopeJson.scopeTree[cat].tables[messageJson.tableName].records[record.sys_id + ''].referenceFields[field] = record[field];
+			if(scopeJson.scopeTree[cat].tables[messageJson.tableName].records[record.sys_id + '']){
+				scopeJson.scopeTree[cat].tables[messageJson.tableName].records[record.sys_id + ''].referenceFields ??= {};
+				scopeJson.scopeTree[cat].tables[messageJson.tableName].records[record.sys_id + ''].referenceFields[field] = record[field];
+			}
 		});
 
 		// let codeChildReferences = Object.keys(metaDataRelations.tableFields[messageJson.tableName]?.codeChildReferences || {}); 
