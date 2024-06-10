@@ -1,8 +1,13 @@
 # CHANGELOG.md
 
+## 3.3.5 (2024-04-18)
+Fixes / changes:
+ - Improve error handling with SN Utils helper tab
+ - Added CONTRIBUTING.md
+
 ## 3.3.3 (2024-04-18)
 Fixes / changes:
- - Misspellimhg fix (PR #95)
+ - Misspelling fix (PR #95)
 
 ## 3.3.2 (2024-04-15)
 Fixes / changes:

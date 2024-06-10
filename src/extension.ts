@@ -439,14 +439,17 @@ function startServers() {
 		ws.on('message', function incoming(message) {
 			let messageJson = JSON.parse(message)
 			if (messageJson.hasOwnProperty('error')) {
-				if (messageJson.error.detail.includes("ACL"))
-					messageJson.error.detail = "ACL Error, try changing scope in the browser";
-				else if (messageJson.error.detail.includes("Required to provide Auth information"))
-					messageJson.error.detail = "Could not sync file, no valid token. Try typing the slashcommand /token in a active browser session and retry.";
+				if (messageJson.error?.detail){
+					if (messageJson.error.detail.includes("ACL"))
+						messageJson.error.detail = "ACL Error, try changing scope in the browser";
+					else if (messageJson.error.detail.includes("Required to provide Auth information"))
+						messageJson.error.detail = "Could not sync file, no valid token. Try typing the slashcommand /token in a active browser session and retry.";
+					vscode.window.showErrorMessage("Error while saving file: " + messageJson.error?.detail);
+				} 
+				else 
+					vscode.window.showErrorMessage("Error while saving file: " + JSON.stringify(messageJson,null,2));
 
-
-				vscode.window.showErrorMessage("Error while saving file: " + messageJson.error.detail);
-
+				
 				markFileAsDirty(window.activeTextEditor.document);
 			}
 
@@ -514,7 +517,7 @@ function startServers() {
 
 		//send immediatly a feedback to the incoming connection    
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
-		ws.send(JSON.stringify({ action : 'bannerMessage', message : 'Update: You can now create and run BG Scripts via the contextmenu in VS Code!', class: 'alert alert-primary' }), function () { });
+		ws.send(JSON.stringify({ action : 'bannerMessage', message : '2024-06-10 You should now get better error message, please log an Issue when there are issues!', class: 'alert alert-primary' }), function () { });
 
 	});
 	updateScriptSyncStatusBarItem('Running');
