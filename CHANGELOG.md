@@ -1,6 +1,10 @@
 # CHANGELOG.md
 
-## 3.3.5 (2024-04-18)
+## 3.3.5 (2024-10-05)
+Fixes / changes:
+ - Fix for loading scope artefacts (Issue #101)
+
+## 3.3.4 (2024-04-18)
 Fixes / changes:
  - Improve error handling with SN Utils helper tab
  - Added CONTRIBUTING.md

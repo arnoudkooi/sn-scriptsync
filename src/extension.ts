@@ -843,7 +843,12 @@ function writeTableFields(messageJson) {
 		let referenceFields = Object.keys(metaDataRelations.tableFields[messageJson.tableName]?.referenceFields || {}); 
 		referenceFields.forEach(field => {
 			let cat = metaDataRelations.tableFields[messageJson.tableName]?.group || 'other';
-			scopeJson.scopeTree[cat].tables[messageJson.tableName].records[record.sys_id + ''].referenceFields[field] = record[field];
+			const table = scopeJson.scopeTree[cat].tables[messageJson.tableName];
+			const recordId = record.sys_id + '';
+			if (table.records && table.records[recordId]) {
+				const referenceFields = table.records[recordId].referenceFields ?? (table.records[recordId].referenceFields = {});
+				referenceFields[field] = record[field];
+			}
 		});
 
 		// let codeChildReferences = Object.keys(metaDataRelations.tableFields[messageJson.tableName]?.codeChildReferences || {}); 
