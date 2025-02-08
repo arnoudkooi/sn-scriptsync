@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "SN Utils sn-sriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "3.3.5",
+	"version": "3.3.6",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -195,8 +195,8 @@
 		},
 		"viewsWelcome": [
 			{
-			  "view": "scopeTreeView",
-			  "contents": "Please load scope via right click context menu."
+				"view": "scopeTreeView",
+				"contents": "Please load scope via right click context menu."
 			}
 		],
 		"snippets": [
@@ -213,10 +213,10 @@
 	},
 	"devDependencies": {
 		"@types/node": "^18.15.11",
+		"@types/vscode": "^1.58.0",
 		"diff": "^5.1.0",
 		"tslint": "^5.20.1",
-		"typescript": "^5.0.4",
-		"@types/vscode": "^1.58.0"
+		"typescript": "^5.0.4"
 	},
 	"dependencies": {
 		"sass": "^1.61.0",

@@ -26,6 +26,28 @@ let eu = new ExtensionUtils();
 
 let lastSave = Math.floor(+new Date() / 1000); 
 
+// Use a map to track which documents were manually saved #105
+const manualSaveMap: Map<string, boolean> = new Map();
+
+// Listen for the "will save" event and mark the document if the reason was manual.
+vscode.workspace.onWillSaveTextDocument((event) => {
+	if (event.reason === vscode.TextDocumentSaveReason.Manual) {
+		manualSaveMap.set(event.document.uri.toString(), true);
+	}
+});
+
+// In the did-save handler, only process files that were flagged as manually saved. #105
+vscode.workspace.onDidSaveTextDocument(document => {
+	// Check our map for the document URI.
+	if (manualSaveMap.get(document.uri.toString())) {
+		// Remove the flag and proceed with sync logic.
+		manualSaveMap.delete(document.uri.toString());
+		if (!saveFieldsToServiceNow(document, true)) {
+			markFileAsDirty(document);
+		}
+	}
+});
+
 export function activate(context: vscode.ExtensionContext) {
 
 	//initialize statusbaritem and click events
@@ -214,13 +236,6 @@ export function activate(context: vscode.ExtensionContext) {
 		modifiedMapFiles.forEach((map, path) => eu.writeOrReadNameToSysIdMapping(path, map, true));
 	});
 
-
-	vscode.workspace.onDidSaveTextDocument(listener => {
-		if (!saveFieldsToServiceNow(listener, true)) {
-			//if (listener.fileName.includes("^"))//only sn files
-				markFileAsDirty(listener);
-		}
-	});
 
 	vscode.workspace.onDidChangeConfiguration(event => {
 		settings = vscode.workspace.getConfiguration('sn-scriptsync');

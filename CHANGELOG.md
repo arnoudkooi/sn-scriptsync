@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 3.3.6 (2025-02-08)
+Fixes / changes:
+ - Prevent scriptsync trigger when document is autosaved (Issue #105)
+
 ## 3.3.5 (2024-10-05)
 Fixes / changes:
  - Fix for loading scope artefacts (Issue #101)
