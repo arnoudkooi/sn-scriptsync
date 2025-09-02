@@ -151,6 +151,10 @@ export function activate(context: vscode.ExtensionContext) {
 		requestScopeArtifacts(true);
 	});
 
+	vscode.commands.registerCommand('extension.createArtifact', (artifact) => {
+		createArtifact(artifact);
+	});
+
 
 
 
@@ -473,6 +477,8 @@ function startServers() {
 				eu.writeInstanceSettings(messageJson.instance);
 			if (messageJson?.action == 'saveFieldAsFile')
 				saveFieldAsFile(messageJson);
+			else if (messageJson?.action == 'createRecordResponse')
+				handleCreateRecordResponse(messageJson);
 			else if (messageJson?.action == 'saveWidget')
 				saveWidget(messageJson);
 			else if (messageJson?.action == 'linkAppToVSCode')
@@ -542,6 +548,29 @@ function startServers() {
 	const infoTreeViewProvider = new InfoTreeViewProvider();
 	vscode.window.registerTreeDataProvider("infoTreeView", infoTreeViewProvider);
 
+}
+
+function handleCreateRecordResponse(responseJson) {
+	if (responseJson.success) {
+		vscode.window.showInformationMessage(`Successfully created artifact: ${responseJson.newRecord.name}`);
+		
+		// Adapt the response to the structure expected by saveFieldAsFile
+		const artifactToSave = {
+			instance: responseJson.instance,
+			table: responseJson.newRecord.tableName,
+			sys_id: responseJson.newRecord.sys_id,
+			name: responseJson.newRecord.name,
+			scope: responseJson.newRecord.scope,
+			field: responseJson.newRecord.field, // We need to ensure this is part of the response
+			fieldType: responseJson.newRecord.fieldType, // and this
+			content: responseJson.newRecord.content // and this
+		};
+
+		saveFieldAsFile(artifactToSave);
+
+	} else {
+		vscode.window.showErrorMessage(`Failed to create artifact: ${responseJson.error}`);
+	}
 }
 
 function stopServers() {
@@ -1380,6 +1409,31 @@ vscode.commands.registerCommand('openFile', (meta) => {
 function updateScriptSyncStatusBarItem(message: string): void {
 	scriptSyncStatusBarItem.text = `$(megaphone) sn-scriptsync: ${message}`;
 	scriptSyncStatusBarItem.show();
+}
+
+async function createArtifact(artifact: any) {
+	if (!serverRunning) {
+		vscode.window.showInformationMessage("sn-scriptsync server must be running");
+		return;
+	}
+
+	if (!wss.clients.size) {
+		vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
+		return;
+	}
+
+	const requestJson = {
+		action: 'createRecord',
+		payload: artifact
+	};
+
+	wss.clients.forEach(function each(client) {
+		if (client.readyState === WebSocket.OPEN) {
+			client.send(JSON.stringify(requestJson));
+		}
+	});
+
+	vscode.window.showInformationMessage(`Requesting to create artifact: ${JSON.stringify(artifact.name)}`);
 }
 
 async function selectionToBG(global = true) {

@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+
+## 3.3.8 (2025-09-02)
+Fixes / changes:
+ - Update dependencies
+ - Preparation for createArtifact command
+
 ## 3.3.6 (2025-02-08)
 Fixes / changes:
  - Prevent scriptsync trigger when document is autosaved (Issue #105)

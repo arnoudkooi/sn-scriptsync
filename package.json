@@ -74,6 +74,10 @@
 			{
 				"command": "extension.bgScriptExecute",
 				"title": "sn-scriptsync: Execute Backgroundscipt (.js files in /background folder only)"
+			},
+			{
+				"command": "extension.createArtifact",
+				"title": "sn-scriptsync: Create a new artifact in ServiceNow"
 			}
 		],
 		"keybindings": [
@@ -219,8 +223,8 @@
 		"typescript": "^5.0.4"
 	},
 	"dependencies": {
-		"sass": "^1.89.2",
-		"ws": "^8.17.1"
+		"sass": "^1.91.0",
+		"ws": "^8.18.3"
 	},
 	"resolutions": {
 		"minimist": "1.2.6"
