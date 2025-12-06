@@ -223,7 +223,7 @@
 		"typescript": "^5.0.4"
 	},
 	"dependencies": {
-		"sass": "^1.91.0",
+		"sass": "^1.92.1",
 		"ws": "^8.18.3"
 	},
 	"resolutions": {
