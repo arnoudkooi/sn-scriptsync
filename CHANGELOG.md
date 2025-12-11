@@ -1,6 +1,12 @@
 # CHANGELOG.md
 
 
+## 4.0.7 (2025-12-11)
+
+**Documentation:**
+- Added "Get single record by sys_id" example to Agent API query_records documentation
+- Added Service Portal widget client script patterns (Angular DI vs IIFE)
+
 ## 4.0.5 (2025-12-10)
 
 **Packaging fixes:**

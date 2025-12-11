@@ -446,6 +446,26 @@ data.dayOfWeek = now.getDayOfWeekLocalTime();
 - ❌ `gs.now()` - NOT allowed in scoped applications
 - ❌ Non-LocalTime methods may fail: `getDayOfMonth()`, `getMonth()`, `getYear()`
 
+### Service Portal Widget Client Scripts
+
+**Use Angular dependency injection, not IIFE patterns:**
+
+```javascript
+// ❌ WRONG - IIFE loses 'this' context, causes $apply issues
+(function() {
+  var c = this;
+  setInterval(function() { c.$apply(); }, 1000);
+})();
+
+// ✅ CORRECT - Proper Angular controller with DI
+api.controller = function($scope, $interval, $timeout) {
+  var c = this;
+  $interval(updateFn, 1000);  // Auto-handles digest cycle
+};
+```
+
+**Available Angular services:** `$scope`, `$interval`, `$timeout`, `$http`, `$q`, `$location`, `spUtil`, `spModal`
+
 ### GlideRecord Best Practices
 Always use `setValue()` and `getValue()` methods:
 
@@ -1257,6 +1277,7 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
 
 | Use Case | Query |
 |----------|-------|
+| **Get single record by sys_id** | `sys_id=abc123def456...` |
 | Active P1 incidents | `priority=1^active=true` |
 | Recent changes | `ORDERBYDESCsys_created_on` |
 | My assigned tasks | `assigned_to=javascript:gs.getUserID()^active=true` |

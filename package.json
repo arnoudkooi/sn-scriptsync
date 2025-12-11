@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.0.6",
+	"version": "4.0.7",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
