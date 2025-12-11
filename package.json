@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.0.5",
+	"version": "4.0.6",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -11,7 +11,7 @@
 	},
 	"bugs": {
 		"url": "https://github.com/arnoudkooi/sn-scriptsync/issues",
-		"email": "anoud@snutils.com"
+		"email": "arnoud@snutils.com"
 	},
 	"categories": [
 		"Linters",
@@ -136,11 +136,6 @@
 				"key": "ctrl+enter",
 				"mac": "cmd+enter",
 				"when": "editorLangId == javascript && resourceDirname =~ /background/"
-			},
-			{
-				"command": "extension.takeScreenshot",
-				"key": "ctrl+alt+s",
-				"mac": "ctrl+cmd+s"
 			}
 		],
 		"menus": {
@@ -217,6 +212,32 @@
 					"when": "view == queueTreeView && viewItem == queueItem",
 					"group": "inline"
 				}
+			],
+			"commandPalette": [
+				{
+					"command": "extension.takeScreenshot",
+					"when": "false"
+				},
+				{
+					"command": "extension.createArtifact",
+					"when": "false"
+				},
+				{
+					"command": "extension.syncNow",
+					"when": "false"
+				},
+				{
+					"command": "extension.pauseQueue",
+					"when": "false"
+				},
+				{
+					"command": "extension.resumeQueue",
+					"when": "false"
+				},
+				{
+					"command": "extension.removeFromQueue",
+					"when": "false"
+				}
 			]
 		},
 		"configuration": {
@@ -228,11 +249,6 @@
 					"default": "scriptsync",
 					"description": "Scripts folder (Extension will auto activate when folder path ends with this name)"
 				},
-				"sn-scriptsync.refresh": {
-					"type": "integer",
-					"default": "60",
-					"description": "Update check (Not in use"
-				},
 				"sn-scriptsync.syncDelay": {
 					"type": "integer",
 					"default": 30,
@@ -243,6 +259,11 @@
 					"default": true,
 					"scope": "language-overridable",
 					"description": "Show sn-scriptsync commands in the editor context menu. Can be configured per language (e.g., disable for markdown files)."
+				},
+				"sn-scriptsync.debugLogging": {
+					"type": "boolean",
+					"default": false,
+					"description": "Write verbose diagnostics to debug.log in the workspace root. Useful for troubleshooting; can generate a lot of output when syncDelay > 0."
 				}
 			}
 		},

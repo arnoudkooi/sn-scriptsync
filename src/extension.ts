@@ -111,16 +111,21 @@ function processPendingFiles() {
 	}
 }
 
-// Debug logging
+// Debug logging - only logs when server is running and debugLogging is enabled
 function debugLog(message: string) {
+	if (!serverRunning) return;
+	
 	try {
+		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
+		const enabled = settings.get('debugLogging') as boolean;
+		if (!enabled) return;
+
 		const logPath = path.join(vscode.workspace.rootPath || '', 'debug.log');
 		const timestamp = new Date().toISOString();
 		const logLine = `[${timestamp}] ${message}\n`;
 		fs.appendFileSync(logPath, logLine);
 	} catch (e) {
 		// Silently ignore if we can't write to debug.log (e.g., read-only file system)
-		console.log(`[sn-scriptsync] ${message}`);
 	}
 }
 
@@ -1736,14 +1741,11 @@ function setupWatcher() {
 	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	const debounceSeconds = settings.get('syncDelay') as number;
 	
-	debugLog(`setupWatcher called: debounceSeconds=${debounceSeconds}, workspace=${vscode.workspace.rootPath}`);
-	
 	// Only enable if debounce > 0
 	if (debounceSeconds > 0) {
 		const DEBOUNCE_DELAY = debounceSeconds * 1000; 
 
 		watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.workspace.rootPath || '', "**/*"));
-		debugLog(`Watcher created for: ${vscode.workspace.rootPath}`);
 		
 		watcher.onDidCreate(uri => {
 			const fileName = path.basename(uri.fsPath);
@@ -1768,18 +1770,14 @@ function setupWatcher() {
 				return;
 			}
 			
-			debugLog(`File change detected: ${uri.fsPath}`);
-			
 			// Ignore Agent API folders (already handled separately above)
 			if (uri.fsPath.includes(`${path.sep}agent${path.sep}`)) {
-				debugLog(`  EXCLUDED: agent folder (API communication, not for sync)`);
 				return;
 			}
 			
 			// Ignore system/hidden files
 			const ignoredFiles = ['.DS_Store', '.gitignore', '.git', 'Thumbs.db', '.env', '.vscode'];
 			if (fileName.startsWith('.') || fileName.startsWith('_') || ignoredFiles.includes(fileName)) {
-				debugLog(`  EXCLUDED: system/hidden file (${fileName})`);
 				return;
 			}
 
@@ -1787,13 +1785,10 @@ function setupWatcher() {
 			// Path structure: workspace/instance/table/file.js (minimum 3 levels)
 			const relativePath = uri.fsPath.replace(vscode.workspace.rootPath || '', '');
 			const pathParts = relativePath.split(path.sep).filter(p => p);
-			debugLog(`  Relative path: ${relativePath}`);
-			debugLog(`  Path parts (${pathParts.length}): ${JSON.stringify(pathParts)}`);
 			
 			// Must be at least: instance/table/file (3 parts minimum)
 			// Files directly in instance folder should be ignored
 			if (pathParts.length < 3) {
-				debugLog(`  EXCLUDED: not deep enough (${pathParts.length} < 3)`);
 				return; // Not in a table folder
 			}
 			
@@ -1801,25 +1796,20 @@ function setupWatcher() {
 			const settingsPath = path.join(instanceFolder, '_settings.json');
 			const oldSettingsPath = path.join(instanceFolder, 'settings.json');
 			const hasSettings = fs.existsSync(settingsPath) || fs.existsSync(oldSettingsPath);
-			debugLog(`  Instance folder: ${instanceFolder}`);
-			debugLog(`  Settings check: _settings.json=${fs.existsSync(settingsPath)}, settings.json=${fs.existsSync(oldSettingsPath)}`);
 			
 			if (!hasSettings) {
-				debugLog(`  EXCLUDED: no settings file in instance folder`);
 				return; // Not a synced instance folder
 			}
 
 			// Ignore if this is a result of our own write
 			if (ExtensionUtils.ignoreNextSync.has(uri.fsPath)) {
 				ExtensionUtils.ignoreNextSync.delete(uri.fsPath);
-				debugLog(`  EXCLUDED: ignoreNextSync flag set`);
 				return;
 			}
 
 			// Ignore if this file was manually saved recently (within 2 seconds)
 			const lastManualSave = recentManualSaves.get(uri.fsPath);
 			if (lastManualSave && (Date.now() - lastManualSave < 2000)) {
-				debugLog(`  EXCLUDED: recently manually saved`);
 				return;
 			}
 
@@ -1827,14 +1817,12 @@ function setupWatcher() {
 			// This allows AI agents to create artifacts without waiting for the debounce timer
 			const scriptObj = eu.fileNameToObject(uri.fsPath);
 			if (scriptObj !== true && !scriptObj.sys_id && scriptObj.tableName && scriptObj.fieldName) {
-				debugLog(`  IMMEDIATE CREATE: new artifact detected (no sys_id), executing immediately`);
 				saveFieldsToServiceNow(uri.fsPath, false);
 				return;
 			}
 
 			// Add to pending set (for updates only)
 			pendingFiles.add(uri.fsPath);
-			debugLog(`  QUEUED: file added to pending (total: ${pendingFiles.size})`);
 
 			// Reset global timer
 			if (globalDebounceTimer) {
@@ -1848,8 +1836,6 @@ function setupWatcher() {
 			// Update UI
 			queueProvider.updateQueue(pendingFiles, DEBOUNCE_DELAY);
 		});
-	} else {
-		debugLog(`Watcher DISABLED: debounceSeconds is ${debounceSeconds}`);
 	}
 }
 
@@ -1903,8 +1889,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 	let settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	let syncDir: string = settings.get('path');
-	let refresh: number = settings.get('refresh');
-	refresh = Math.max(refresh, 30);
 	syncDir = syncDir.replace('~', '');	
 	if (nodePath.sep == "\\"){ //reverse slash when windows.
 		syncDir = syncDir.replace(/\//g,'\\');
@@ -1936,36 +1920,6 @@ export function activate(context: vscode.ExtensionContext) {
 		startServers();
 	}
 	setupWatcher();
-
-	// let handle = setInterval(() => { //todo auto check for changes
-
-	// 	let fileMeta = openFiles[window.activeTextEditor.document.fileName];
-	// 	let currentTime = new Date().getTime()
-	// 	if (fileMeta) {
-	// 		if (currentTime - fileMeta.refreshed > (refresh * 1000)) {
-	// 			let req = eu.fileNameToObject(window.activeTextEditor.document.fileName);
-	// 			req.action = 'requestRecord';
-	// 			req.actionGoal = 'updateCheck';
-	// 			req.sys_id = req.sys_id + "?sysparm_query=sys_updated_on>" + fileMeta.sys_updated_on +
-	// 				"&sysparm_fields=name,sys_updated_on,sys_updated_by,sys_scope.scope," + req.fieldName;
-	// 			requestRecords(req);
-
-	// 			openFiles[window.activeTextEditor.document.fileName].refreshed = currentTime;
-	// 		}
-	// 	}
-	// 	else {
-	// 		let fileMeta = {
-	// 			"opened": currentTime,
-	// 			"refreshed": currentTime,
-	// 			"sys_updated_by": "",
-	// 			"sys_updated_on": "",
-	// 			"original_content": window.activeTextEditor.document.getText(),
-	// 			"scope": ""
-	// 		}
-	// 		openFiles[window.activeTextEditor.document.fileName] = fileMeta;
-	// 	}
-
-	// }, 1000);
 
 	vscode.commands.registerCommand('extension.snScriptSyncDisable', () => {
 		stopServers();
@@ -2395,15 +2349,7 @@ function startServers() {
                 writeResponseToWebViewPanel(messageJson);
             }
 			else if (messageJson.hasOwnProperty('actionGoal')) {
-				if (messageJson.actionGoal == 'updateCheck') {
-					// todo track open files for auto refresh when changed
-
-					// openFiles[messageJson.fileName].sys_updated_on = messageJson.result.sys_updated_on;
-					// openFiles[messageJson.fileName].sys_updated_by = messageJson.result.sys_updated_by;
-					// openFiles[messageJson.fileName].scope = messageJson.result['sys_scope.scope'];
-					// openFiles[messageJson.fileName].content = messageJson.result[messageJson.fieldName];
-				}
-				else if (messageJson.actionGoal == 'getCurrent') {
+				if (messageJson.actionGoal == 'getCurrent') {
 					eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
 				}
 				else if (messageJson.actionGoal == 'writeInstanceMetaData') {
@@ -3081,12 +3027,8 @@ function saveWidget(postedJson, retry = 0) {
 
 		eu.writeFile(filePath + file, files[file].content, files[file].openFile, function (err) {
 			if (err) {
-				//todo
+				vscode.window.showErrorMessage(`Error writing widget file: ${err}`);
 			}
-			else {
-
-			}
-
 		});
 	}
 
@@ -3120,11 +3062,8 @@ function saveWidget(postedJson, retry = 0) {
 
 
 function saveRequestResponse(responseJson) {
-
+	// Guard: response must have results array (see issue #19)
 	if (!responseJson.hasOwnProperty("results")) {
-		console.log("responseJson does not have property results")
-		//https://github.com/arnoudkooi/sn-scriptsync/issues/19
-		//need to look in this further..
 		return;
 	}
 	let filePath = responseJson.filePath + responseJson.tableName + nodePath.sep;
@@ -3227,34 +3166,20 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 	}
 
 	let scriptObj = eu.fileNameToObject(documentOrPath);
-	debugLog(`saveFieldsToServiceNow: ${filePath}`);
-	debugLog(`  scriptObj: tableName=${scriptObj.tableName}, fieldName=${scriptObj.fieldName}, sys_id=${scriptObj.sys_id}, name=${scriptObj.name}`);
 
 	if (scriptObj.fieldName == '_test_urls') return true; //helper file, dont save to instance
 	if (!serverRunning) return true; 
 
-	// Handle new artifacts (specifically script includes) that have no sys_id yet
-	// tableName might be misidentified as the record name if not found in map, or if parsing logic is tricky.
-	// But let's trust fileNameToObject for now. 
-	// If tableName is NOT sys_script_include, maybe it was parsed as something else.
-	
+	// Handle new artifacts that have no sys_id yet - create them in ServiceNow
 	if (!scriptObj.sys_id) {
-		debugLog(`  No sys_id - creating new artifact`);
-		debugLog(`  tableName: ${scriptObj.tableName}, fieldName: ${scriptObj.fieldName}`);
-		
-		// Create new artifact for any table type
 		if (scriptObj.tableName && scriptObj.fieldName) {
-			debugLog(`  -> Calling createNewArtifact!`);
 			createNewArtifact(scriptObj);
 			return true;
-		} else {
-			debugLog(`  -> NOT calling createNewArtifact (missing tableName or fieldName)`);
 		}
 	}
 
 	if (!scriptObj?.sys_id ) {
-		debugLog(`  SKIPPED: no sys_id`);
-		return true; //r server is off or this was not a recognized file (probably metadata)
+		return true; // server is off or this was not a recognized file (probably metadata)
 	}
 
 	if (fromVsCode) lastSave = Math.floor(+new Date() / 1000);
@@ -3397,7 +3322,6 @@ vscode.commands.registerCommand('infoTreeCommand', (arg) => {
 		openInInstance();
 	}
 	else if (arg.action == "selectionToBG"){
-		console.log("selectionToBG", arg);
 		selectionToBG(arg.global);
 	}
 });
@@ -3669,12 +3593,10 @@ function proceedWithArtifactCreation(scriptObj: any) {
 				// Try to set a default value if one exists
 				if (fieldMeta.default_value) {
 					recordPayload[fieldName] = fieldMeta.default_value;
-					debugLog(`  Best effort: Set ${fieldName} to default value: ${fieldMeta.default_value}`);
 				}
 				// For boolean fields, default to true for common ones like 'active'
 				else if (fieldMeta.type === 'boolean' && fieldName === 'active') {
 					recordPayload[fieldName] = 'true';
-					debugLog(`  Best effort: Set ${fieldName} to 'true'`);
 				}
 			}
 		} catch (e) {

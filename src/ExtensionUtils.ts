@@ -92,7 +92,6 @@ export class ExtensionUtils {
     writeInstanceSettings(instance) {
         var path = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep + "_settings.json";
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
-            if (err) console.log(err);
             fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
         });
         instanceSettings[instance.name] = instance;
@@ -128,7 +127,6 @@ export class ExtensionUtils {
             return JSON.parse(fs.readFileSync(path)) || {};
         }
         catch(ex){
-            console.log(ex);
             return {};
         }
     }
