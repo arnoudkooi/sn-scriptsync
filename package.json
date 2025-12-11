@@ -1,8 +1,8 @@
 {
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
-	"description": "SN Utils sn-sriptSync for VS Code. (Personal work of Arnoud Kooi)",
-	"version": "3.3.8",
+	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
+	"version": "4.0.5",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -11,7 +11,7 @@
 	},
 	"bugs": {
 		"url": "https://github.com/arnoudkooi/sn-scriptsync/issues",
-		"email": "apps@arnoudkooi.com"
+		"email": "anoud@snutils.com"
 	},
 	"categories": [
 		"Linters",
@@ -78,6 +78,31 @@
 			{
 				"command": "extension.createArtifact",
 				"title": "sn-scriptsync: Create a new artifact in ServiceNow"
+			},
+			{
+				"command": "extension.syncNow",
+				"title": "Sync Now",
+				"icon": "$(cloud-upload)"
+			},
+			{
+				"command": "extension.pauseQueue",
+				"title": "Pause Queue",
+				"icon": "$(primitive-square)"
+			},
+			{
+				"command": "extension.resumeQueue",
+				"title": "Resume Queue",
+				"icon": "$(play)"
+			},
+			{
+				"command": "extension.removeFromQueue",
+				"title": "Remove from Queue",
+				"icon": "$(close)"
+			},
+			{
+				"command": "extension.takeScreenshot",
+				"title": "sn-scriptsync: Take Screenshot of ServiceNow Page",
+				"icon": "$(device-camera)"
 			}
 		],
 		"keybindings": [
@@ -111,6 +136,11 @@
 				"key": "ctrl+enter",
 				"mac": "cmd+enter",
 				"when": "editorLangId == javascript && resourceDirname =~ /background/"
+			},
+			{
+				"command": "extension.takeScreenshot",
+				"key": "ctrl+alt+s",
+				"mac": "ctrl+cmd+s"
 			}
 		],
 		"menus": {
@@ -119,44 +149,73 @@
 					"command": "extension.bgScriptGlobal",
 					"group": "sn-scriptsync",
 					"title": "Selection to Background Script (global)",
-					"when": "editorLangId == javascript"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.bgScriptScope",
 					"group": "sn-scriptsync",
 					"title": "Selection to Background Script (scope)",
-					"when": "editorLangId == javascript"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.openInInstance",
 					"group": "sn-scriptsync",
-					"title": "Open in Instance"
+					"title": "Open in Instance",
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.refreshFromInstance",
 					"group": "sn-scriptsync",
-					"title": "Retrieve current version from Instance"
+					"title": "Retrieve current version from Instance",
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.requestScopeArtifacts",
 					"group": "sn-scriptsync",
-					"title": "Load/Refresh artifacts from scope"
+					"title": "Load/Refresh artifacts from scope",
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.requestScopeArtifactsAll",
 					"group": "sn-scriptsync",
-					"title": "Load/Refresh artifacts from scope (include empty)"
+					"title": "Load/Refresh artifacts from scope (include empty)",
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.requestInstanceMetaData",
 					"group": "sn-scriptsync",
-					"title": "Load instance tablenames and properties for IntelliSense"
+					"title": "Load instance tablenames and properties for IntelliSense",
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.bgScriptExecute",
 					"group": "sn-scriptsync",
 					"title": "Execute Background Script in Instance",
-					"when": "editorLangId == javascript && resourceDirname =~ /background/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceDirname =~ /background/ && resourceFilename =~ /^[^_]/"
+				}
+			],
+			"view/title": [
+				{
+					"command": "extension.pauseQueue",
+					"when": "view == queueTreeView && !sn-scriptsync.queuePaused",
+					"group": "navigation@1"
+				},
+				{
+					"command": "extension.resumeQueue",
+					"when": "view == queueTreeView && sn-scriptsync.queuePaused",
+					"group": "navigation@1"
+				},
+				{
+					"command": "extension.syncNow",
+					"when": "view == queueTreeView",
+					"group": "navigation@2"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "extension.removeFromQueue",
+					"when": "view == queueTreeView && viewItem == queueItem",
+					"group": "inline"
 				}
 			]
 		},
@@ -173,6 +232,17 @@
 					"type": "integer",
 					"default": "60",
 					"description": "Update check (Not in use"
+				},
+				"sn-scriptsync.syncDelay": {
+					"type": "integer",
+					"default": 30,
+					"description": "Sync changes made by external tools (e.g. AI agents, git) or when files are not open in the editor. Set to 0 to disable. Defaults to 30 seconds."
+				},
+				"sn-scriptsync.showContextMenu": {
+					"type": "boolean",
+					"default": true,
+					"scope": "language-overridable",
+					"description": "Show sn-scriptsync commands in the editor context menu. Can be configured per language (e.g., disable for markdown files)."
 				}
 			}
 		},
@@ -181,12 +251,16 @@
 				{
 					"id": "sn-scriptsync",
 					"title": "sn-scriptsync",
-					"icon": "img/icon24.svg"
+					"icon": "img/grey.svg"
 				}
 			]
 		},
 		"views": {
 			"sn-scriptsync": [
+				{
+					"id": "queueTreeView",
+					"name": "Pending Saves"
+				},
 				{
 					"id": "scopeTreeView",
 					"name": "Scoped App Files"
@@ -201,6 +275,10 @@
 			{
 				"view": "scopeTreeView",
 				"contents": "Please load scope via right click context menu."
+			},
+			{
+				"view": "queueTreeView",
+				"contents": "No pending file syncs."
 			}
 		],
 		"snippets": [

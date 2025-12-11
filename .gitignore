@@ -1,9 +1,34 @@
-node_modules
-package-lock.json
-build
-out
-npm-debug.log
+# Dependencies
+node_modules/
+roadmap/
+
+# Build output
+build/
+out/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
 .env
+.env.local
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# VS Code extension packaging
 *.vsix
-roadmap
+
+# IDE
+.vscode-test/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+*~

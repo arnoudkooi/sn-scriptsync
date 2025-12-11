@@ -16,6 +16,8 @@ let instanceSettings = {};
 
 export class ExtensionUtils {
 
+    public static ignoreNextSync = new Set<string>();
+
     renamePath(oldPath: string, newPath: string) : void {
         fs.renameSync(oldPath, newPath);
     }
@@ -47,6 +49,8 @@ export class ExtensionUtils {
 
     writeFile(path: string, contents: string, openFile, cb: Function, myThis = this) {
 
+        ExtensionUtils.ignoreNextSync.add(path);
+
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             fs.writeFile(path, contents, (error) => { /* handle error */ });
@@ -67,6 +71,8 @@ export class ExtensionUtils {
 
     writeFileIfNotExists(path, contents, openFile, cb) {
 
+        ExtensionUtils.ignoreNextSync.add(path);
+
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             fs.writeFile(path, contents, { "flag": "wx" }, (error) => { /* handle error */ });
@@ -84,7 +90,7 @@ export class ExtensionUtils {
 
 
     writeInstanceSettings(instance) {
-        var path = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep + "settings.json";
+        var path = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep + "_settings.json";
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) console.log(err);
             fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
@@ -97,8 +103,23 @@ export class ExtensionUtils {
             return instanceSettings[instanceName];
         }
         else {
-            var path = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep + "settings.json";
-            return JSON.parse(fs.readFileSync(path)) || {};
+            const newPath = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep + "_settings.json";
+            const oldPath = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep + "settings.json";
+            
+            // Check new path first, fall back to old path for backwards compatibility
+            if (fs.existsSync(newPath)) {
+                return JSON.parse(fs.readFileSync(newPath)) || {};
+            } else if (fs.existsSync(oldPath)) {
+                // Migrate: rename old file to new name
+                try {
+                    fs.renameSync(oldPath, newPath);
+                    return JSON.parse(fs.readFileSync(newPath)) || {};
+                } catch (e) {
+                    // If rename fails, just read from old path
+                    return JSON.parse(fs.readFileSync(oldPath)) || {};
+                }
+            }
+            return {};
         }
     }
 
@@ -137,9 +158,12 @@ export class ExtensionUtils {
     }
 
     //
-    fileNameToObject(listener : TextDocument) {
+    fileNameToObject(listener : TextDocument | string) {
 
-        var fileNameUse = listener.fileName.replace(workspace.rootPath, "");
+        let fileName = (typeof listener === 'string') ? listener : listener.fileName;
+        let content = (typeof listener === 'string') ? fs.readFileSync(listener, 'utf-8') : listener.getText();
+
+        var fileNameUse = fileName.replace(workspace.rootPath, "");
         var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
         var basePath = workspace.rootPath + nodePath.sep + fileNameArr[0]+ nodePath.sep;
         let fullPath = basePath + fileNameArr[1]+ nodePath.sep + fileNameArr[2]+ nodePath.sep
@@ -170,6 +194,17 @@ export class ExtensionUtils {
             var scriptObj = <any>{};
             scriptObj.instance = this.getInstanceSettings(fileNameArr[0]);
             scriptObj.tableName = fileNameArr[2];
+            // Handle folder record tables where the structure is different
+            if (Constants.FOLDERRECORDTABLES.includes(scriptObj.tableName)) {
+                // For folder records, fileNameArr[3] is the record name (folder)
+                // and fileNameArr[4] is the field name.
+                // This block handles the general "6 parts" case, but folder records 
+                // might need specific handling if they fall into this length check.
+                // However, based on the regex in dissasembleFilePath, folder records 
+                // usually have a different structure.
+                // Let's assume standard flat structure for now as per "new 2023 way".
+            }
+            
             scriptObj.name = fileNameArr[3];
             scriptObj.fieldName = fileNameArr[4];
             scriptObj.sys_id = objNameToSysId[fileNameArr[3]] || '';
@@ -177,8 +212,8 @@ export class ExtensionUtils {
             if (scopes.hasOwnProperty(fileNameArr[1])) 
                 scriptObj.scope = scopes[fileNameArr[1]];
 
-            scriptObj.fileName = listener.fileName;
-            scriptObj.content = listener.getText();
+            scriptObj.fileName = fileName;
+            scriptObj.content = content;
 
             if (fileNameArr[2] == 'sp_widget')
                 scriptObj.testUrls = this.getFileAsArray(path.dirname(scriptObj.fileName) + nodePath.sep + "_test_urls.txt");
@@ -226,8 +261,8 @@ export class ExtensionUtils {
                 scriptObj.sys_id = fileNameArr[6];
             }
         }
-        scriptObj.fileName = listener.fileName;
-        scriptObj.content = listener.getText();
+        scriptObj.fileName = fileName;
+        scriptObj.content = content;
         return scriptObj;
 
     }

@@ -1,6 +1,167 @@
 # CHANGELOG.md
 
 
+## 4.0.5 (2025-12-10)
+
+**Packaging fixes:**
+- Minor fixes for missing artefacts in the published package
+
+## 4.0.0 (2025-12-10)
+
+**Requirements**: Agent API features require **SN Utils 9.2.0.0 or higher**. 
+
+### AI Agent & External Change Support (Issue #119)
+This release adds comprehensive support for AI coding assistants and external file changes:
+
+- **Automatic sync of external changes**: Files modified by AI agents (Cursor, GitHub Copilot, Windsurf, etc.), git operations, or external editors are now automatically synced to ServiceNow
+- **New `syncDelay` setting**: Controls how often external changes are synced (default: 30 seconds)
+  - Set to `0` to disable external change syncing
+  - Changes are batched and deduplicated for efficiency
+- **Pending Saves Queue**: New tree view showing files waiting to be synced
+  - Pause/Resume queue functionality
+  - "Sync Now" button for immediate sync
+  - Remove individual files from queue
+- **Multi-field batching**: When multiple fields of the same record change, they're combined into a single API call
+- **New artifact creation**: AI agents can create new Script Includes and other artifacts by simply creating files in the correct folder structure
+
+### File-based Agent API
+AI agents can interact with scriptsync programmatically via folder-based event queue or legacy `_requests.json` files in the instance folder. The file-based approach was designed to be **simple and dependency-free** - no npm packages, no HTTP servers, just JSON files that any AI agent can read and write.
+
+**Event-Driven Queue (Recommended):**
+- New `agent/requests/` and `agent/responses/` folder structure
+- Instant, event-driven processing (no polling on extension side)
+- Parallel request support with unique file names (`req_<id>.json`, `res_<id>.json`)
+- Adds `appName` property to all responses (e.g., "Cursor", "VS Code")
+
+### Security Enhancements
+Added comprehensive security validations for Agent API:
+
+- **Request ID validation**: IDs must be alphanumeric with underscores/hyphens only (`^[a-zA-Z0-9_-]+$`)
+- **Workspace boundary enforcement**: All file operations restricted to VS Code workspace
+- **Path traversal protection**: File paths are normalized and validated to prevent directory escapes
+- **Upload security**: `upload_attachment` command validates file paths are within workspace
+- **Agent folder isolation**: `agent/` folders excluded from ServiceNow sync and git tracking
+- Security violations return descriptive error responses
+
+**Request format:**
+```json
+{
+    "id": "unique-request-id",
+    "command": "command_name",
+    "params": { ... }
+}
+```
+
+#### Agent Commands
+
+| Command | Description | Parameters |
+|---------|-------------|------------|
+| `check_connection` | Check if scriptsync server is running and browser is connected | - |
+| `get_sync_status` | Get current sync queue status (pending files, paused state) | - |
+| `sync_now` | Immediately sync all pending files | - |
+| `get_last_error` | Get the most recent sync error | - |
+| `clear_last_error` | Clear the last error | - |
+| `get_instance_info` | Get instance name and connection status | - |
+| `list_tables` | List all table folders (scopes) in the instance | - |
+| `list_artifacts` | List artifacts in a table folder | `table` |
+| `check_name_exists` | Check if artifact name exists locally in `_map.json` | `table`, `name` |
+| `get_file_structure` | Get expected file naming conventions | - |
+| `validate_path` | Validate a proposed file path | `path` |
+| `update_record` | Update a single field on a record | `sys_id`, `table`, `field`, `content` |
+| `update_record_batch` | Update multiple fields on a record | `sys_id`, `table`, `fields` (object) |
+| `open_in_browser` | Open an artifact in the browser | `sys_id` or (`name`, `table`, `scope`) |
+| `refresh_preview` | Refresh widget preview in browser | `sys_id` or (`name`, `table`, `scope`) |
+| `get_table_metadata` | Fetch table schema/fields from ServiceNow | `table` |
+| `check_name_exists_remote` | Check if artifact exists in ServiceNow | `table`, `name` |
+| `query_records` | Query records from any ServiceNow table | `table`, `query`, `fields`, `limit`, `orderBy` |
+| `get_parent_options` | Get available parent records for references | `table`, `scope`, `nameField`, `limit` |
+| `create_artifact` | Create a new record in ServiceNow | `table`, `scope`, `fields` (object with `name` required) |
+
+**Example: Check connection**
+```json
+// Write to _requests.json
+{ "id": "1", "command": "check_connection" }
+
+// Response in _responses.json
+{
+    "id": "1",
+    "command": "check_connection",
+    "status": "success",
+    "result": {
+        "ready": true,
+        "serverRunning": true,
+        "browserConnected": true,
+        "message": "Connected and ready"
+    }
+}
+```
+
+**Example: Query incidents**
+```json
+// Write to _requests.json
+{
+    "id": "2",
+    "command": "query_records",
+    "params": {
+        "table": "incident",
+        "query": "active=true^priority=1",
+        "fields": "number,short_description,state",
+        "limit": 5
+    }
+}
+```
+
+**Example: Create script include**
+```json
+// Write to _requests.json
+{
+    "id": "3",
+    "command": "create_artifact",
+    "params": {
+        "table": "sys_script_include",
+        "scope": "global",
+        "fields": {
+            "name": "MyNewUtils",
+            "script": "var MyNewUtils = Class.create();\nMyNewUtils.prototype = {\n    initialize: function() {},\n    type: 'MyNewUtils'\n};",
+            "api_name": "global.MyNewUtils",
+            "active": true,
+            "client_callable": false
+        }
+    }
+}
+```
+
+### Context Menu Improvements (Issues #115, #116)
+The right-click context menu has been significantly improved to reduce clutter:
+
+- **New `showContextMenu` setting**: Hide/show sn-scriptsync commands in the context menu
+  - Supports **language-specific overrides** - configure per file type (e.g., hide for markdown)
+  - Can be set globally or per-workspace
+- **Server-aware visibility**: Context menu only appears when scriptsync server is running
+- **Smart filtering**: 
+  - Commands hidden for internal files (`_map.json`, `_settings.json`, etc.)
+  - "Load IntelliSense" command only shows for JavaScript files
+  - Background script commands restricted to JavaScript files
+
+Example settings.json configuration:
+```json
+{
+    "sn-scriptsync.showContextMenu": true,
+    "[markdown]": {
+        "sn-scriptsync.showContextMenu": false
+    },
+    "[plaintext]": {
+        "sn-scriptsync.showContextMenu": false
+    }
+}
+```
+
+### Other Improvements
+- Files saved with "Save without formatting" (Ctrl+K, S) are now synced to the instance
+- Manual saves always sync immediately, bypassing the debounce queue
+- Improved duplicate detection for file changes
+
+
 ## 3.3.8 (2025-09-02)
 Fixes / changes:
  - Update dependencies

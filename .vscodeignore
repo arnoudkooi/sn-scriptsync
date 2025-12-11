@@ -1,0 +1,52 @@
+# Development files
+.vscode/**
+.vscode-test/**
+src/**
+tsconfig.json
+tslint.json
+.gitignore
+.vscodeignore
+
+# Build artifacts
+**/*.map
+*.vsix
+
+# Dev dependencies only (production deps like ws, sass are needed at runtime)
+node_modules/.bin/**
+node_modules/@types/**
+node_modules/typescript/**
+node_modules/tslint/**
+
+# Lock files
+package-lock.json
+
+# Git
+.git
+.github
+
+# Documentation for contributors
+CONTRIBUTING.md
+
+# Roadmap
+roadmap/**
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test files
+test/**
+**/.eslintrc.json
+
+# Unused files
+scriptsync.js
+resources/convertTernToDTS.js
+resources/metaDataRelations.js
+resources/images/**
+security/**
+
+
+
