@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.1.0",
+	"version": "4.1.1",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -271,15 +271,15 @@
 					"default": "scriptsync",
 					"description": "Scripts folder (Extension will auto activate when folder path ends with this name)"
 				},
-				"sn-scriptsync.syncDelay": {
-					"type": "integer",
-					"default": 30,
-					"description": "Seconds to wait before auto-syncing external file changes (AI agents/git/tools). Set to 0 to disable auto-sync (monitor only). Defaults to 30 seconds."
-				},
-				"sn-scriptsync.monitorFileChanges": {
+				"sn-scriptsync.externalChanges.monitorFileChanges": {
 					"type": "boolean",
 					"default": true,
 					"description": "Monitor external file changes (AI agents/git/tools) and show them in the Pending Saves queue. Turn off to fully disable monitoring."
+				},
+				"sn-scriptsync.externalChanges.syncDelay": {
+					"type": "integer",
+					"default": 30,
+					"description": "Seconds to wait before auto-syncing monitored external changes. Set to 0 to disable auto-sync (monitor only). Defaults to 30 seconds."
 				},
 				"sn-scriptsync.showContextMenu": {
 					"type": "boolean",

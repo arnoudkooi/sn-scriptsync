@@ -1,11 +1,15 @@
 # CHANGELOG.md
 
 
-## 4.1.0 (2025-12-12)
+## 4.1.1 (2025-12-12)
 
 **External change monitoring / auto-sync (AI agents / git / tools):**
-- New `monitorFileChanges` toggle (default: on)
-- `syncDelay = 0` now means monitor-only (queue updates, manual Sync Now) and `syncDelay > 0` enables auto-sync
+- New `externalChanges.monitorFileChanges` toggle (default: on). Turn off to fully disable monitoring.
+- New `externalChanges.syncDelay` auto-sync timer:
+  - `= 0`: monitor-only (queue updates, manual Sync Now)
+  - `> 0`: auto-sync after N seconds
+- **Breaking**: settings renamed under `externalChanges.*` (old `syncDelay` / `monitorFileChanges` keys are no longer read)
+- Fix: when the queue is paused, new external file changes no longer re-arm the auto-sync timer
 
 **Pending Saves Queue:**
 - Added a "Clear All Pending" header button (with confirmation)

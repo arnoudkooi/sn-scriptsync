@@ -32,7 +32,9 @@ Files modified by AI agents (Cursor, GitHub Copilot, Windsurf, etc.), git operat
 - **Automatic detection**: External file changes are monitored via file system watcher
 - **Smart batching**: Changes are intelligently grouped and deduplicated for efficiency
 - **Multi-field batching**: Multiple field changes on the same record are combined into a single API call
-- **New `syncDelay` setting**: Control sync frequency (default: 30 seconds, set to 0 to disable)
+- **New external change settings**:
+  - `externalChanges.monitorFileChanges`: monitor external changes (default: on)
+  - `externalChanges.syncDelay`: auto-sync delay in seconds (default: 30, set to 0 for monitor-only)
 - **Pending Saves Queue**: New tree view showing files waiting to sync
   - Pause/Resume queue functionality
   - "Sync Now" button for immediate sync
@@ -188,8 +190,8 @@ sn-scriptsync is designed to work seamlessly with AI coding assistants. Changes 
 4. **Multi-field batching**: Multiple changes to the same record are combined into one API call
 
 ### Settings
-- `monitorFileChanges`: Monitor external changes (AI agents/git/tools) and show them in the Pending Saves queue (default: true)
-- `syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 30, set to 0 to disable auto-sync)
+- `externalChanges.monitorFileChanges`: Monitor external changes (AI agents/git/tools) and show them in the Pending Saves queue (default: true)
+- `externalChanges.syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 30, set to 0 to disable auto-sync)
 - Manual saves (Ctrl+S) always sync immediately, bypassing the queue
 
 ### Creating New Artifacts with AI

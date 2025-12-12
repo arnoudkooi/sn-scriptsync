@@ -1739,8 +1739,8 @@ function setupWatcher() {
 		watcher = undefined;
 	}
 	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
-	const debounceSeconds = settings.get('syncDelay') as number;
-	const monitorFileChanges = settings.get('monitorFileChanges') as boolean;
+	const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
+	const monitorFileChanges = (settings.get('externalChanges.monitorFileChanges') as boolean) ?? true;
 	const autoSyncEnabled = monitorFileChanges && debounceSeconds > 0;
 	vscode.commands.executeCommand('setContext', 'sn-scriptsync.queueAutoSyncEnabled', autoSyncEnabled);
 	
@@ -1883,7 +1883,7 @@ vscode.workspace.onDidSaveTextDocument(document => {
 		manualSaveMap.delete(document.uri.toString());
 		
 		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
-		const debounceSeconds = settings.get('syncDelay') as number;
+		const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
 		
 		// If external sync is ON, remove this file from the pending queue
 		// since we're saving it NOW (instant manual save)
@@ -2450,8 +2450,8 @@ function startServers() {
 	// Register Pause command
 	vscode.commands.registerCommand('extension.pauseQueue', () => {
 		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
-		const debounceSeconds = settings.get('syncDelay') as number;
-		const monitorFileChanges = settings.get('monitorFileChanges') as boolean;
+		const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
+		const monitorFileChanges = (settings.get('externalChanges.monitorFileChanges') as boolean) ?? true;
 		if (!monitorFileChanges || debounceSeconds <= 0) {
 			vscode.window.showInformationMessage('Auto-sync is disabled. Enable monitoring and set syncDelay > 0 to use Pause/Resume.');
 			return;
@@ -2475,8 +2475,8 @@ function startServers() {
 	// Register Resume command
 	vscode.commands.registerCommand('extension.resumeQueue', () => {
 		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
-		const debounceSeconds = settings.get('syncDelay') as number;
-		const monitorFileChanges = settings.get('monitorFileChanges') as boolean;
+		const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
+		const monitorFileChanges = (settings.get('externalChanges.monitorFileChanges') as boolean) ?? true;
 		if (!monitorFileChanges || debounceSeconds <= 0) {
 			vscode.window.showInformationMessage('Auto-sync is disabled. Use "Sync Now" to sync pending files.');
 			return;
