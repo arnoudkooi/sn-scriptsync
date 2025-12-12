@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.0.7",
+	"version": "4.1.0",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -100,6 +100,15 @@
 				"icon": "$(close)"
 			},
 			{
+				"command": "extension.clearQueue",
+				"title": "Clear All Pending",
+				"icon": "$(clear-all)"
+			},
+			{
+				"command": "extension.openQueuedFile",
+				"title": "Open Pending File"
+			},
+			{
 				"command": "extension.takeScreenshot",
 				"title": "sn-scriptsync: Take Screenshot of ServiceNow Page",
 				"icon": "$(device-camera)"
@@ -192,18 +201,23 @@
 			"view/title": [
 				{
 					"command": "extension.pauseQueue",
-					"when": "view == queueTreeView && !sn-scriptsync.queuePaused",
+					"when": "view == queueTreeView && !sn-scriptsync.queuePaused && sn-scriptsync.queueAutoSyncEnabled",
 					"group": "navigation@1"
 				},
 				{
 					"command": "extension.resumeQueue",
-					"when": "view == queueTreeView && sn-scriptsync.queuePaused",
+					"when": "view == queueTreeView && sn-scriptsync.queuePaused && sn-scriptsync.queueAutoSyncEnabled",
 					"group": "navigation@1"
 				},
 				{
 					"command": "extension.syncNow",
 					"when": "view == queueTreeView",
 					"group": "navigation@2"
+				},
+				{
+					"command": "extension.clearQueue",
+					"when": "view == queueTreeView",
+					"group": "navigation@3"
 				}
 			],
 			"view/item/context": [
@@ -237,6 +251,14 @@
 				{
 					"command": "extension.removeFromQueue",
 					"when": "false"
+				},
+				{
+					"command": "extension.clearQueue",
+					"when": "false"
+				},
+				{
+					"command": "extension.openQueuedFile",
+					"when": "false"
 				}
 			]
 		},
@@ -252,7 +274,12 @@
 				"sn-scriptsync.syncDelay": {
 					"type": "integer",
 					"default": 30,
-					"description": "Sync changes made by external tools (e.g. AI agents, git) or when files are not open in the editor. Set to 0 to disable. Defaults to 30 seconds."
+					"description": "Seconds to wait before auto-syncing external file changes (AI agents/git/tools). Set to 0 to disable auto-sync (monitor only). Defaults to 30 seconds."
+				},
+				"sn-scriptsync.monitorFileChanges": {
+					"type": "boolean",
+					"default": true,
+					"description": "Monitor external file changes (AI agents/git/tools) and show them in the Pending Saves queue. Turn off to fully disable monitoring."
 				},
 				"sn-scriptsync.showContextMenu": {
 					"type": "boolean",

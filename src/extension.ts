@@ -1740,10 +1740,29 @@ function setupWatcher() {
 	}
 	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	const debounceSeconds = settings.get('syncDelay') as number;
+	const monitorFileChanges = settings.get('monitorFileChanges') as boolean;
+	const autoSyncEnabled = monitorFileChanges && debounceSeconds > 0;
+	vscode.commands.executeCommand('setContext', 'sn-scriptsync.queueAutoSyncEnabled', autoSyncEnabled);
 	
-	// Only enable if debounce > 0
-	if (debounceSeconds > 0) {
-		const DEBOUNCE_DELAY = debounceSeconds * 1000; 
+	// If monitoring is disabled, keep Agent API working by watching only agent request files.
+	if (!monitorFileChanges) {
+		watcher = vscode.workspace.createFileSystemWatcher(
+			new vscode.RelativePattern(vscode.workspace.rootPath || '', '**/agent/requests/*.json')
+		);
+
+		watcher.onDidCreate(uri => {
+			debugLog(`Agent API request file created: ${uri.fsPath}`);
+			handleAgentRequest(uri.fsPath);
+		});
+
+		watcher.onDidChange(uri => {
+			debugLog(`Agent API request file changed: ${uri.fsPath}`);
+			handleAgentRequest(uri.fsPath);
+		});
+		return;
+	}
+
+	const DEBOUNCE_DELAY = debounceSeconds > 0 ? debounceSeconds * 1000 : 0;
 
 		watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.workspace.rootPath || '', "**/*"));
 		
@@ -1824,6 +1843,18 @@ function setupWatcher() {
 			// Add to pending set (for updates only)
 			pendingFiles.add(uri.fsPath);
 
+			// Monitor-only: update queue/badge but don't schedule auto sync.
+			if (debounceSeconds <= 0) {
+				queueProvider.updateQueue(pendingFiles, 0);
+				return;
+			}
+
+			// If paused, do not schedule auto-sync; just refresh UI.
+			if (queueProvider?.isPaused) {
+				queueProvider.updateQueue(pendingFiles, DEBOUNCE_DELAY);
+				return;
+			}
+
 			// Reset global timer
 			if (globalDebounceTimer) {
 				clearTimeout(globalDebounceTimer);
@@ -1836,7 +1867,6 @@ function setupWatcher() {
 			// Update UI
 			queueProvider.updateQueue(pendingFiles, DEBOUNCE_DELAY);
 		});
-	}
 }
 
 // Listen for the "will save" event and mark the document if the reason was manual.
@@ -1857,7 +1887,7 @@ vscode.workspace.onDidSaveTextDocument(document => {
 		
 		// If external sync is ON, remove this file from the pending queue
 		// since we're saving it NOW (instant manual save)
-		if (debounceSeconds > 0) {
+			if (debounceSeconds !== 0) {
 			pendingFiles.delete(document.fileName);
 			queueProvider?.removeFromQueue(document.fileName);
 		}
@@ -2419,6 +2449,14 @@ function startServers() {
 
 	// Register Pause command
 	vscode.commands.registerCommand('extension.pauseQueue', () => {
+		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
+		const debounceSeconds = settings.get('syncDelay') as number;
+		const monitorFileChanges = settings.get('monitorFileChanges') as boolean;
+		if (!monitorFileChanges || debounceSeconds <= 0) {
+			vscode.window.showInformationMessage('Auto-sync is disabled. Enable monitoring and set syncDelay > 0 to use Pause/Resume.');
+			return;
+		}
+
 		if (pendingFiles.size === 0) {
 			vscode.window.showInformationMessage('No pending files to pause.');
 			return;
@@ -2436,6 +2474,14 @@ function startServers() {
 
 	// Register Resume command
 	vscode.commands.registerCommand('extension.resumeQueue', () => {
+		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
+		const debounceSeconds = settings.get('syncDelay') as number;
+		const monitorFileChanges = settings.get('monitorFileChanges') as boolean;
+		if (!monitorFileChanges || debounceSeconds <= 0) {
+			vscode.window.showInformationMessage('Auto-sync is disabled. Use "Sync Now" to sync pending files.');
+			return;
+		}
+
 		if (pendingFiles.size === 0) {
 			vscode.window.showInformationMessage('No pending files to resume.');
 			return;
@@ -2445,8 +2491,6 @@ function startServers() {
 		vscode.commands.executeCommand('setContext', 'sn-scriptsync.queuePaused', false);
 		
 		// Resume: restart the timer with remaining time
-		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
-		const debounceSeconds = settings.get('syncDelay') as number;
 		const DEBOUNCE_DELAY = debounceSeconds * 1000;
 		
 		globalDebounceTimer = setTimeout(() => {
@@ -2467,6 +2511,51 @@ function startServers() {
 				clearTimeout(globalDebounceTimer);
 				globalDebounceTimer = undefined;
 			}
+		}
+	});
+
+	// Open/activate a pending file in the editor
+	vscode.commands.registerCommand('extension.openQueuedFile', async (item: any) => {
+		try {
+			const filePath: string | undefined = item?.filePath;
+			if (!filePath) {
+				return;
+			}
+
+			const uri = vscode.Uri.file(filePath);
+			await vscode.window.showTextDocument(uri, { preview: false, preserveFocus: false });
+		} catch (e) {
+			console.error('Failed to open pending file:', e);
+			debugLog(`Failed to open pending file: ${e}`);
+			vscode.window.showErrorMessage('Failed to open pending file.');
+		}
+	});
+
+	// Clear all pending files from the queue (with confirmation)
+	vscode.commands.registerCommand('extension.clearQueue', async () => {
+		if (pendingFiles.size === 0) {
+			vscode.window.showInformationMessage('No pending files to clear.');
+			return;
+		}
+
+		const confirm = await vscode.window.showWarningMessage(
+			`Clear all ${pendingFiles.size} pending file sync${pendingFiles.size !== 1 ? 's' : ''}?`,
+			{ modal: true },
+			'Clear all'
+		);
+
+		if (confirm !== 'Clear all') {
+			return;
+		}
+
+		pendingFiles.clear();
+		queueProvider.clearQueue();
+
+		// Reset paused context + timers
+		vscode.commands.executeCommand('setContext', 'sn-scriptsync.queuePaused', false);
+		if (globalDebounceTimer) {
+			clearTimeout(globalDebounceTimer);
+			globalDebounceTimer = undefined;
 		}
 	});
 

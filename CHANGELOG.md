@@ -1,7 +1,15 @@
 # CHANGELOG.md
 
 
-## 4.0.7 (2025-12-11)
+## 4.1.0 (2025-12-12)
+
+**External change monitoring / auto-sync (AI agents / git / tools):**
+- New `monitorFileChanges` toggle (default: on)
+- `syncDelay = 0` now means monitor-only (queue updates, manual Sync Now) and `syncDelay > 0` enables auto-sync
+
+**Pending Saves Queue:**
+- Added a "Clear All Pending" header button (with confirmation)
+- Clicking a pending file now opens/activates it in the editor
 
 **Documentation:**
 - Added "Get single record by sys_id" example to Agent API query_records documentation

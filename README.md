@@ -188,7 +188,8 @@ sn-scriptsync is designed to work seamlessly with AI coding assistants. Changes 
 4. **Multi-field batching**: Multiple changes to the same record are combined into one API call
 
 ### Settings
-- `syncDelay`: Seconds to wait before syncing external changes (default: 30, set to 0 to disable)
+- `monitorFileChanges`: Monitor external changes (AI agents/git/tools) and show them in the Pending Saves queue (default: true)
+- `syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 30, set to 0 to disable auto-sync)
 - Manual saves (Ctrl+S) always sync immediately, bypassing the queue
 
 ### Creating New Artifacts with AI
