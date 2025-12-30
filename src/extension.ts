@@ -3165,6 +3165,11 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 		return true;
 	}
 
+	// Only sync files that belong to a ServiceNow instance folder (containing _settings.json)
+	if (!eu.hasSettingsFile(filePath)) {
+		return true;
+	}
+
 	let scriptObj = eu.fileNameToObject(documentOrPath);
 
 	if (scriptObj.fieldName == '_test_urls') return true; //helper file, dont save to instance

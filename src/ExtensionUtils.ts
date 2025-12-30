@@ -298,6 +298,30 @@ export class ExtensionUtils {
         return nodePath.basename(path)
     }
 
+    hasSettingsFile(filePath: string): boolean {
+        if (!workspace.rootPath) return false;
+        
+        let currentDir = path.dirname(filePath);
+        const rootPath = workspace.rootPath;
+
+        // Traverse up to find _settings.json or settings.json
+        // Limit traversal to stay within workspace root and avoid infinite loops
+        while (currentDir.startsWith(rootPath)) {
+            const settingsPath = path.join(currentDir, "_settings.json");
+            const oldSettingsPath = path.join(currentDir, "settings.json");
+            
+            if (fs.existsSync(settingsPath) || fs.existsSync(oldSettingsPath)) {
+                return true;
+            }
+
+            const parentDir = path.dirname(currentDir);
+            if (parentDir === currentDir) break; // Reached filesystem root
+            currentDir = parentDir;
+        }
+
+        return false;
+    }
+
     joinPaths(...pathParts) : string {
         return nodePath.join(...pathParts);
     }
