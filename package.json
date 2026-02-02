@@ -323,7 +323,7 @@
 	},
 	"dependencies": {
 		"sass": "^1.94.0",
-		"ws": "^8.18.3"
+		"ws": "^8.19.0"
 	},
 	"resolutions": {
 		"minimist": "1.2.6"
