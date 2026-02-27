@@ -17,7 +17,7 @@ Version 4.0 is a major release bringing **native AI coding assistant support** a
 >
 > This file contains comprehensive guidelines for AI agents to work effectively with sn-scriptsync, including file structure patterns, Agent API documentation, and ServiceNow best practices. **You can expand this file** with your own project-specific instructions, coding standards, or ServiceNow patterns to further educate your AI assistant.
 >
-> 📚 **Learn more**: See [`agentrules/agentinstructions.md`](https://github.com/arnoudkooi/sn-scriptsync/blob/main/agentrules/agentinstructions.md) for the template and [`agentrules/info.md`](https://github.com/arnoudkooi/sn-scriptsync/blob/main/agentrules/info.md) for detailed setup instructions.
+> 📚 **Learn more**: See [`agentrules/agentinstructions.md`](/agentrules/agentinstructions.md) for the template and [`agentrules/info.md`](/agentrules/info.md) for detailed setup instructions.
 >
 > 💬 **Feedback Welcome**: This is a new feature! Please share your experience and suggestions via [GitHub Issue or Discussion](https://github.com/arnoudkooi/sn-scriptsync/).
 >
