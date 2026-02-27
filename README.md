@@ -27,14 +27,14 @@ Version 4.0 is a major release bringing **native AI coding assistant support** a
 
 ### 🤖 AI Agent & External Change Support
 
-Files modified by AI agents (Cursor, GitHub Copilot, Windsurf, etc.), git operations, or external editors are now **automatically synced** to ServiceNow:
+Files modified by AI agents (Cursor, GitHub Copilot, Windsurf, etc.), git operations, or external editors are now **monitored by default** and can be auto-synced when enabled:
 
 - **Automatic detection**: External file changes are monitored via file system watcher
 - **Smart batching**: Changes are intelligently grouped and deduplicated for efficiency
 - **Multi-field batching**: Multiple field changes on the same record are combined into a single API call
 - **New external change settings**:
   - `externalChanges.monitorFileChanges`: monitor external changes (default: on)
-  - `externalChanges.syncDelay`: auto-sync delay in seconds (default: 30, set to 0 for monitor-only)
+  - `externalChanges.syncDelay`: auto-sync delay in seconds (default: 0 monitor-only; set to `> 0` to enable auto-sync)
 - **Pending Saves Queue**: New tree view showing files waiting to sync
   - Pause/Resume queue functionality
   - "Sync Now" button for immediate sync
@@ -185,14 +185,25 @@ sn-scriptsync is designed to work seamlessly with AI coding assistants. Changes 
 
 ### How It Works
 1. **Automatic detection**: File changes are detected via file system watcher
-2. **Debounced sync**: Changes are batched and synced after a configurable delay (default: 30 seconds)
+2. **Debounced sync**: Changes are batched and synced after a configurable delay
+   - Default behavior is monitor-only (`syncDelay = 0`), so changes stay in queue until manual save or Sync Now
 3. **Queue management**: View pending syncs in the "Pending Saves" panel, pause/resume, or sync immediately
 4. **Multi-field batching**: Multiple changes to the same record are combined into one API call
 
 ### Settings
 - `externalChanges.monitorFileChanges`: Monitor external changes (AI agents/git/tools) and show them in the Pending Saves queue (default: true)
-- `externalChanges.syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 30, set to 0 to disable auto-sync)
+- `externalChanges.syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 0 monitor-only, set to `> 0` to enable auto-sync)
+- `createArtifacts.enabled`: Allow creating new records in ServiceNow from file/agent flows (default: true). Disable to block all create-record operations.
 - Manual saves (Ctrl+S) always sync immediately, bypassing the queue
+
+### Forensic Audit Logging
+When `sn-scriptsync.debugLogging` is enabled, the extension writes structured NDJSON audit entries to `audit.log` in the workspace root.
+
+Use this when reporting sync issues to include objective decision traces:
+- watcher event source and ignore reason
+- queue decisions (queued, paused, debounce elapsed, monitor-only)
+- create/update dispatch attempts and websocket availability
+- mapping resolution events (`_map.json` name/sys_id decisions)
 
 ### Creating New Artifacts with AI
 AI agents can create new ServiceNow artifacts by simply creating files in the correct location:

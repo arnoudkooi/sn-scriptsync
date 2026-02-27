@@ -1,5 +1,24 @@
 # CHANGELOG.md
 
+## 4.1.5 (2026-02-27)
+
+**Sync hardening / safer defaults:**
+- Changed `externalChanges.syncDelay` default from `30` to `0` (monitor-only by default).
+- Clarified setting descriptions and README guidance for monitor-only vs auto-sync behavior.
+- Tightened instance folder validation in watcher/save paths (valid `_settings.json` shape required, stricter root checks).
+- Added create guardrails to block record creation when file/path/instance preconditions are not met.
+- Added `createArtifacts.enabled` setting to globally block create-record operations when disabled.
+- Hardened parser behavior to fail closed when file metadata parsing is ambiguous.
+
+**Forensic audit logging:**
+- Added structured NDJSON audit logging to workspace `audit.log` (when `sn-scriptsync.debugLogging` is enabled).
+- Added correlation `runId` traces across watcher, queue decisions, dispatch, create checks, map resolution, and remote responses.
+- Added data sanitization in audit payloads to avoid logging sensitive fields.
+
+**Issue coverage:**
+- Hardening addresses reported concerns around unexpected sync/create behavior and false-positive folder detection (`#132`, `#133`, `#134`).
+- Follow-up fixes for queue consistency in monitor-only mode and create-precondition queue timing were included in the same release batch.
+
 
 ## 4.1.1 (2025-12-12)
 

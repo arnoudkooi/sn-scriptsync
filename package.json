@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.1.1",
+	"version": "4.1.5",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -278,8 +278,13 @@
 				},
 				"sn-scriptsync.externalChanges.syncDelay": {
 					"type": "integer",
-					"default": 30,
-					"description": "Seconds to wait before auto-syncing monitored external changes. Set to 0 to disable auto-sync (monitor only). Defaults to 30 seconds."
+					"default": 0,
+					"description": "Seconds to wait before auto-syncing monitored external changes. Default is 0 (monitor-only). Use Sync Now or manual save to push changes, or set a value > 0 to enable auto-sync."
+				},
+				"sn-scriptsync.createArtifacts.enabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Allow creating new records in ServiceNow from files/Agent API. Disable to block all create-record operations."
 				},
 				"sn-scriptsync.showContextMenu": {
 					"type": "boolean",

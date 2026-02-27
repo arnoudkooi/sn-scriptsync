@@ -10,6 +10,10 @@ tslint.json
 # Build artifacts
 **/*.map
 *.vsix
+**/*.vsix
+sn-scriptsync-*.vsix
+dist/**
+coverage/**
 
 # Dev dependencies only (production deps like ws, sass are needed at runtime)
 node_modules/.bin/**
@@ -17,12 +21,19 @@ node_modules/@types/**
 node_modules/typescript/**
 node_modules/tslint/**
 
+# iCloud Drive conflict-copy folders (e.g. "@types 2", "@parcel 2", "ws 2")
+node_modules/@types 2/**
+node_modules/@parcel 2/**
+node_modules/ws 2/**
+node_modules/**/node_modules/**
+
 # Lock files
 package-lock.json
 
 # Git
 .git
 .github
+.cursor/**
 
 # Documentation for contributors
 CONTRIBUTING.md
@@ -36,6 +47,12 @@ roadmap/**
 # Logs
 *.log
 npm-debug.log*
+debug.log
+audit.log
+
+# Local runtime/agent artifacts
+agent/**
+agent-transcripts/**
 
 # Test files
 test/**

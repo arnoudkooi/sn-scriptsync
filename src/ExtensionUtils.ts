@@ -159,7 +159,12 @@ export class ExtensionUtils {
     fileNameToObject(listener : TextDocument | string) {
 
         let fileName = (typeof listener === 'string') ? listener : listener.fileName;
-        let content = (typeof listener === 'string') ? fs.readFileSync(listener, 'utf-8') : listener.getText();
+        let content = '';
+        try {
+            content = (typeof listener === 'string') ? fs.readFileSync(listener, 'utf-8') : listener.getText();
+        } catch {
+            return true;
+        }
 
         var fileNameUse = fileName.replace(workspace.rootPath, "");
         var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
@@ -217,6 +222,9 @@ export class ExtensionUtils {
                 scriptObj.testUrls = this.getFileAsArray(path.dirname(scriptObj.fileName) + nodePath.sep + "_test_urls.txt");
 
 
+            if (!this.isValidParsedScriptObject(scriptObj)) {
+                return true;
+            }
             return scriptObj;
 
         }
@@ -261,8 +269,20 @@ export class ExtensionUtils {
         }
         scriptObj.fileName = fileName;
         scriptObj.content = content;
+        if (!this.isValidParsedScriptObject(scriptObj)) {
+            return true;
+        }
         return scriptObj;
 
+    }
+
+    isValidParsedScriptObject(scriptObj: any): boolean {
+        if (!scriptObj || typeof scriptObj !== 'object') return false;
+        if (!scriptObj.fileName || !scriptObj.tableName || !scriptObj.fieldName) return false;
+        if (!scriptObj.instance || typeof scriptObj.instance !== 'object') return false;
+        if (!scriptObj.instance.name || !scriptObj.instance.url) return false;
+        if (typeof scriptObj.content !== 'string') return false;
+        return true;
     }
 
     writeOrReadNameToSysIdMapping(path:string, mappingObject?: object, overwriteExistingMap : boolean = false) : object {

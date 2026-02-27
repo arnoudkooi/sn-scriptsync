@@ -55,9 +55,12 @@ const pendingFiles = new Set<string>();
 
 // Pending artifact creations (waiting for name check)
 const pendingCreations: Map<string, any> = new Map();
+const NON_SYNC_FOLDER_NAMES = new Set(['.vscode', '.cursor', '.git', 'node_modules', 'profiles', 'profile']);
 
 // Process all pending files - extracted for reuse by Sync Now
 function processPendingFiles() {
+	const runId = buildRunId();
+	auditLog('pending_processing_started', { pendingCount: pendingFiles.size }, runId);
 	// Group files by record (same instance/scope/table/sys_id)
 	const recordGroups = new Map<string, { scriptObj: any, fields: Map<string, string> }>();
 	
@@ -65,6 +68,7 @@ function processPendingFiles() {
 		const scriptObj = eu.fileNameToObject(file);
 		if (scriptObj === true || !scriptObj?.sys_id) {
 			// Can't group, save individually
+			auditLog('pending_file_individual_dispatch', { filePath: file, reason: 'invalid_or_missing_sys_id' }, runId);
 			saveFieldsToServiceNow(file, true);
 			return;
 		}
@@ -91,12 +95,25 @@ function processPendingFiles() {
 			group.scriptObj.fieldName = fieldName;
 			group.scriptObj.content = content;
 			delete group.scriptObj.fields;
+			auditLog('pending_group_dispatch', {
+				recordKey: key,
+				mode: 'single_field',
+				tableName: group.scriptObj.tableName,
+				sys_id: group.scriptObj.sys_id
+			}, runId);
 			sendToServiceNow(group.scriptObj);
 		} else {
 			// Multiple fields - combine into single request
 			group.scriptObj.fields = Object.fromEntries(group.fields);
 			group.scriptObj.fieldName = Array.from(group.fields.keys()).join(', ');
 			group.scriptObj.content = ''; // Not used for multi-field
+			auditLog('pending_group_dispatch', {
+				recordKey: key,
+				mode: 'multi_field',
+				fieldCount: group.fields.size,
+				tableName: group.scriptObj.tableName,
+				sys_id: group.scriptObj.sys_id
+			}, runId);
 			sendToServiceNow(group.scriptObj);
 		}
 	});
@@ -127,6 +144,168 @@ function debugLog(message: string) {
 	} catch (e) {
 		// Silently ignore if we can't write to debug.log (e.g., read-only file system)
 	}
+}
+
+function buildRunId(): string {
+	return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sanitizeAuditData(value: any): any {
+	if (Array.isArray(value)) {
+		return value.map(item => sanitizeAuditData(item));
+	}
+	if (value && typeof value === 'object') {
+		const sanitized: Record<string, any> = {};
+		Object.entries(value).forEach(([key, val]) => {
+			const k = key.toLowerCase();
+			if (k.includes('token') || k.includes('password') || k.includes('authorization') || k === 'g_ck' || k === 'content') {
+				sanitized[key] = '[redacted]';
+			} else {
+				sanitized[key] = sanitizeAuditData(val);
+			}
+		});
+		return sanitized;
+	}
+	return value;
+}
+
+function auditLog(event: string, data: Record<string, any> = {}, runId?: string) {
+	if (!serverRunning) return;
+	try {
+		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
+		const enabled = settings.get('debugLogging') as boolean;
+		if (!enabled) return;
+
+		const logPath = path.join(vscode.workspace.rootPath || '', 'audit.log');
+		const payload = {
+			timestamp: new Date().toISOString(),
+			event,
+			runId: runId || buildRunId(),
+			data: sanitizeAuditData(data)
+		};
+		fs.appendFileSync(logPath, `${JSON.stringify(payload)}\n`);
+	} catch (_) {
+		// Silently ignore logging failures.
+	}
+}
+
+function getInstanceRootForPath(filePath: string): string | undefined {
+	const workspaceRoot = vscode.workspace.rootPath || '';
+	if (!workspaceRoot || !filePath.startsWith(workspaceRoot)) {
+		return undefined;
+	}
+	const relativePath = filePath.replace(workspaceRoot, '').replace(/^[\\/]/, '');
+	const parts = relativePath.split(path.sep).filter(Boolean);
+	if (!parts.length) {
+		return undefined;
+	}
+	return path.join(workspaceRoot, parts[0]);
+}
+
+function isValidInstanceSettingsObject(settings: any, expectedName?: string): boolean {
+	if (!settings || typeof settings !== 'object') return false;
+	if (typeof settings.name !== 'string' || !settings.name.trim()) return false;
+	if (expectedName && settings.name !== expectedName) return false;
+	if (typeof settings.url !== 'string' || !settings.url.trim()) return false;
+	try {
+		const parsedUrl = new URL(settings.url);
+		if (!parsedUrl.hostname || !parsedUrl.protocol.startsWith('http')) return false;
+	} catch {
+		return false;
+	}
+	return true;
+}
+
+function isValidInstanceRoot(instanceFolder: string): boolean {
+	const workspaceRoot = vscode.workspace.rootPath || '';
+	if (!workspaceRoot || !instanceFolder || !instanceFolder.startsWith(workspaceRoot)) {
+		return false;
+	}
+	const folderName = path.basename(instanceFolder);
+	if (!folderName || NON_SYNC_FOLDER_NAMES.has(folderName.toLowerCase())) {
+		return false;
+	}
+	const settingsPath = path.join(instanceFolder, '_settings.json');
+	const oldSettingsPath = path.join(instanceFolder, 'settings.json');
+	const candidatePath = fs.existsSync(settingsPath) ? settingsPath : oldSettingsPath;
+	if (!candidatePath || !fs.existsSync(candidatePath)) {
+		return false;
+	}
+	try {
+		const settings = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+		return isValidInstanceSettingsObject(settings, folderName);
+	} catch {
+		return false;
+	}
+}
+
+function canCreateArtifactFromFile(filePath: string, scriptObj: any): { ok: boolean; reason?: string } {
+	const instanceRoot = getInstanceRootForPath(filePath);
+	if (!instanceRoot || !isValidInstanceRoot(instanceRoot)) {
+		return { ok: false, reason: 'invalid_instance_root' };
+	}
+	if (!scriptObj || !scriptObj.tableName || !scriptObj.fieldName || !scriptObj.name || !scriptObj.scopeName) {
+		return { ok: false, reason: 'missing_required_fields' };
+	}
+	if (!isValidInstanceSettingsObject(scriptObj.instance, path.basename(instanceRoot))) {
+		return { ok: false, reason: 'invalid_instance_settings' };
+	}
+	if (scriptObj.fieldName.startsWith('_') || scriptObj.tableName === 'background') {
+		return { ok: false, reason: 'blocked_table_or_field' };
+	}
+	const baseName = path.basename(filePath);
+	const validFilePattern = /^[^.]+\.[^.]+\.[^.]+$/;
+	if (!validFilePattern.test(baseName)) {
+		return { ok: false, reason: 'invalid_filename_pattern' };
+	}
+	const mapPath = path.join(path.dirname(filePath), '_map.json');
+	if (!fs.existsSync(mapPath)) {
+		return { ok: false, reason: 'missing_map_file' };
+	}
+	return { ok: true };
+}
+
+function isCreateArtifactsEnabled(): boolean {
+	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
+	return (settings.get('createArtifacts.enabled') as boolean) ?? true;
+}
+
+function enqueuePendingFile(
+	filePath: string,
+	reason: string,
+	runId: string,
+	debounceSeconds: number,
+	debounceDelay: number
+) {
+	pendingFiles.add(filePath);
+	auditLog('queue_decision', { filePath, queued: true, reason }, runId);
+
+	// Monitor-only: update queue/badge but don't schedule auto sync.
+	if (debounceSeconds <= 0) {
+		queueProvider.updateQueue(pendingFiles, 0);
+		auditLog('queue_monitor_only', { filePath, pendingCount: pendingFiles.size }, runId);
+		return;
+	}
+
+	// If paused, do not schedule auto-sync; just refresh UI.
+	if (queueProvider?.isPaused) {
+		queueProvider.updateQueue(pendingFiles, debounceDelay);
+		auditLog('queue_paused', { filePath, pendingCount: pendingFiles.size }, runId);
+		return;
+	}
+
+	// Reset global timer
+	if (globalDebounceTimer) {
+		clearTimeout(globalDebounceTimer);
+	}
+
+	globalDebounceTimer = setTimeout(() => {
+		auditLog('queue_debounce_elapsed', { pendingCount: pendingFiles.size, debounceDelayMs: debounceDelay }, runId);
+		processPendingFiles();
+	}, debounceDelay);
+
+	// Update UI
+	queueProvider.updateQueue(pendingFiles, debounceDelay);
 }
 
 // Agent API - File-based AI communication
@@ -1149,6 +1328,10 @@ async function handleAgentRequest(requestPath: string) {
 				case 'create_artifact': {
 					// Create a new artifact directly via payload (no file creation needed)
 					// This allows AI agents to create artifacts immediately without the file system
+					if (!isCreateArtifactsEnabled()) {
+						throw new Error('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+					}
+
 					const createTable = request.params?.table;
 					const createScope = request.params?.scope || 'global';
 					const createFields = request.params?.fields; // Object with field:value pairs
@@ -1775,28 +1958,34 @@ function setupWatcher() {
 		});
 		
 		watcher.onDidChange(uri => {
+			const runId = buildRunId();
 			const fileName = path.basename(uri.fsPath);
+			auditLog('watcher_event_received', { filePath: uri.fsPath, fileName }, runId);
 			
 			// Ignore debug.log to prevent infinite loop
-			if (fileName === 'debug.log') {
+			if (fileName === 'debug.log' || fileName === 'audit.log') {
+				auditLog('watcher_event_ignored', { reason: 'internal_log_file', filePath: uri.fsPath }, runId);
 				return;
 			}
 			
 			// Handle Agent API requests (fallback for file changes)
 			if (fileName.endsWith('.json') && uri.fsPath.includes(`${path.sep}agent${path.sep}requests${path.sep}`)) {
 				debugLog(`Agent API request file changed: ${uri.fsPath}`);
+				auditLog('watcher_event_ignored', { reason: 'agent_request_file', filePath: uri.fsPath }, runId);
 				handleAgentRequest(uri.fsPath);
 				return;
 			}
 			
 			// Ignore Agent API folders (already handled separately above)
 			if (uri.fsPath.includes(`${path.sep}agent${path.sep}`)) {
+				auditLog('watcher_event_ignored', { reason: 'agent_folder', filePath: uri.fsPath }, runId);
 				return;
 			}
 			
 			// Ignore system/hidden files
 			const ignoredFiles = ['.DS_Store', '.gitignore', '.git', 'Thumbs.db', '.env', '.vscode'];
 			if (fileName.startsWith('.') || fileName.startsWith('_') || ignoredFiles.includes(fileName)) {
+				auditLog('watcher_event_ignored', { reason: 'hidden_or_system_file', filePath: uri.fsPath }, runId);
 				return;
 			}
 
@@ -1808,27 +1997,27 @@ function setupWatcher() {
 			// Must be at least: instance/table/file (3 parts minimum)
 			// Files directly in instance folder should be ignored
 			if (pathParts.length < 3) {
+				auditLog('watcher_event_ignored', { reason: 'outside_table_folder', filePath: uri.fsPath }, runId);
 				return; // Not in a table folder
 			}
 			
 			const instanceFolder = path.join(vscode.workspace.rootPath || '', pathParts[0]);
-			const settingsPath = path.join(instanceFolder, '_settings.json');
-			const oldSettingsPath = path.join(instanceFolder, 'settings.json');
-			const hasSettings = fs.existsSync(settingsPath) || fs.existsSync(oldSettingsPath);
-			
-			if (!hasSettings) {
+			if (!isValidInstanceRoot(instanceFolder)) {
+				auditLog('watcher_event_ignored', { reason: 'invalid_instance_root', filePath: uri.fsPath, instanceFolder }, runId);
 				return; // Not a synced instance folder
 			}
 
 			// Ignore if this is a result of our own write
 			if (ExtensionUtils.ignoreNextSync.has(uri.fsPath)) {
 				ExtensionUtils.ignoreNextSync.delete(uri.fsPath);
+				auditLog('watcher_event_ignored', { reason: 'self_write_guard', filePath: uri.fsPath }, runId);
 				return;
 			}
 
 			// Ignore if this file was manually saved recently (within 2 seconds)
 			const lastManualSave = recentManualSaves.get(uri.fsPath);
 			if (lastManualSave && (Date.now() - lastManualSave < 2000)) {
+				auditLog('watcher_event_ignored', { reason: 'recent_manual_save', filePath: uri.fsPath }, runId);
 				return;
 			}
 
@@ -1836,36 +2025,20 @@ function setupWatcher() {
 			// This allows AI agents to create artifacts without waiting for the debounce timer
 			const scriptObj = eu.fileNameToObject(uri.fsPath);
 			if (scriptObj !== true && !scriptObj.sys_id && scriptObj.tableName && scriptObj.fieldName) {
-				saveFieldsToServiceNow(uri.fsPath, false);
+				const createSent = saveFieldsToServiceNow(uri.fsPath, false);
+				auditLog('create_candidate_from_watcher', {
+					filePath: uri.fsPath,
+					tableName: scriptObj.tableName,
+					fieldName: scriptObj.fieldName,
+					createSent
+				}, runId);
+				if (!createSent) {
+					enqueuePendingFile(uri.fsPath, 'create_preconditions_failed', runId, debounceSeconds, DEBOUNCE_DELAY);
+				}
 				return;
 			}
 
-			// Add to pending set (for updates only)
-			pendingFiles.add(uri.fsPath);
-
-			// Monitor-only: update queue/badge but don't schedule auto sync.
-			if (debounceSeconds <= 0) {
-				queueProvider.updateQueue(pendingFiles, 0);
-				return;
-			}
-
-			// If paused, do not schedule auto-sync; just refresh UI.
-			if (queueProvider?.isPaused) {
-				queueProvider.updateQueue(pendingFiles, DEBOUNCE_DELAY);
-				return;
-			}
-
-			// Reset global timer
-			if (globalDebounceTimer) {
-				clearTimeout(globalDebounceTimer);
-			}
-
-			globalDebounceTimer = setTimeout(() => {
-				processPendingFiles();
-			}, DEBOUNCE_DELAY);
-
-			// Update UI
-			queueProvider.updateQueue(pendingFiles, DEBOUNCE_DELAY);
+			enqueuePendingFile(uri.fsPath, 'watcher_update', runId, debounceSeconds, DEBOUNCE_DELAY);
 		});
 }
 
@@ -1882,15 +2055,10 @@ vscode.workspace.onDidSaveTextDocument(document => {
 	if (manualSaveMap.get(document.uri.toString())) {
 		manualSaveMap.delete(document.uri.toString());
 		
-		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
-		const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
-		
-		// If external sync is ON, remove this file from the pending queue
-		// since we're saving it NOW (instant manual save)
-			if (debounceSeconds !== 0) {
-			pendingFiles.delete(document.fileName);
-			queueProvider?.removeFromQueue(document.fileName);
-		}
+		// Always remove from pending queue on manual save.
+		// This keeps monitor-only mode (syncDelay=0) consistent with immediate sync behavior.
+		pendingFiles.delete(document.fileName);
+		queueProvider?.removeFromQueue(document.fileName);
 
 		recentManualSaves.set(document.fileName, Date.now());
 
@@ -2308,6 +2476,7 @@ function startServers() {
 			try {
 				let messageJson = JSON.parse(message)
 				if (messageJson.hasOwnProperty('error')) {
+					auditLog('remote_result_error', { action: messageJson?.action || 'unknown', detail: messageJson.error?.detail || null });
 					let errorDetail = '';
 					if (messageJson.error?.detail){
 						if (messageJson.error.detail.includes("ACL"))
@@ -2562,6 +2731,12 @@ function startServers() {
 }
 
 function handleCreateRecordResponse(responseJson) {
+	auditLog('remote_create_response', {
+		success: !!responseJson.success,
+		tableName: responseJson?.newRecord?.tableName,
+		name: responseJson?.newRecord?.name,
+		error: responseJson?.error || null
+	});
 	// Check if this is for an Agent API request
 	const agentRequestId = responseJson.agentRequestId;
 	if (agentRequestId && pendingAgentRequests.has(agentRequestId)) {
@@ -3236,25 +3411,42 @@ function broadcastToHelperTab(messageObj: any) {
 }
 
 function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCode:boolean): boolean {
+	const runId = buildRunId();
 
-	if (!serverRunning) return;
+	if (!serverRunning) return true;
 
 	// Get file name to check for internal files
 	const filePath = typeof documentOrPath === 'string' ? documentOrPath : documentOrPath.fileName;
 	const fileName = path.basename(filePath);
+	auditLog('sync_candidate_received', { filePath, fileName, fromVsCode }, runId);
 	
 	// Skip Agent API folders (communication files, not for sync)
 	if (filePath.includes(`${path.sep}agent${path.sep}`)) {
+		auditLog('sync_candidate_ignored', { reason: 'agent_folder', filePath }, runId);
 		return true;
 	}
 	
 	// Skip system/hidden files
 	const ignoredFiles = ['.DS_Store', 'Thumbs.db', '.env'];
 	if (fileName.startsWith('.') || fileName.startsWith('_') || ignoredFiles.includes(fileName)) {
+		auditLog('sync_candidate_ignored', { reason: 'hidden_or_system_file', filePath }, runId);
 		return true;
 	}
 
 	let scriptObj = eu.fileNameToObject(documentOrPath);
+	if (scriptObj === true) {
+		auditLog('sync_candidate_ignored', { reason: 'parse_failed', filePath }, runId);
+		return true;
+	}
+	const instanceRoot = getInstanceRootForPath(filePath);
+	if (!instanceRoot || !isValidInstanceRoot(instanceRoot)) {
+		auditLog('sync_candidate_ignored', { reason: 'invalid_instance_root', filePath, instanceRoot }, runId);
+		return true;
+	}
+	if (!isValidInstanceSettingsObject(scriptObj.instance, path.basename(instanceRoot))) {
+		auditLog('sync_candidate_ignored', { reason: 'invalid_instance_settings', filePath }, runId);
+		return true;
+	}
 
 	if (scriptObj.fieldName == '_test_urls') return true; //helper file, dont save to instance
 	if (!serverRunning) return true; 
@@ -3262,6 +3454,32 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 	// Handle new artifacts that have no sys_id yet - create them in ServiceNow
 	if (!scriptObj.sys_id) {
 		if (scriptObj.tableName && scriptObj.fieldName) {
+			if (!isCreateArtifactsEnabled()) {
+				auditLog('create_guard_blocked', {
+					filePath,
+					tableName: scriptObj.tableName,
+					fieldName: scriptObj.fieldName,
+					reason: 'create_setting_disabled'
+				}, runId);
+				vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+				return false;
+			}
+
+			const canCreate = canCreateArtifactFromFile(filePath, scriptObj);
+			if (!canCreate.ok) {
+				auditLog('create_guard_blocked', {
+					filePath,
+					tableName: scriptObj.tableName,
+					fieldName: scriptObj.fieldName,
+					reason: canCreate.reason
+				}, runId);
+				return false;
+			}
+			auditLog('create_guard_passed', {
+				filePath,
+				tableName: scriptObj.tableName,
+				fieldName: scriptObj.fieldName
+			}, runId);
 			createNewArtifact(scriptObj);
 			return true;
 		}
@@ -3284,15 +3502,24 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 			scriptObj.action = "updateVar";
 		}
 
-		if (!wss.clients.size) {
+		if (!wss || !wss.clients.size) {
 			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
+			auditLog('sync_dispatch_blocked', { reason: 'no_websocket_client', filePath, tableName: scriptObj.tableName, sys_id: scriptObj.sys_id }, runId);
 			success = false;
 		}
+		auditLog('sync_dispatch_sent', {
+			filePath,
+			tableName: scriptObj.tableName,
+			fieldName: scriptObj.fieldName,
+			sys_id: scriptObj.sys_id,
+			saveSource: scriptObj.saveSource
+		}, runId);
 		broadcastToHelperTab(scriptObj);
 
 	}
 	catch (err) {
 		vscode.window.showErrorMessage("Error while saving file: " + JSON.stringify(err, null, 4));
+		auditLog('sync_dispatch_error', { filePath, error: `${err}` }, runId);
 		success = false;
 	}
 
@@ -3330,11 +3557,18 @@ function saveFieldAsFile(postedJson, retry = 0) {
 	let scopeMappingFile = fullPath + '_map.json';
 	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
 	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
+	const runId = buildRunId();
 	// If this file was synced before, use whatever name is in the _map.json
 	cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === postedJson.sys_id) ?? cleanName
 	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
 		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 	}
+	auditLog('map_resolution', {
+		tableName: postedJson.table,
+		sys_id: postedJson.sys_id,
+		mapPath: scopeMappingFile,
+		resolvedName: cleanName
+	}, runId);
 
 
 	nameToSysId[cleanName] = postedJson.sys_id;
@@ -3479,15 +3713,24 @@ function updateScriptSyncStatusBarItem(message: string): void {
 
 function sendToServiceNow(scriptObj: any) {
 	if (!serverRunning) return;
+	const runId = buildRunId();
 	
 	scriptObj.saveSource = "FileWatcher";
+	auditLog('sync_dispatch_prepare', {
+		tableName: scriptObj.tableName,
+		fieldName: scriptObj.fieldName,
+		sys_id: scriptObj.sys_id,
+		saveSource: scriptObj.saveSource
+	}, runId);
 	
-	if (!wss.clients.size) {
+	if (!wss || !wss.clients.size) {
 		vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
+		auditLog('sync_dispatch_blocked', { reason: 'no_websocket_client', tableName: scriptObj.tableName, sys_id: scriptObj.sys_id }, runId);
 		return;
 	}
 	
 	broadcastToHelperTab(scriptObj);
+	auditLog('sync_dispatch_sent', { tableName: scriptObj.tableName, sys_id: scriptObj.sys_id }, runId);
 }
 
 function requestTableStructure(tableName: string, instance: any) {
@@ -3563,9 +3806,23 @@ function handleTableStructureResponse(responseJson: any) {
 
 async function createNewArtifact(scriptObj: any) {
 	// Only support script includes for now
+	const runId = buildRunId();
+	auditLog('create_prepare', {
+		tableName: scriptObj?.tableName,
+		fieldName: scriptObj?.fieldName,
+		name: scriptObj?.name,
+		scope: scriptObj?.scope
+	}, runId);
 
-	if (wss.clients.size === 0) {
+	if (!isCreateArtifactsEnabled()) {
+		vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+		auditLog('create_blocked', { reason: 'create_setting_disabled', tableName: scriptObj?.tableName, name: scriptObj?.name }, runId);
+		return;
+	}
+
+	if (!wss || wss.clients.size === 0) {
 		vscode.window.showErrorMessage("No WebSocket connection. Cannot create new artifact.");
+		auditLog('create_blocked', { reason: 'no_websocket_client', tableName: scriptObj?.tableName, name: scriptObj?.name }, runId);
 		return;
 	}
 
@@ -3586,6 +3843,7 @@ async function createNewArtifact(scriptObj: any) {
 	};
 
 	vscode.window.showInformationMessage(`Checking if "${scriptObj.name}" already exists...`);
+	auditLog('create_name_check_sent', { creationKey, tableName: scriptObj.tableName, name: scriptObj.name }, runId);
 	
 	broadcastToHelperTab(checkRequest);
 }
@@ -3629,6 +3887,7 @@ function handleCheckNameExistsResponse(responseJson: any) {
 	
 	if (!creationKey || !pendingCreations.has(creationKey)) {
 		console.error("No pending creation found for key:", creationKey);
+		auditLog('create_name_check_orphaned', { creationKey: creationKey || 'missing' });
 		return;
 	}
 
@@ -3637,10 +3896,12 @@ function handleCheckNameExistsResponse(responseJson: any) {
 
 	if (!responseJson.success) {
 		vscode.window.showErrorMessage(`Error checking name: ${responseJson.error}`);
+		auditLog('create_name_check_error', { creationKey, error: responseJson.error });
 		return;
 	}
 
 	if (responseJson.exists) {
+		auditLog('create_name_check_exists', { creationKey, existingSysId: responseJson.existingRecord?.sys_id || null });
 		vscode.window.showErrorMessage(
 			`Artifact "${scriptObj.name}" already exists in ServiceNow (sys_id: ${responseJson.existingRecord?.sys_id}). Use a different name.`
 		);
@@ -3648,10 +3909,17 @@ function handleCheckNameExistsResponse(responseJson: any) {
 	}
 
 	// Name is available, proceed with creation
+	auditLog('create_name_check_passed', { creationKey });
 	proceedWithArtifactCreation(scriptObj);
 }
 
 function proceedWithArtifactCreation(scriptObj: any) {
+	if (!isCreateArtifactsEnabled()) {
+		vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+		auditLog('create_blocked', { reason: 'create_setting_disabled', tableName: scriptObj?.tableName, name: scriptObj?.name });
+		return;
+	}
+
 	const basePath = workspace.rootPath + nodePath.sep + scriptObj.instance.name + nodePath.sep;
 	const tablePath = path.join(basePath, scriptObj.scopeName, scriptObj.tableName);
 
@@ -3706,10 +3974,17 @@ function proceedWithArtifactCreation(scriptObj: any) {
 	};
 
 	broadcastToHelperTab(requestJson);
+	auditLog('create_dispatch_sent', { tableName: scriptObj.tableName, name: scriptObj.name, scope: scriptObj.scope });
 	vscode.window.showInformationMessage(`Creating new ${scriptObj.tableName}: ${scriptObj.name}`);
 }
 
 async function createArtifact(artifact: any) {
+	if (!isCreateArtifactsEnabled()) {
+		vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+		auditLog('create_blocked', { reason: 'create_setting_disabled', source: 'command_palette' });
+		return;
+	}
+
 	if (!serverRunning) {
 		vscode.window.showInformationMessage("sn-scriptsync server must be running");
 		return;
