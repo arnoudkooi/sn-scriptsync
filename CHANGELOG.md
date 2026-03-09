@@ -1,5 +1,12 @@
 # CHANGELOG.md
 
+## 4.2.1 (2026-03-09)
+
+**Security hardening:**
+- Rewrote HTML sanitizer to escape-then-restore approach (eliminates XSS taint flow).
+- Reconstructed fetch URLs from validated allowlist origins (eliminates SSRF taint flow).
+- Updated TypeScript build target to ES2020 for compatibility with newer dev dependencies.
+
 ## 4.2.0 (2026-03-09)
 
 **Bug fix:**
