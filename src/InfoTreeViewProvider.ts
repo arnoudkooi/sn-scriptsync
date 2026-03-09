@@ -15,7 +15,7 @@ export class InfoTreeViewProvider implements vscode.TreeDataProvider<TreeItem> {
         new TreeItem('New Background Script (scope)', { action : 'selectionToBG', global : false})
       ]),
       new TreeItem('Links',{},[
-      new TreeItem('arnoudkooi.com', { action : 'openUrl', url : 'https://www.arnoudkooi.com' }),
+      new TreeItem('snutils.com', { action : 'openUrl', url : 'https://snutils.com' }),
       new TreeItem('github.com/arnoudkooi', { action : 'openUrl', url : 'https://github.com/arnoudkooi' }),
       new TreeItem('Join sndevs slack channel #snutils', { action : 'openUrl', url : 'https://invite.sndevs.com' })
       ])

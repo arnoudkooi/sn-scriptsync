@@ -2033,7 +2033,7 @@ function setIntervalX(callback, delay, repetitions) {
 var eventCount = 0;
 
 function increaseTitlecounter() {
-    document.title = "[" + (++eventCount) + "] sn-scriptsync SN Utils by arnoudkooi.com";
+    document.title = "[" + (++eventCount) + "] sn-scriptsync by SN Utils B.V.";
 }
 
 function changeFavicon(src) {

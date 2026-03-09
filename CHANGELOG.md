@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+## 4.2.2 (2026-03-09)
+
+**Branding:**
+- Updated extension icon to new SN Utils logo (256, 128, SVG).
+- Replaced `arnoudkooi.com` references with `snutils.com` / SN Utils B.V.
+
 ## 4.2.1 (2026-03-09)
 
 **Security hardening:**

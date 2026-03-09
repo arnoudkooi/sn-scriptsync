@@ -114,7 +114,7 @@ instancename/scopename/sp_widget/WidgetName/client_script.js
 
 # SN Utils
 Requires the latest version of SN Utils, links via: 
-[arnoudkooi.com](https://arnoudkooi.com)  
+[snutils.com](https://snutils.com)  
 
 **In case of issues, always check for the latest version of both the browser and VS Code extension, and update if needed!**
 
