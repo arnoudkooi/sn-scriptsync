@@ -1,5 +1,19 @@
 # CHANGELOG.md
 
+## 4.2.0 (2026-03-09)
+
+**Bug fix:**
+- Fixed duplicate record creation when using Agent API `create_artifact` command. File watcher was firing both `create` and `change` events for the same request file, causing the command to execute twice. Added request ID deduplication with a 5-second TTL window. (`#137`)
+
+**Dependencies:**
+- Bumped `immutable` from 5.1.3 to 5.1.5 (prototype pollution fix).
+- Bumped `ws` from 8.18.3 to 8.19.0 (added `closeTimeout` option).
+- Fixed broken README links (`#129`).
+
+**Browser helper (scriptsync.js):**
+- Updated helper tab script with latest Agent API handlers.
+
+
 ## 4.1.5 (2026-02-27)
 
 **Sync hardening / safer defaults:**
