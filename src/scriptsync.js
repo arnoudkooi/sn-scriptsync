@@ -12,6 +12,28 @@ let scriptsyncinstances;
 let lastScreenshotTabId = null;
 let pendingScreenshotRequest = null; // Store pending request while waiting for user action
 
+const ALLOWED_TAGS = new Set(['b', 'br', 'i', 'em', 'strong', 'span', 'code']);
+const ALLOWED_ATTRS = new Set(['class']);
+function sanitizeHtml(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    function clean(node) {
+        for (const child of Array.from(node.childNodes)) {
+            if (child.nodeType === Node.ELEMENT_NODE) {
+                if (!ALLOWED_TAGS.has(child.tagName.toLowerCase())) {
+                    child.replaceWith(document.createTextNode(child.textContent));
+                    continue;
+                }
+                for (const attr of Array.from(child.attributes)) {
+                    if (!ALLOWED_ATTRS.has(attr.name.toLowerCase())) child.removeAttribute(attr.name);
+                }
+                clean(child);
+            }
+        }
+    }
+    clean(doc.body);
+    return doc.body.innerHTML;
+}
+
 // Simple Table Component replacement for DataTable
 class SimpleTable {
     constructor(tableId) {
@@ -35,9 +57,7 @@ class SimpleTable {
 
         // Message Cell
         const msgCell = document.createElement('td');
-        // Using innerHTML to support the formatting passed in original code (e.g. <b>, <br>)
-        // Ensure content passed here is trusted or sanitized
-        msgCell.innerHTML = data[2]; 
+        msgCell.innerHTML = sanitizeHtml(String(data[2]));
         row.appendChild(msgCell);
 
         // Prepend to show newest first (like desc sort)
@@ -345,13 +365,16 @@ async function safeFetch(path, rawUrl, init) {
   if (!isApprovedInstanceUrl(rawUrl)) {
     throw new Error(`Fetch to unapproved instance URL blocked: ${rawUrl}`);
   }
-  let url;
+  let parsed;
   try {
-    url = new URL(path, rawUrl).toString();
+    parsed = new URL(path, rawUrl);
   } catch (e) {
     throw new Error(`Invalid URL: ${e.message}`);
   }
-  return fetch(url, init);
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`Only HTTPS requests are allowed, got: ${parsed.protocol}`);
+  }
+  return fetch(parsed.href, init);
 }
 
 async function requestRecord(requestJson) {
@@ -1716,7 +1739,7 @@ function takeScreenshot(wsObj) {
                 findTabByUrl(url, wsObj);
             } else {
                 // If a URL is provided, check if it matches or navigate to it
-                if (url && !tab.url.startsWith(url.replace('*', ''))) {
+                if (url && !tab.url.startsWith(url.replaceAll('*', ''))) {
                     // Navigate the existing tab to the new URL
                     t.addRow([
                         new Date(), 'Helper tab', `Navigating existing tab to: ${url}`
@@ -2033,7 +2056,18 @@ function changeFavicon(src) {
  * @return {undefined}
  */
 function snuStartBackgroundScript(script, instance, action) {
-    document.querySelector('base').setAttribute('href', instance.url + '/');
+    if (!isApprovedInstanceUrl(instance.url)) {
+        t.addRow([new Date(), 'Helper tab', `Blocked: unapproved instance URL for background script`]);
+        return;
+    }
+    try {
+        const baseUrl = new URL(instance.url);
+        if (baseUrl.protocol !== 'https:') throw new Error('Only HTTPS allowed');
+        document.querySelector('base').setAttribute('href', baseUrl.origin + '/');
+    } catch (e) {
+        t.addRow([new Date(), 'Helper tab', `Invalid instance URL: ${e.message}`]);
+        return;
+    }
 
     try {
         safeFetch('/sys.scripts.do', instance.url, {
