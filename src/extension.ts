@@ -332,6 +332,7 @@ interface PendingAgentRequest {
 	instanceFolder: string;
 }
 const pendingAgentRequests: Map<string, PendingAgentRequest> = new Map();
+const processedAgentRequestIds = new Set<string>();
 
 async function handleAgentRequest(requestPath: string) {
 	try {
@@ -371,6 +372,14 @@ async function handleAgentRequest(requestPath: string) {
 			}
 			return;
 		}
+		
+		// Dedup: file watcher can fire both create and change events for the same file
+		if (processedAgentRequestIds.has(request.id)) {
+			debugLog(`Agent API: Skipping duplicate request ${request.id}`);
+			return;
+		}
+		processedAgentRequestIds.add(request.id);
+		setTimeout(() => processedAgentRequestIds.delete(request.id), 5000);
 		
 		debugLog(`Agent API Request: ${request.command} (id: ${request.id})`);
 		
