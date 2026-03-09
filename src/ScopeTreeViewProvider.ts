@@ -190,8 +190,8 @@ class TreeItem extends vscode.TreeItem {
     this.meta = meta;
     if (extension) {
       this.iconPath = {
-        light: path.join(__filename, '..', '..', 'resources', 'images', extension.replace('.','') + '.svg'),
-        dark: path.join(__filename, '..', '..', 'resources', 'images', extension.replace('.','') + '.svg')
+        light: vscode.Uri.file(path.join(__filename, '..', '..', 'resources', 'images', extension.replace('.','') + '.svg')),
+        dark: vscode.Uri.file(path.join(__filename, '..', '..', 'resources', 'images', extension.replace('.','') + '.svg'))
       };
       this.command = {command: 'openFile', title: 'Open file',  arguments: [meta]}
     }
