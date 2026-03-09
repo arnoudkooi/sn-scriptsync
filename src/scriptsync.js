@@ -12,26 +12,17 @@ let scriptsyncinstances;
 let lastScreenshotTabId = null;
 let pendingScreenshotRequest = null; // Store pending request while waiting for user action
 
-const ALLOWED_TAGS = new Set(['b', 'br', 'i', 'em', 'strong', 'span', 'code']);
-const ALLOWED_ATTRS = new Set(['class']);
 function sanitizeHtml(html) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    function clean(node) {
-        for (const child of Array.from(node.childNodes)) {
-            if (child.nodeType === Node.ELEMENT_NODE) {
-                if (!ALLOWED_TAGS.has(child.tagName.toLowerCase())) {
-                    child.replaceWith(document.createTextNode(child.textContent));
-                    continue;
-                }
-                for (const attr of Array.from(child.attributes)) {
-                    if (!ALLOWED_ATTRS.has(attr.name.toLowerCase())) child.removeAttribute(attr.name);
-                }
-                clean(child);
-            }
-        }
-    }
-    clean(doc.body);
-    return doc.body.innerHTML;
+    const s = String(html)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    return s
+        .replace(/&lt;(\/?)(b|i|em|strong|code)&gt;/gi, '<$1$2>')
+        .replace(/&lt;br\s*\/?&gt;/gi, '<br />')
+        .replace(/&lt;span class=&quot;([a-zA-Z0-9_ -]+)&quot;&gt;/gi, '<span class="$1">')
+        .replace(/&lt;\/span&gt;/gi, '</span>');
 }
 
 // Simple Table Component replacement for DataTable
@@ -361,20 +352,30 @@ function isApprovedInstanceUrl(rawUrl) {
   return scriptsyncinstances?.allowed?.includes(rawUrl);
 }
 
+function getApprovedOrigin(rawUrl) {
+  const allowed = scriptsyncinstances?.allowed || [];
+  for (const entry of allowed) {
+    try {
+      const approvedUrl = new URL(entry);
+      if (approvedUrl.origin === new URL(rawUrl).origin) return approvedUrl.origin;
+    } catch (_) { /* skip malformed entries */ }
+  }
+  return null;
+}
+
 async function safeFetch(path, rawUrl, init) {
-  if (!isApprovedInstanceUrl(rawUrl)) {
+  const origin = getApprovedOrigin(rawUrl);
+  if (!origin) {
     throw new Error(`Fetch to unapproved instance URL blocked: ${rawUrl}`);
   }
-  let parsed;
+  let pathParsed;
   try {
-    parsed = new URL(path, rawUrl);
+    pathParsed = new URL(path, 'https://placeholder.invalid');
   } catch (e) {
-    throw new Error(`Invalid URL: ${e.message}`);
+    throw new Error(`Invalid path: ${e.message}`);
   }
-  if (parsed.protocol !== 'https:') {
-    throw new Error(`Only HTTPS requests are allowed, got: ${parsed.protocol}`);
-  }
-  return fetch(parsed.href, init);
+  const safeUrl = origin + pathParsed.pathname + pathParsed.search;
+  return fetch(safeUrl, init);
 }
 
 async function requestRecord(requestJson) {
