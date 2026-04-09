@@ -46,6 +46,9 @@ let lastSave = Math.floor(+new Date() / 1000);
 
 // Use a map to track which documents were manually saved #105
 const manualSaveMap: Map<string, boolean> = new Map();
+// Track all documents that went through onWillSaveTextDocument (any reason).
+// "Save without formatting" skips this event entirely, so its absence signals a manual save. #119
+const willSaveSeenMap: Map<string, boolean> = new Map();
 // Track timestamps of manual saves to ignore subsequent watcher events
 const recentManualSaves: Map<string, number> = new Map();
 
@@ -2052,20 +2055,28 @@ function setupWatcher() {
 }
 
 // Listen for the "will save" event and mark the document if the reason was manual.
+// Also track that onWillSaveTextDocument fired at all — "Save without formatting" skips it. #119
 vscode.workspace.onWillSaveTextDocument((event) => {
+	const key = event.document.uri.toString();
+	willSaveSeenMap.set(key, true);
 	if (event.reason === vscode.TextDocumentSaveReason.Manual) {
-		manualSaveMap.set(event.document.uri.toString(), true);
+		manualSaveMap.set(key, true);
 	}
 });
 
 // In the did-save handler, only process files that were flagged as manually saved. #105
+// Also handle "Save without formatting" which skips onWillSaveTextDocument entirely. #119
 vscode.workspace.onDidSaveTextDocument(document => {
-	// Manual saves should always sync immediately, regardless of debounce setting
-	if (manualSaveMap.get(document.uri.toString())) {
-		manualSaveMap.delete(document.uri.toString());
-		
-		// Always remove from pending queue on manual save.
-		// This keeps monitor-only mode (syncDelay=0) consistent with immediate sync behavior.
+	const key = document.uri.toString();
+	const wasManual = manualSaveMap.get(key);
+	const wasSeenByWillSave = willSaveSeenMap.get(key);
+
+	manualSaveMap.delete(key);
+	willSaveSeenMap.delete(key);
+
+	// Treat as manual save if: explicitly flagged as manual, OR onWillSaveTextDocument
+	// never fired (which means "Save without formatting" was used). #119
+	if (wasManual || !wasSeenByWillSave) {
 		pendingFiles.delete(document.fileName);
 		queueProvider?.removeFromQueue(document.fileName);
 
@@ -3430,8 +3441,14 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 	auditLog('sync_candidate_received', { filePath, fileName, fromVsCode }, runId);
 	
 	// Skip Agent API folders (communication files, not for sync)
+	// But still handle agent request files (Kiro/VS Code forks may create files via onDidSaveTextDocument, not onDidCreate)
 	if (filePath.includes(`${path.sep}agent${path.sep}`)) {
-		auditLog('sync_candidate_ignored', { reason: 'agent_folder', filePath }, runId);
+		if (fileName.endsWith('.json') && filePath.includes(`${path.sep}agent${path.sep}requests${path.sep}`)) {
+			auditLog('agent_request_from_save', { filePath }, runId);
+			handleAgentRequest(filePath);
+		} else {
+			auditLog('sync_candidate_ignored', { reason: 'agent_folder', filePath }, runId);
+		}
 		return true;
 	}
 	
