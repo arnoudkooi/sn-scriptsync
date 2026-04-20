@@ -114,7 +114,7 @@ The `_map.json` files are **automatically maintained** by the `sn-scriptsync` ex
 |--------------|------------|---------------|
 | Script Include | `sys_script_include` | Global + Scoped |
 | Business Rule | `sys_script` | Global + Scoped |
-| Client Script | `sys_client_script` | Global + Scoped |
+| Client Script | `sys_script_client` | Global + Scoped |
 | UI Action | `sys_ui_action` | Global + Scoped |
 | UI Script | `sys_ui_script` | Global + Scoped |
 | UI Page | `sys_ui_page` | Global + Scoped |
@@ -296,7 +296,7 @@ The `sn-scriptsync` extension will:
 | `sys_script` | `script` | `collection` (table name) | Must specify which table |
 | `sys_ws_operation` | `operation_script` | `web_service_definition` | Needs parent REST API |
 | `sys_ui_action` | `script` | `table` (table name) | Must specify which table |
-| `sys_client_script` | `script` | `table` (table name) | Must specify which table |
+| `sys_script_client` | `script` | `table` (table name) | Must specify which table |
 | `sp_widget` | Multiple files | None | Widget folder structure |
 | `rm_story` | N/A | None | See rm_story specific guidance below |
 
@@ -2282,7 +2282,7 @@ This refreshes all browser tabs showing the widget preview.
    | `sys_ws_operation` | Yes | `sys_ws_definition` | REST API endpoint needs a REST API service |
    | `sys_script` | Yes | Table reference | Business Rule needs a target table |
    | `sys_ui_action` | Yes | Table reference | UI Action needs a target table |
-   | `sys_client_script` | Yes | Table reference | Client Script needs a target table |
+   | `sys_script_client` | Yes | Table reference | Client Script needs a target table |
    | `sys_dictionary` | Yes | Table reference | Dictionary entry needs a table |
    
    **Before creating these artifacts:**
@@ -2435,7 +2435,7 @@ This refreshes all browser tabs showing the widget preview.
    - `sys_ws_operation` - "Which REST API service?"
    - `sys_script` - "Which table should this Business Rule run on?"
    - `sys_ui_action` - "Which table should this UI Action appear on?"
-   - `sys_client_script` - "Which form should this Client Script run on?"
+   - `sys_script_client` - "Which form should this Client Script run on?"
 
 ---
 
