@@ -8,14 +8,13 @@ Easy integration from ServiceNow to VS Code, enabling you to script in a full-fl
 Version 4.0 is a major release bringing **native AI coding assistant support** and powerful automation capabilities to sn-scriptsync.
 
 > **📝 AI Assistant Setup**  
-> When you start sn-scriptsync, an `agentinstructions.md` file is automatically copied to your workspace root.  
-> **Rename it** based on your AI tool:
-> - **Cursor**: `.cursorrules`
-> - **Claude**: `CLAUDE.md`  
-> - **GitHub Copilot**: `.github/copilot-instructions.md`  
-> - **Windsurf**: `.windsurfrules`  
+> When you start sn-scriptsync, an `agentinstructions.md` file is placed in your workspace root and **kept up to date automatically**.  
+> **Recommended: import/reference it** (single source of truth, never goes stale) instead of renaming a copy:
+> - **Cursor**: add `@agentinstructions.md` to a rule in `.cursor/rules/` (or rename to `AGENTS.md`, which Cursor reads)
+> - **Claude Code**: add `@agentinstructions.md` to `CLAUDE.md`
+> - **GitHub Copilot / Windsurf** (no import support): copy it once to `.github/copilot-instructions.md` / `.windsurfrules` — sn-scriptsync refreshes the managed block in those files for you
 >
-> This file contains comprehensive guidelines for AI agents to work effectively with sn-scriptsync, including file structure patterns, Agent API documentation, and ServiceNow best practices. **You can expand this file** with your own project-specific instructions, coding standards, or ServiceNow patterns to further educate your AI assistant.
+> The generated content lives inside `SN-SCRIPTSYNC:BEGIN` / `SN-SCRIPTSYNC:END` markers. **You can expand the file** with your own project-specific instructions, coding standards, or ServiceNow patterns — just add them **outside** the markers and they are preserved across updates.
 >
 > 📚 **Learn more**: See [`agentrules/agentinstructions.md`](/agentrules/agentinstructions.md) for the template and [`agentrules/info.md`](/agentrules/info.md) for detailed setup instructions.
 >
@@ -41,30 +40,43 @@ Files modified by AI agents (Cursor, GitHub Copilot, Windsurf, etc.), git operat
   - Remove individual files from queue
 - **New artifact creation**: AI agents can create new Script Includes and other artifacts by simply creating files in the correct folder structure
 
-### ⚡ File-based Agent API
+### ⚡ Agent API (HTTP, 4.3.0+)
 
-AI agents can now interact with scriptsync programmatically via an **event-driven folder queue**. The file-based approach was designed to be **simple and dependency-free** - no npm packages, no HTTP servers, just JSON files that any AI agent can read and write.
+AI agents talk to scriptsync through a local HTTP server on `127.0.0.1`. The extension picks a random port on startup and writes it, together with a per-session auth token, to `.vscode/sn-agent-port.json`:
 
-**Event-Driven Queue (Recommended):**
-- New `agent/requests/` and `agent/responses/` folder structure
-- Instant, event-driven processing (no polling on extension side)
-- Parallel request support with unique file names (`req_<id>.json`, `res_<id>.json`)
-- Zero-latency responses for local commands (<100ms)
+```json
+{ "port": 53123, "token": "4f9a...hex...", "pid": 68861, "apiVersion": 2, "startedAt": 1734000000000 }
+```
 
-**Available Commands:**
-- `check_connection` - Verify server and browser connection
-- `get_sync_status` - Get current sync queue status
-- `sync_now` - Immediately sync all pending files
-- `query_records` - Query any ServiceNow table with encoded queries
-- `create_artifact` - Create new records directly (Script Includes, Business Rules, etc.)
-- `update_record` / `update_record_batch` - Update existing records
-- `open_in_browser` - Open artifacts in ServiceNow
-- `take_screenshot` - Capture ServiceNow pages
-- `upload_attachment` - Attach files to records
-- `switch_context` - Switch update sets, application scope, or domain
-- And many more...
+Quick example:
 
-See [CHANGELOG.md](https://github.com/arnoudkooi/sn-scriptsync/blob/main/CHANGELOG.md) for complete Agent API documentation.
+```bash
+PORT=$(jq -r .port  .vscode/sn-agent-port.json)
+TOKEN=$(jq -r .token .vscode/sn-agent-port.json)
+
+curl -s -X POST http://127.0.0.1:$PORT/api \
+  -H "Content-Type: application/json" \
+  -H "X-Agent-Token: $TOKEN" \
+  -d '{ "command": "check_connection", "instance": "dev12345" }'
+```
+
+**Key properties:**
+- Event-driven: no file polling, no iCloud/OneDrive latency.
+- Structured error codes (`E_ACL`, `E_TIMEOUT`, `E_BROWSER_DISCONNECTED`, ...) mapped to HTTP status codes.
+- Token auth via `X-Agent-Token` header; health endpoint at `GET /api/health` (no auth).
+- Legacy `{instance}/agent/requests/*.json` file queue still works as a fallback - toggle with `sn-scriptsync.agentApi.fileFallback`.
+
+> **Migrating from the file-based Agent API?** Nothing breaks: HTTP and the file transport both run, and the file fallback stays **on by default**. On start, the extension refreshes whichever instructions file you use (`.cursorrules`, `CLAUDE.md`, `.windsurfrules`, `.github/copilot-instructions.md`, `agentinstructions.md`, ...) in place — preserving your own edits outside the managed block — so your agent picks up the HTTP endpoint automatically. Agents should discover the endpoint every session and verify it via `GET /api/health` (matching `pid`) before trusting it, since the port file can be stale when the workspace is synced by iCloud/OneDrive/git. HTTP only changes the agent-to-extension hop; the SN Utils helper tab is still required for anything touching ServiceNow. The file transport is legacy and is planned to default off in a future major release.
+
+**Available commands** (full details in `agentinstructions.md`):
+- Connection/state: `check_connection`, `get_instance_info`, `get_sync_status`, `sync_now`, `get_last_error`, `clear_last_error`
+- Records: `update_record`, `update_record_batch`, `create_artifact`, `get_table_metadata`, `check_name_exists_remote`
+- Queries: `query_records`, `get_parent_options`
+- Local files: `list_tables`, `list_artifacts`, `check_name_exists`, `get_file_structure`, `validate_path`
+- Browser: `open_in_browser`, `refresh_preview`, `take_screenshot`, `navigate_and_screenshot`, `run_slash_command`, `activate_tab`, `switch_context`, `upload_attachment`
+- Live form/page control: `navigate`, `set_field`, `get_form_state`, `run_ui_action`, `click_element`
+
+See [CHANGELOG.md](https://github.com/arnoudkooi/sn-scriptsync/blob/main/CHANGELOG.md) for the full list of changes.
 
 ### 🔒 Security Enhancements
 
@@ -256,16 +268,15 @@ Common tables: `sys_script_include`, `sys_script` (Business Rules), `sys_ui_scri
 `sys_script_client`, `sp_widget`, `sys_ui_page`, `sys_ui_action`, `sys_ws_operation`
 ```
 
-### File-based Agent API
+### Agent API
 
-For advanced AI integrations, scriptsync exposes a file-based API. AI agents can write requests to `_requests.json` and read responses from `_responses.json` in the instance folder.
+Detailed usage (HTTP transport, auth, request/response shapes, error codes, and every command) lives in the generated `agentinstructions.md` that's placed in your workspace on startup and kept up to date automatically. Import/reference it from your AI tool (e.g. `@agentinstructions.md` in `CLAUDE.md` or a Cursor rule), or copy it for tools without import support (`.github/copilot-instructions.md`, `.windsurfrules`) as described above.
 
-**Example - Check connection:**
+The legacy file-based transport (`{instance}/agent/requests/*.json` -> `{instance}/agent/responses/res_*.json`) is still supported and can be disabled with:
+
 ```json
-{"id": "1", "command": "check_connection"}
+"sn-scriptsync.agentApi.fileFallback": false
 ```
-
-**Available commands:** `check_connection`, `get_sync_status`, `sync_now`, `query_records`, `create_artifact`, `update_record`, and more. See [CHANGELOG.md](https://github.com/arnoudkooi/sn-scriptsync/blob/main/CHANGELOG.md) for full documentation.
 
 ## Context Menu Visibility
 The sn-scriptsync context menu commands only appear when the scriptsync server is running. You can also hide them completely using the `showContextMenu` setting.

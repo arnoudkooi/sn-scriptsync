@@ -10,6 +10,19 @@ import { Constants } from "./constants";
 import * as path from "path";
 import nodePath = require('path');
 import * as fs from 'fs';
+import {
+	setRuntime as setAgentRuntime,
+	setSyncStateProvider,
+	startAgentHttpServer,
+	stopAgentHttpServer,
+	startAgentFileTransport,
+	logAgentRequestToFile,
+	pendingRegistry,
+	inferCodeFromMessage,
+	AGENT_API_VERSION,
+	HttpServerState,
+	FileTransportHandle,
+} from './agent';
 
 
 
@@ -20,6 +33,8 @@ let scopeJson : any = {};
 
 let wss;
 let serverRunning = false;
+let agentHttpState: HttpServerState | undefined;
+let agentFileHandle: FileTransportHandle | undefined;
 //let openFiles = {};
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
@@ -311,1600 +326,111 @@ function enqueuePendingFile(
 	queueProvider.updateQueue(pendingFiles, debounceDelay);
 }
 
-// Agent API - File-based AI communication
-interface AgentRequest {
-	id: string;
-	command: string;
-	params?: any;
-	timestamp?: number;
+// ---------------------------------------------------------------------------
+// Agent API bridge: thin helpers that forward WebSocket responses from the
+// SN Utils helper tab into the agent module's pendingRegistry. The heavy
+// lifting lives in src/agent/ so this file stays focused on VS Code wiring.
+// ---------------------------------------------------------------------------
+
+function resolvePending(agentRequestId: string, value: any): boolean {
+	return pendingRegistry.resolve(agentRequestId, value);
 }
 
-interface AgentResponse {
-	id: string;
-	command: string;
-	status: 'success' | 'error';
-	result?: any;
-	error?: string;
-	timestamp: number;
+function rejectPending(agentRequestId: string, code: any, message: string): boolean {
+	return pendingRegistry.reject(agentRequestId, code, message);
 }
 
-// Pending async Agent API requests (for commands that need ServiceNow round-trip)
-interface PendingAgentRequest {
-	request: AgentRequest;
-	responsePath: string;
-	instanceFolder: string;
-}
-const pendingAgentRequests: Map<string, PendingAgentRequest> = new Map();
-const processedAgentRequestIds = new Set<string>();
-
-async function handleAgentRequest(requestPath: string) {
-	try {
-		const content = fs.readFileSync(requestPath, 'utf8').trim();
-		
-		// Skip empty or cleared request files
-		if (!content || content === '{}' || content === '') {
-			return;
-		}
-		
-		const request: AgentRequest = JSON.parse(content);
-		
-		// Skip if no valid command
-		if (!request.id || !request.command) {
-			debugLog(`Agent API: Skipping invalid request (missing id or command)`);
-			return;
-		}
-		
-		// Security: Validate request ID format (alphanumeric, underscore, hyphen only)
-		if (!/^[a-zA-Z0-9_-]+$/.test(request.id)) {
-			debugLog(`Agent API: Security violation - invalid request ID format: ${request.id}`);
-			const errorResponse: AgentResponse = {
-				id: request.id || 'unknown',
-				command: request.command,
-				status: 'error',
-				error: 'Invalid request ID: only alphanumeric, underscore, and hyphen allowed',
-				timestamp: Date.now()
-			};
-			// Try to write error response if possible
-			try {
-				const safeDir = path.join(path.dirname(requestPath), '..', 'responses');
-				if (fs.existsSync(safeDir)) {
-					fs.writeFileSync(path.join(safeDir, `res_error.json`), JSON.stringify(errorResponse, null, 2));
-				}
-			} catch (e) {
-				// Silently fail - security takes precedence
-			}
-			return;
-		}
-		
-		// Dedup: file watcher can fire both create and change events for the same file
-		if (processedAgentRequestIds.has(request.id)) {
-			debugLog(`Agent API: Skipping duplicate request ${request.id}`);
-			return;
-		}
-		processedAgentRequestIds.add(request.id);
-		setTimeout(() => processedAgentRequestIds.delete(request.id), 5000);
-		
-		debugLog(`Agent API Request: ${request.command} (id: ${request.id})`);
-		
-		// Structure: <instance>/agent/requests/<req>.json
-		// Go up two levels to get instance folder: requests -> agent -> instance
-		const instanceFolder = path.dirname(path.dirname(path.dirname(requestPath)));
-		
-		// Security: Validate instance folder is within workspace
-		const workspaceRoot = vscode.workspace.rootPath || '';
-		if (!workspaceRoot || !instanceFolder.startsWith(workspaceRoot)) {
-			debugLog(`Agent API: Security violation - request path outside workspace`);
-			const errorResponse: AgentResponse = {
-				id: request.id,
-				command: request.command,
-				status: 'error',
-				error: 'Security: Request path outside workspace',
-				timestamp: Date.now()
-			};
-			return;
-		}
-		
-		const responseDir = path.join(instanceFolder, 'agent', 'responses');
-		if (!fs.existsSync(responseDir)) {
-			fs.mkdirSync(responseDir, { recursive: true });
-		}
-		
-		// Response file matches request ID
-		const responsePath = path.join(responseDir, `res_${request.id}.json`);
-		
-		let response: AgentResponse = {
-			id: request.id,
-			command: request.command,
-			status: 'success',
-			timestamp: Date.now()
-		};
-		
-		try {
-			switch (request.command) {
-				case 'check_connection':
-					// Verify WebSocket server is running and browser is connected
-					const wsRunning = serverRunning && wss !== undefined;
-					const browserConnected = wsRunning && wss?.clients?.size > 0;
-					
-					if (!wsRunning) {
-						response.status = 'error';
-						response.error = 'WebSocket server not running. Click sn-scriptsync in VS Code status bar to start.';
-						response.result = {
-							ready: false,
-							serverRunning: false,
-							browserConnected: false,
-							message: 'WebSocket server not running'
-						};
-					} else if (!browserConnected) {
-						response.status = 'error';
-						response.error = 'No browser connection. Open SN Utils helper tab via /token command in ServiceNow.';
-						response.result = {
-							ready: false,
-							serverRunning: true,
-							browserConnected: false,
-							message: 'No browser connected - open helper tab with /token'
-						};
-					} else {
-						response.result = {
-							ready: true,
-							serverRunning: true,
-							browserConnected: true,
-							clientCount: wss.clients.size,
-							message: 'Connected and ready'
-						};
-					}
-					break;
-				
-				case 'get_sync_status':
-					response.result = {
-						serverRunning,
-						pendingFiles: Array.from(pendingFiles),
-						pendingCount: pendingFiles.size,
-						isPaused: queueProvider?.isPaused || false
-					};
-					break;
-				
-				case 'get_last_error': {
-					// Get the last error that occurred (if any)
-					const errorFilePath = path.join(instanceFolder, '_last_error.json');
-					if (fs.existsSync(errorFilePath)) {
-						try {
-							const errorData = JSON.parse(fs.readFileSync(errorFilePath, 'utf8'));
-							// Check if error is recent (within last 60 seconds)
-							const isRecent = errorData.timestamp && (Date.now() - errorData.timestamp < 60000);
-							response.result = {
-								hasError: true,
-								isRecent: isRecent,
-								error: errorData.error,
-								time: errorData.time,
-								timestamp: errorData.timestamp,
-								details: errorData.details
-							};
-						} catch (e) {
-							response.result = { hasError: false, message: 'No recent errors' };
-						}
-					} else {
-						response.result = { hasError: false, message: 'No errors recorded' };
-					}
-					break;
-				}
-				
-				case 'clear_last_error': {
-					// Clear the last error file
-					const clearErrorPath = path.join(instanceFolder, '_last_error.json');
-					if (fs.existsSync(clearErrorPath)) {
-						fs.unlinkSync(clearErrorPath);
-						response.result = { cleared: true, message: 'Error cleared' };
-					} else {
-						response.result = { cleared: false, message: 'No error to clear' };
-					}
-					break;
-				}
-				
-				case 'sync_now':
-					// Immediately sync all pending files (flush the queue)
-					if (pendingFiles.size === 0) {
-						response.result = {
-							synced: false,
-							message: 'No pending files to sync',
-							count: 0
-						};
-					} else {
-						const count = pendingFiles.size;
-						const files = Array.from(pendingFiles);
-						processPendingFiles();
-						response.result = {
-							synced: true,
-							message: `Synced ${count} file(s) immediately`,
-							count: count,
-							files: files
-						};
-					}
-					break;
-				
-				case 'update_record': {
-					// Direct update without creating temporary files
-					const updateSysId = request.params?.sys_id;
-					const updateTable = request.params?.table;
-					const updateField = request.params?.field;
-					const updateContent = request.params?.content;
-					
-					if (!updateSysId || !updateTable || !updateField || updateContent === undefined) {
-						throw new Error('Missing required params: sys_id, table, field, content');
-					}
-					
-					// Get instance settings
-					const instanceSettings1 = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings1?.url) {
-						throw new Error('Instance settings not found. Ensure _settings.json exists.');
-					}
-					
-					// Check WebSocket connection
-					if (!serverRunning || !wss) {
-						throw new Error('WebSocket server not running. Click sn-scriptsync in status bar to start.');
-					}
-					if (!wss.clients.size) {
-						throw new Error('No browser connection. Open SN Utils helper tab via /token command.');
-					}
-					
-					// Build scriptObj directly (no file system!)
-					const directScriptObj = {
-						sys_id: updateSysId,
-						tableName: updateTable,
-						fieldName: updateField,
-						content: updateContent,
-						instance: instanceSettings1,
-						saveSource: 'AgentAPI-Direct'
-					};
-					
-					// Send directly to ServiceNow via WebSocket
-					broadcastToHelperTab(directScriptObj);
-					
-					debugLog(`Agent API: Direct update sent for ${updateTable}/${updateSysId}.${updateField}`);
-					
-					response.result = {
-						success: true,
-						message: `Update sent for ${updateTable}/${updateSysId}`,
-						table: updateTable,
-						sys_id: updateSysId,
-						field: updateField
-					};
-					break;
-				}
-				
-				case 'update_record_batch': {
-					// Update multiple fields on the same record in one request
-					const batchSysId = request.params?.sys_id;
-					const batchTable = request.params?.table;
-					const batchFields = request.params?.fields; // { script: "...", css: "...", etc }
-					
-					if (!batchSysId || !batchTable || !batchFields || typeof batchFields !== 'object') {
-						throw new Error('Missing required params: sys_id, table, fields (object with field:content pairs)');
-					}
-					
-					const fieldNames = Object.keys(batchFields);
-					if (fieldNames.length === 0) {
-						throw new Error('Fields object cannot be empty');
-					}
-					
-					// Get instance settings
-					const instanceSettings2 = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings2?.url) {
-						throw new Error('Instance settings not found. Ensure _settings.json exists.');
-					}
-					
-					// Check WebSocket connection
-					if (!serverRunning || !wss) {
-						throw new Error('WebSocket server not running. Click sn-scriptsync in status bar to start.');
-					}
-					if (!wss.clients.size) {
-						throw new Error('No browser connection. Open SN Utils helper tab via /token command.');
-					}
-					
-					// Build batch scriptObj
-					const batchScriptObj = {
-						sys_id: batchSysId,
-						tableName: batchTable,
-						fields: batchFields,
-						fieldName: fieldNames.join(', '),
-						content: '', // Not used for multi-field
-						instance: instanceSettings2,
-						saveSource: 'AgentAPI-Batch'
-					};
-					
-					// Send directly to ServiceNow via WebSocket
-					broadcastToHelperTab(batchScriptObj);
-					
-					debugLog(`Agent API: Batch update sent for ${batchTable}/${batchSysId} (${fieldNames.length} fields)`);
-					
-					response.result = {
-						success: true,
-						message: `Updated ${fieldNames.length} field(s) on ${batchTable}/${batchSysId}`,
-						table: batchTable,
-						sys_id: batchSysId,
-						fields: fieldNames
-					};
-					break;
-				}
-				
-				case 'open_in_browser': {
-					// Open an artifact in the browser via scriptsync (to maintain correct scope)
-					const openTable = request.params?.table;
-					const openSysId = request.params?.sys_id;
-					const openScope = request.params?.scope || 'global';
-					const openName = request.params?.name;
-					
-					if (!openSysId) {
-						// Try to get sys_id from _map.json if name is provided
-						if (openName && openTable) {
-							const mapPath = path.join(instanceFolder, openScope, openTable, '_map.json');
-							if (fs.existsSync(mapPath)) {
-								const mapContent = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-								const cleanName = openName.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-');
-								if (mapContent[cleanName]) {
-									request.params.sys_id = mapContent[cleanName];
-								}
-							}
-						}
-						if (!request.params?.sys_id) {
-							throw new Error('Missing required param: sys_id (or name + table + scope to look it up)');
-						}
-					}
-					
-					const instanceSettings5 = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings5?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					// Check if scriptsync is connected
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					let openUrl: string;
-					const sysId = request.params.sys_id;
-					
-					// Build URL based on table type
-					if (openTable === 'sp_widget') {
-						// Widget preview URL
-						openUrl = `${instanceSettings5.url}/$sp.do?id=sp-preview&sys_id=${sysId}`;
-					} else if (openTable === 'sp_page') {
-						// Portal page - open in portal
-						openUrl = `${instanceSettings5.url}/sp?id=${openName || sysId}`;
-					} else {
-						// Standard form view
-						openUrl = `${instanceSettings5.url}/${openTable}.do?sys_id=${sysId}`;
-					}
-					
-					// Route through scriptsync to open in connected browser (maintains scope)
-					const agentRequestIdOpen = `open_${request.id}_${Date.now()}`;
-					
-					pendingAgentRequests.set(agentRequestIdOpen, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					const openRequest = {
-						action: 'activateTab',
-						agentRequestId: agentRequestIdOpen,
-						url: openUrl,
-						reload: false,
-						waitForLoad: false,
-						openIfNotFound: true
-					};
-					
-					broadcastToHelperTab(openRequest);
-					
-					debugLog(`Agent API: Sent open_in_browser request for ${openUrl}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'refresh_preview': {
-					// Send refresh command to browser for widget preview or test URLs
-					const refreshTable = request.params?.table;
-					const refreshSysId = request.params?.sys_id;
-					const refreshScope = request.params?.scope || 'global';
-					const refreshName = request.params?.name;
-					
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const instanceSettings6 = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings6?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					// Get sys_id from _map.json if needed
-					let sysIdToRefresh = refreshSysId;
-					if (!sysIdToRefresh && refreshName && refreshTable) {
-						const mapPath = path.join(instanceFolder, refreshScope, refreshTable, '_map.json');
-						if (fs.existsSync(mapPath)) {
-							const mapContent = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-							const cleanName = refreshName.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-');
-							sysIdToRefresh = mapContent[cleanName];
-						}
-					}
-					
-					if (!sysIdToRefresh) {
-						throw new Error('Missing required param: sys_id (or name + table + scope to look it up)');
-					}
-					
-					// Build test URLs for widget
-					const testUrls: string[] = [];
-					if (refreshTable === 'sp_widget') {
-						testUrls.push(`${instanceSettings6.url}/$sp.do?id=sp-preview&sys_id=${sysIdToRefresh}*`);
-						if (refreshName) {
-							const widgetId = refreshName.toLowerCase().replace(/\s+/g, '_');
-							testUrls.push(`${instanceSettings6.url}/sp_config?id=${widgetId}*`);
-							testUrls.push(`${instanceSettings6.url}/sp?id=${widgetId}*`);
-							testUrls.push(`${instanceSettings6.url}/esc?id=${widgetId}*`);
-						}
-					}
-					
-					// Send refresh command to browser
-					const refreshCommand = {
-						action: 'refreshPreview',
-						testUrls: testUrls,
-						sys_id: sysIdToRefresh,
-						instance: instanceSettings6
-					};
-					
-					broadcastToHelperTab(refreshCommand);
-					
-					response.result = {
-						refreshed: true,
-						sys_id: sysIdToRefresh,
-						testUrls: testUrls,
-						message: `Refresh command sent for ${refreshTable || 'artifact'}`
-					};
-					break;
-				}
-					
-				case 'get_instance_info':
-					const settings = eu.getInstanceSettings(path.basename(instanceFolder));
-					response.result = {
-						instanceName: path.basename(instanceFolder),
-						hasSettings: !!settings,
-						connected: serverRunning && wss?.clients?.size > 0
-					};
-					break;
-					
-				case 'list_tables':
-					// List table folders in the instance
-					const instancePath = instanceFolder;
-					const folders = fs.readdirSync(instancePath, { withFileTypes: true })
-						.filter(d => d.isDirectory() && !d.name.startsWith('_') && !d.name.startsWith('.'))
-						.map(d => d.name);
-					response.result = { tables: folders };
-					break;
-					
-				case 'list_artifacts':
-					// List artifacts in a table folder
-					const tableName = request.params?.table;
-					if (!tableName) {
-						throw new Error('Missing required param: table');
-					}
-					const tablePath = path.join(instanceFolder, tableName);
-					if (!fs.existsSync(tablePath)) {
-						// Check in scope subfolders
-						const scopes = fs.readdirSync(instanceFolder, { withFileTypes: true })
-							.filter(d => d.isDirectory() && !d.name.startsWith('_'));
-						let artifacts: string[] = [];
-						for (const scope of scopes) {
-							const scopeTablePath = path.join(instanceFolder, scope.name, tableName);
-							if (fs.existsSync(scopeTablePath)) {
-								const files = fs.readdirSync(scopeTablePath)
-									.filter(f => !f.startsWith('_') && !f.startsWith('.'));
-								artifacts = artifacts.concat(files.map(f => `${scope.name}/${f}`));
-							}
-						}
-						response.result = { artifacts };
-					} else {
-						const files = fs.readdirSync(tablePath)
-							.filter(f => !f.startsWith('_') && !f.startsWith('.'));
-						response.result = { artifacts: files };
-					}
-					break;
-					
-				case 'check_name_exists':
-					// Check if an artifact name exists in the mapping
-					const checkTable = request.params?.table;
-					const checkName = request.params?.name;
-					if (!checkTable || !checkName) {
-						throw new Error('Missing required params: table, name');
-					}
-					// Search through scope folders for _map.json
-					let exists = false;
-					let existingSysId: string | null = null;
-					const scopeDirs = fs.readdirSync(instanceFolder, { withFileTypes: true })
-						.filter(d => d.isDirectory() && !d.name.startsWith('_'));
-					for (const scopeDir of scopeDirs) {
-						const mapPath = path.join(instanceFolder, scopeDir.name, checkTable, '_map.json');
-						if (fs.existsSync(mapPath)) {
-							const mapContent = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-							for (const [sysId, info] of Object.entries(mapContent)) {
-								if ((info as any).name === checkName) {
-									exists = true;
-									existingSysId = sysId;
-									break;
-								}
-							}
-						}
-						if (exists) break;
-					}
-					response.result = { exists, sysId: existingSysId };
-					break;
-					
-				case 'get_file_structure':
-					// Return expected file naming convention
-					response.result = {
-						pattern: '{instance}/{scope}/{table}/{name}.{field}.{ext}',
-						example: 'myinstance/global/sys_script_include/MyUtils.script.js',
-						fields: {
-							sys_script_include: ['script'],
-							sys_script: ['script'],
-							sys_ui_script: ['script'],
-							sp_widget: ['script', 'css', 'client_script', 'link', 'template'],
-							sys_ui_page: ['html', 'client_script', 'processing_script']
-						}
-					};
-					break;
-					
-				case 'validate_path':
-					// Validate a proposed file path
-					const filePath = request.params?.path;
-					if (!filePath) {
-						throw new Error('Missing required param: path');
-					}
-					const parts = filePath.split(path.sep).filter((p: string) => p);
-					const isValid = parts.length >= 3;
-					response.result = {
-						valid: isValid,
-						parsed: isValid ? {
-							instance: parts[0],
-							scope: parts.length > 3 ? parts[1] : 'global',
-							table: parts.length > 3 ? parts[2] : parts[1],
-							file: parts[parts.length - 1]
-						} : null,
-						reason: !isValid ? 'Path must be at least instance/table/file' : null
-					};
-					break;
-				
-				// ===== REMOTE COMMANDS (require ServiceNow round-trip) =====
-				
-				case 'get_table_metadata': {
-					// Fetch table metadata from ServiceNow (reuses existing requestTableStructure)
-					const metaTable = request.params?.table;
-					if (!metaTable) {
-						throw new Error('Missing required param: table');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					// Get instance settings
-					const instanceSettings = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					// Store pending request
-					const agentRequestId = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestId, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					// Send request using existing action
-					const metaRequest = {
-						action: 'requestTableStructure',
-						agentRequestId,
-						tableName: metaTable,
-						instance: instanceSettings
-					};
-					
-					broadcastToHelperTab(metaRequest);
-					
-					debugLog(`Agent API: Sent remote request for table metadata: ${metaTable}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'check_name_exists_remote': {
-					// Check if artifact exists in ServiceNow (reuses existing checkNameExists)
-					const remoteTable = request.params?.table;
-					const remoteName = request.params?.name;
-					if (!remoteTable || !remoteName) {
-						throw new Error('Missing required params: table, name');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const instanceSettings2 = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings2?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					const agentRequestId2 = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestId2, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					// Send request using existing action
-					const checkRemoteRequest = {
-						action: 'checkNameExists',
-						agentRequestId: agentRequestId2,
-						tableName: remoteTable,
-						name: remoteName,
-						instance: instanceSettings2
-					};
-					
-					broadcastToHelperTab(checkRemoteRequest);
-					
-					debugLog(`Agent API: Sent remote check for ${remoteName} in ${remoteTable}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'query_records': {
-					// Execute an arbitrary query against any ServiceNow table
-					const queryTable = request.params?.table;
-					const encodedQuery = request.params?.query || '';
-					const queryFields = request.params?.fields || 'sys_id,number,short_description,sys_created_on';
-					const queryLimit = request.params?.limit || 10;
-					const queryOrderBy = request.params?.orderBy || '';
-					
-					if (!queryTable) {
-						throw new Error('Missing required param: table');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const instanceSettingsQuery = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettingsQuery?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					const agentRequestIdQuery = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestIdQuery, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					// Build query string
-					let queryString = `sysparm_fields=${queryFields}&sysparm_limit=${queryLimit}`;
-					if (encodedQuery) {
-						queryString += `&sysparm_query=${encodedQuery}`;
-					}
-					if (queryOrderBy) {
-						// Append to existing query or create new one
-						if (encodedQuery) {
-							queryString = queryString.replace(`sysparm_query=${encodedQuery}`, `sysparm_query=${encodedQuery}^${queryOrderBy}`);
-						} else {
-							queryString += `&sysparm_query=${queryOrderBy}`;
-						}
-					}
-					
-					const queryRequest = {
-						action: 'agentQueryRecords',
-						agentRequestId: agentRequestIdQuery,
-						tableName: queryTable,
-						queryString: queryString,
-						instance: instanceSettingsQuery
-					};
-					
-					broadcastToHelperTab(queryRequest);
-					
-					debugLog(`Agent API: Sent query request to ${queryTable}: ${encodedQuery}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'get_parent_options': {
-					// Get available parent records for reference fields (e.g., REST API services for sys_ws_operation)
-					const parentTable = request.params?.table;
-					const scopeFilter = request.params?.scope; // optional scope filter
-					const nameField = request.params?.nameField || 'name'; // field to use as display name
-					const limit = request.params?.limit || 50;
-					
-					if (!parentTable) {
-						throw new Error('Missing required param: table');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const instanceSettings3 = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings3?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					const agentRequestId3 = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestId3, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					// Build query string
-					let queryString = `sysparm_fields=sys_id,${nameField},sys_scope&sysparm_limit=${limit}`;
-					if (scopeFilter) {
-						queryString += `&sysparm_query=sys_scope.scope=${scopeFilter}^ORDERBYname`;
-					} else {
-						queryString += `&sysparm_query=ORDERBYname`;
-					}
-					
-					const parentRequest = {
-						action: 'agentGetParentOptions',
-						agentRequestId: agentRequestId3,
-						tableName: parentTable,
-						nameField: nameField,
-						queryString: queryString,
-						instance: instanceSettings3
-					};
-					
-					broadcastToHelperTab(parentRequest);
-					
-					debugLog(`Agent API: Sent request for parent options from ${parentTable}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'take_screenshot': {
-					// Take a screenshot of a ServiceNow page
-					const screenshotUrl = request.params?.url;
-					const screenshotTabId = request.params?.tabId;
-					
-					if (!screenshotUrl && !screenshotTabId) {
-						throw new Error('Missing required param: url or tabId');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const workspacePath = workspace.rootPath;
-					if (!workspacePath) {
-						throw new Error('No workspace folder open');
-					}
-					
-					// Create screenshots folder if it doesn't exist
-					const screenshotsFolder = path.join(workspacePath, 'screenshots');
-					if (!fs.existsSync(screenshotsFolder)) {
-						fs.mkdirSync(screenshotsFolder, { recursive: true });
-					}
-					
-					// Generate filename with timestamp
-					const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-					const fileName = request.params?.fileName || `screenshot_${timestamp}.png`;
-					
-					const agentRequestIdScreenshot = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestIdScreenshot, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					const screenshotRequest = {
-						action: 'takeScreenshot',
-						agentRequestId: agentRequestIdScreenshot,
-						url: screenshotUrl,
-						tabId: screenshotTabId,
-						fileName: fileName,
-						savePath: path.join(screenshotsFolder, fileName)
-					};
-					
-					broadcastToHelperTab(screenshotRequest);
-					
-					debugLog(`Agent API: Sent screenshot request for ${screenshotUrl || `tabId:${screenshotTabId}`}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'run_slash_command': {
-					// Run a SN Utils slash command on a ServiceNow tab
-					const slashCommand = request.params?.command;
-					const slashUrl = request.params?.url || 'https://*.service-now.com/*';
-					const slashTabId = request.params?.tabId;
-					const slashAutoRun = request.params?.autoRun !== false; // Default true
-					
-					if (!slashCommand) {
-						throw new Error('Missing required param: command');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const agentRequestIdSlash = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestIdSlash, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					const slashRequest = {
-						action: 'runSlashCommand',
-						agentRequestId: agentRequestIdSlash,
-						command: slashCommand,
-						url: slashUrl,
-						tabId: slashTabId,
-						autoRun: slashAutoRun
-					};
-					
-					broadcastToHelperTab(slashRequest);
-					
-					debugLog(`Agent API: Sent slash command request: ${slashCommand}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'activate_tab': {
-					// Find and activate a browser tab by URL pattern, optionally reload it
-					const activateUrl = request.params?.url;
-					const activateReload = request.params?.reload || false;
-					const activateWaitForLoad = request.params?.waitForLoad || false;
-					const activateOpenIfNotFound = request.params?.openIfNotFound || false;
-					
-					if (!activateUrl) {
-						throw new Error('Missing required param: url');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const agentRequestIdActivate = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestIdActivate, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					const activateRequest = {
-						action: 'activateTab',
-						agentRequestId: agentRequestIdActivate,
-						url: activateUrl,
-						reload: activateReload,
-						waitForLoad: activateWaitForLoad,
-						openIfNotFound: activateOpenIfNotFound
-					};
-					
-					broadcastToHelperTab(activateRequest);
-					
-					debugLog(`Agent API: Sent activate tab request for ${activateUrl}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'switch_context': {
-					// Switch ServiceNow context (update set, application, or domain)
-					let switchType = request.params?.switchType; // 'updateset', 'application', or 'domain'
-					const switchValue = request.params?.value || request.params?.sysId; // Support both 'value' and 'sysId' for backwards compat
-					const switchReloadTab = request.params?.reloadTab !== false; // Default true
-					const switchTabUrl = request.params?.tabUrl || 'https://*.service-now.com/*';
-					
-					// Map 'app' to 'application' for convenience
-					if (switchType === 'app') {
-						switchType = 'application';
-					}
-					
-					const validSwitchTypes = ['updateset', 'application', 'domain'];
-					if (!switchType || !validSwitchTypes.includes(switchType)) {
-						throw new Error(`Missing or invalid switchType. Must be one of: ${validSwitchTypes.join(', ')}`);
-					}
-					if (!switchValue) {
-						throw new Error('Missing required param: value (sys_id of update set/app/domain)');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const instanceSettingsSwitch = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettingsSwitch?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					const agentRequestIdSwitch = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestIdSwitch, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					const switchRequest = {
-						action: 'switchContext',
-						agentRequestId: agentRequestIdSwitch,
-						switchType: switchType,
-						value: switchValue,
-						reloadTab: switchReloadTab,
-						tabUrl: switchTabUrl,
-						instance: instanceSettingsSwitch
-					};
-					
-					broadcastToHelperTab(switchRequest);
-					
-					debugLog(`Agent API: Sent switch context request - ${switchType}: ${switchValue}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'upload_attachment': {
-					// Upload a file/image as an attachment to a ServiceNow record
-					const attachTable = request.params?.table;
-					const attachSysId = request.params?.sys_id;
-					let attachFileName = request.params?.fileName;
-					let attachImageData = request.params?.imageData; // Base64 encoded
-					let attachContentType = request.params?.contentType;
-					const attachFilePath = request.params?.filePath; // Alternative: read file from path
-					
-					if (!attachTable || !attachSysId) {
-						throw new Error('Missing required params: table, sys_id');
-					}
-					
-					// Support filePath as alternative to imageData
-					if (attachFilePath && !attachImageData) {
-						// Resolve path: support absolute or relative to instance folder
-						const resolvedPath = path.isAbsolute(attachFilePath) 
-							? path.resolve(attachFilePath)
-							: path.resolve(instanceFolder, attachFilePath);
-						
-						// Security: Ensure file is within workspace
-						const workspaceRoot = vscode.workspace.rootPath || '';
-						if (!resolvedPath.startsWith(workspaceRoot)) {
-							throw new Error('Security: File path outside workspace not allowed');
-						}
-						
-						if (!fs.existsSync(resolvedPath)) {
-							throw new Error(`File not found: ${resolvedPath}`);
-						}
-						
-						// Read file and encode to base64
-						attachImageData = fs.readFileSync(resolvedPath, 'base64');
-						
-						// Auto-detect fileName from path if not provided
-						if (!attachFileName) {
-							attachFileName = path.basename(resolvedPath);
-						}
-						
-						// Auto-detect contentType based on extension if not provided
-						if (!attachContentType) {
-							const ext = path.extname(resolvedPath).toLowerCase();
-							const mimeTypes: Record<string, string> = {
-								'.png': 'image/png',
-								'.jpg': 'image/jpeg',
-								'.jpeg': 'image/jpeg',
-								'.gif': 'image/gif',
-								'.webp': 'image/webp',
-								'.svg': 'image/svg+xml',
-								'.pdf': 'application/pdf',
-								'.txt': 'text/plain',
-								'.json': 'application/json',
-								'.xml': 'application/xml',
-								'.html': 'text/html',
-								'.css': 'text/css',
-								'.js': 'application/javascript',
-								'.zip': 'application/zip',
-								'.doc': 'application/msword',
-								'.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-								'.xls': 'application/vnd.ms-excel',
-								'.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-							};
-							attachContentType = mimeTypes[ext] || 'application/octet-stream';
-						}
-						
-						debugLog(`Agent API: Read file from ${resolvedPath} (${attachContentType})`);
-					}
-					
-					// Set default content type if still not set
-					if (!attachContentType) {
-						attachContentType = 'image/png';
-					}
-					
-					if (!attachFileName) {
-						throw new Error('Missing required param: fileName (or provide filePath)');
-					}
-					if (!attachImageData) {
-						throw new Error('Missing required param: imageData (base64) or filePath');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const instanceSettingsAttach = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettingsAttach?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					const agentRequestIdAttach = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestIdAttach, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					const attachmentRequest = {
-						action: 'uploadAttachment',
-						agentRequestId: agentRequestIdAttach,
-						tableName: attachTable,
-						recordSysId: attachSysId,
-						fileName: attachFileName,
-						imageData: attachImageData,
-						contentType: attachContentType,
-						instance: instanceSettingsAttach
-					};
-					
-					broadcastToHelperTab(attachmentRequest);
-					
-					debugLog(`Agent API: Sent upload attachment request for ${attachFileName} to ${attachTable}/${attachSysId}`);
-					return; // Response written when WebSocket returns
-				}
-				
-				case 'create_artifact': {
-					// Create a new artifact directly via payload (no file creation needed)
-					// This allows AI agents to create artifacts immediately without the file system
-					if (!isCreateArtifactsEnabled()) {
-						throw new Error('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
-					}
-
-					const createTable = request.params?.table;
-					const createScope = request.params?.scope || 'global';
-					const createFields = request.params?.fields; // Object with field:value pairs
-					
-					if (!createTable) {
-						throw new Error('Missing required param: table');
-					}
-					if (!createFields || typeof createFields !== 'object') {
-						throw new Error('Missing required param: fields (object with field:value pairs)');
-					}
-					if (!createFields.name) {
-						throw new Error('Missing required field: name');
-					}
-					if (!serverRunning || !wss?.clients?.size) {
-						throw new Error('Not connected to ServiceNow. Open browser helper tab first.');
-					}
-					
-					const instanceSettings4 = eu.getInstanceSettings(path.basename(instanceFolder));
-					if (!instanceSettings4?.url) {
-						throw new Error('Instance settings not found');
-					}
-					
-					// Get scope sys_id from scopes.json
-					const scopesPath = path.join(instanceFolder, 'scopes.json');
-					let scopeSysId = createScope;
-					if (createScope !== 'global' && fs.existsSync(scopesPath)) {
-						const scopes = JSON.parse(fs.readFileSync(scopesPath, 'utf8'));
-						if (scopes[createScope]) {
-							scopeSysId = scopes[createScope];
-						}
-					}
-					
-					const agentRequestId4 = `agent_${request.id}`;
-					pendingAgentRequests.set(agentRequestId4, {
-						request,
-						responsePath,
-						instanceFolder
-					});
-					
-					// Build the record payload
-					const recordPayload: any = {
-						...createFields,
-						sys_scope: scopeSysId
-					};
-					
-					const createRequest = {
-						action: 'createRecord',
-						agentRequestId: agentRequestId4,
-						tableName: createTable,
-						instance: instanceSettings4,
-						scope: scopeSysId,
-						payload: recordPayload
-					};
-					
-					broadcastToHelperTab(createRequest);
-					
-					debugLog(`Agent API: Sent create request for ${createFields.name} in ${createTable}`);
-					return; // Response written when WebSocket returns
-				}
-					
-				default:
-					response.status = 'error';
-					response.error = `Unknown command: ${request.command}`;
-			}
-		} catch (err: any) {
-			response.status = 'error';
-			response.error = err.message;
-		}
-		
-		// Write response (for local commands only - remote commands return early)
-		fs.writeFileSync(responsePath, JSON.stringify(response, null, 2));
-		debugLog(`Agent API Response written: ${response.status}`);
-		
-		// Log request to _requests.log
-		logAgentRequest(instanceFolder, request, response);
-		// Note: Request file is NOT deleted - agent is responsible for cleanup (Option B)
-		
-	} catch (err: any) {
-		debugLog(`Agent API error: ${err.message}`);
-	}
-}
-
-// Log completed Agent API requests
-function logAgentRequest(instanceFolder: string, request: AgentRequest, response: AgentResponse) {
-	try {
-		const logPath = path.join(instanceFolder, '_requests.log');
-		const timestamp = new Date().toISOString();
-		const logEntry = `[${timestamp}] ${request.command} (id: ${request.id}) - ${response.status}${response.error ? ': ' + response.error : ''}\n`;
-		fs.appendFileSync(logPath, logEntry);
-	} catch (e) {
-		// Silently ignore if we can't write to log file
-		console.log(`[sn-scriptsync] Agent API: ${request.command} - ${response.status}`);
-	}
-}
-
-// Agent API handler for get_parent_options response
+// Legacy WS response handlers. They forward straight into the registry so
+// the waiting command handler resumes with the browser payload.
 function handleAgentParentOptionsResponse(responseJson: any) {
-	const agentRequestId = responseJson.agentRequestId;
-	const pending = pendingAgentRequests.get(agentRequestId);
-	
-	if (!pending) {
-		debugLog(`Agent API: No pending request found for ${agentRequestId}`);
-		return;
-	}
-	
-	pendingAgentRequests.delete(agentRequestId);
-	
-	const response: AgentResponse = {
-		id: pending.request.id,
-		command: pending.request.command,
-		status: responseJson.error ? 'error' : 'success',
-		timestamp: Date.now()
-	};
-	
-	if (responseJson.error) {
-		response.error = responseJson.error;
-	} else {
-		// Transform the results into a more usable format
-		const records = responseJson.result || [];
-		const nameField = responseJson.nameField || 'name';
-		response.result = {
-			table: responseJson.tableName,
-			count: records.length,
-			options: records.map((r: any) => ({
-				sys_id: r.sys_id,
-				name: r[nameField] || r.name || r.sys_id,
-				scope: r.sys_scope?.value || r.sys_scope || 'global'
-			}))
-		};
-	}
-	
-	fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-	debugLog(`Agent API: Parent options response written for ${pending.request.params?.table}`);
-	
-	// Log and clear request file
-	logAgentRequest(pending.instanceFolder, pending.request, response);
-	const requestPath = path.join(pending.instanceFolder, '_requests.json');
-	fs.writeFileSync(requestPath, '{}');
+	if (responseJson?.agentRequestId) resolvePending(responseJson.agentRequestId, responseJson);
 }
-
-// Agent API handler for query_records response
 function handleAgentQueryRecordsResponse(responseJson: any) {
-	const agentRequestId = responseJson.agentRequestId;
-	const pending = pendingAgentRequests.get(agentRequestId);
-	
-	if (!pending) {
-		debugLog(`Agent API: No pending request found for ${agentRequestId}`);
-		return;
-	}
-	
-	pendingAgentRequests.delete(agentRequestId);
-	
-	const response: AgentResponse = {
-		id: pending.request.id,
-		command: pending.request.command,
-		status: responseJson.success ? 'success' : 'error',
-		timestamp: Date.now()
-	};
-	
-	if (responseJson.error) {
-		response.error = responseJson.error;
+	if (responseJson?.agentRequestId) resolvePending(responseJson.agentRequestId, responseJson);
+}
+function handleActivateTabResponse(responseJson: any) {
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) return;
+	debugLog(`activateTabResponse (non-agent): ${responseJson?.url || responseJson?.error}`);
+}
+function handleRunSlashCommandResponse(responseJson: any) {
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) return;
+	debugLog(`runSlashCommandResponse (non-agent): ${responseJson?.command || responseJson?.error}`);
+}
+function handleSwitchContextResponse(responseJson: any) {
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) return;
+	debugLog(`switchContextResponse (non-agent): ${responseJson?.switchType || responseJson?.error}`);
+}
+function handleUploadAttachmentResponse(responseJson: any) {
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) return;
+	if (responseJson?.success) {
+		vscode.window.showInformationMessage(`Attachment uploaded: ${responseJson.fileName}`);
 	} else {
-		response.result = {
-			table: responseJson.tableName,
-			count: responseJson.count,
-			records: responseJson.records
-		};
-	}
-	
-	try {
-		fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-		debugLog(`Agent API: Query response written with ${responseJson.count} records`);
-	} catch (e) {
-		console.log(`[sn-scriptsync] Error writing query response: ${e}`);
-	}
-	
-	// Log and clear request file
-	logAgentRequest(pending.instanceFolder, pending.request, response);
-	try {
-		const requestPath = path.join(pending.instanceFolder, '_requests.json');
-		fs.writeFileSync(requestPath, '{}');
-	} catch (e) {
-		// Ignore
+		vscode.window.showErrorMessage(`Attachment upload failed: ${responseJson?.error}`);
 	}
 }
 
-// Handle screenshot response from browser
+// Screenshot from the browser: when it's tied to an Agent API request let
+// the command handler (see src/agent/commands/browser.ts) save it. Otherwise
+// this is a manual `Take Screenshot` command and we save it here for UX.
 function handleScreenshotResponse(responseJson: any) {
-	// Check if this is for an Agent API request
-	const agentRequestId = responseJson.agentRequestId;
-	const isAgentRequest = agentRequestId && pendingAgentRequests.has(agentRequestId);
-	
-	if (responseJson.error) {
-		if (isAgentRequest) {
-			const pending = pendingAgentRequests.get(agentRequestId)!;
-			pendingAgentRequests.delete(agentRequestId);
-			
-			const response: AgentResponse = {
-				id: pending.request.id,
-				command: pending.request.command,
-				status: 'error',
-				error: responseJson.error,
-				timestamp: Date.now()
-			};
-			
-			fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-			logAgentRequest(pending.instanceFolder, pending.request, response);
-			debugLog(`Agent API: Screenshot failed - ${responseJson.error}`);
-		} else {
-			vscode.window.showErrorMessage(`Screenshot failed: ${responseJson.error}`);
-		}
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) return;
+
+	if (responseJson?.error) {
+		vscode.window.showErrorMessage(`Screenshot failed: ${responseJson.error}`);
 		return;
 	}
-
-	if (!responseJson.imageData) {
-		const errorMsg = 'No image data received';
-		if (isAgentRequest) {
-			const pending = pendingAgentRequests.get(agentRequestId)!;
-			pendingAgentRequests.delete(agentRequestId);
-			
-			const response: AgentResponse = {
-				id: pending.request.id,
-				command: pending.request.command,
-				status: 'error',
-				error: errorMsg,
-				timestamp: Date.now()
-			};
-			
-			fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-			logAgentRequest(pending.instanceFolder, pending.request, response);
-			debugLog(`Agent API: Screenshot failed - ${errorMsg}`);
-		} else {
-			vscode.window.showErrorMessage(`Screenshot failed: ${errorMsg}`);
-		}
+	if (!responseJson?.imageData) {
+		vscode.window.showErrorMessage('Screenshot failed: No image data received');
 		return;
 	}
-
 	try {
 		const workspacePath = workspace.rootPath;
-		if (!workspacePath) {
-			throw new Error('No workspace folder open');
-		}
-
-		// Create screenshots folder if it doesn't exist
+		if (!workspacePath) throw new Error('No workspace folder open');
 		const screenshotsFolder = path.join(workspacePath, 'screenshots');
-		if (!fs.existsSync(screenshotsFolder)) {
-			fs.mkdirSync(screenshotsFolder, { recursive: true });
-		}
-
-		// Generate filename with timestamp
+		if (!fs.existsSync(screenshotsFolder)) fs.mkdirSync(screenshotsFolder, { recursive: true });
 		const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 		const fileName = responseJson.fileName || `screenshot_${timestamp}.png`;
 		const filePath = path.join(screenshotsFolder, fileName);
-
-		// Decode base64 image data and save
-		const imageBuffer = Buffer.from(responseJson.imageData, 'base64');
-		fs.writeFileSync(filePath, new Uint8Array(imageBuffer));
-
+		const buf = Buffer.from(responseJson.imageData, 'base64');
+		fs.writeFileSync(filePath, new Uint8Array(buf));
 		debugLog(`Screenshot saved to ${filePath}`);
-
-		// Handle Agent API response
-		if (isAgentRequest) {
-			const pending = pendingAgentRequests.get(agentRequestId)!;
-			pendingAgentRequests.delete(agentRequestId);
-			
-			const response: AgentResponse = {
-				id: pending.request.id,
-				command: pending.request.command,
-				status: 'success',
-				timestamp: Date.now(),
-				result: {
-					saved: true,
-					filePath: filePath,
-					fileName: fileName,
-					url: responseJson.url || pending.request.params?.url,
-					tabTitle: responseJson.tabTitle
-				}
-			};
-			
-			fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-			logAgentRequest(pending.instanceFolder, pending.request, response);
-			debugLog(`Agent API: Screenshot saved to ${filePath}`);
-		} else {
-			// Show success message with option to open (only for manual command)
-			vscode.window.showInformationMessage(
-				`Screenshot saved: ${fileName}`,
-				'Open File',
-				'Open Folder'
-			).then(selection => {
-				if (selection === 'Open File') {
-					vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
-				} else if (selection === 'Open Folder') {
-					vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
-				}
-			});
-		}
+		vscode.window.showInformationMessage(`Screenshot saved: ${fileName}`, 'Open File', 'Open Folder').then(selection => {
+			if (selection === 'Open File') vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+			else if (selection === 'Open Folder') vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
+		});
 	} catch (e: any) {
-		if (isAgentRequest) {
-			const pending = pendingAgentRequests.get(agentRequestId)!;
-			pendingAgentRequests.delete(agentRequestId);
-			
-			const response: AgentResponse = {
-				id: pending.request.id,
-				command: pending.request.command,
-				status: 'error',
-				error: e.message || String(e),
-				timestamp: Date.now()
-			};
-			
-			fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-			logAgentRequest(pending.instanceFolder, pending.request, response);
-			debugLog(`Agent API: Screenshot save error - ${e}`);
-		} else {
-			vscode.window.showErrorMessage(`Failed to save screenshot: ${e}`);
-			debugLog(`Screenshot save error: ${e}`);
-		}
+		vscode.window.showErrorMessage(`Failed to save screenshot: ${e?.message || e}`);
+		debugLog(`Screenshot save error: ${e}`);
 	}
 }
 
-// Handle upload attachment response from browser
-function handleUploadAttachmentResponse(responseJson: any) {
-	const agentRequestId = responseJson.agentRequestId;
-	
-	if (!agentRequestId || !pendingAgentRequests.has(agentRequestId)) {
-		// Not an Agent API request, just log it
-		if (responseJson.success) {
-			vscode.window.showInformationMessage(`Attachment uploaded: ${responseJson.fileName}`);
-		} else {
-			vscode.window.showErrorMessage(`Attachment upload failed: ${responseJson.error}`);
-		}
-		return;
-	}
-	
-	const pending = pendingAgentRequests.get(agentRequestId)!;
-	pendingAgentRequests.delete(agentRequestId);
-	
-	let response: AgentResponse;
-	
-	if (responseJson.success) {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'success',
-			timestamp: Date.now(),
-			result: {
-				uploaded: true,
-				fileName: responseJson.fileName,
-				table: responseJson.tableName,
-				recordSysId: responseJson.recordSysId,
-				attachment: responseJson.attachment // Contains sys_id, size_bytes, etc.
-			}
-		};
-		debugLog(`Agent API: Attachment uploaded - ${responseJson.fileName} to ${responseJson.tableName}/${responseJson.recordSysId}`);
-	} else {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'error',
-			error: responseJson.error || 'Upload failed',
-			timestamp: Date.now()
-		};
-		debugLog(`Agent API: Attachment upload failed - ${responseJson.error}`);
-	}
-	
-	fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-	logAgentRequest(pending.instanceFolder, pending.request, response);
-}
-
-// Handle activate tab response from browser
-function handleActivateTabResponse(responseJson: any) {
-	const agentRequestId = responseJson.agentRequestId;
-	
-	if (!agentRequestId || !pendingAgentRequests.has(agentRequestId)) {
-		// Not an Agent API request, just log it
-		if (responseJson.success) {
-			debugLog(`Tab activated: ${responseJson.url}`);
-		} else {
-			debugLog(`Tab activation failed: ${responseJson.error}`);
-		}
-		return;
-	}
-	
-	const pending = pendingAgentRequests.get(agentRequestId)!;
-	pendingAgentRequests.delete(agentRequestId);
-	
-	let response: AgentResponse;
-	
-	if (responseJson.success) {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'success',
-			timestamp: Date.now(),
-			result: {
-				activated: true,
-				tabId: responseJson.tabId,
-				url: responseJson.url,
-				title: responseJson.title,
-				opened: responseJson.opened || false, // true if a new tab was opened
-				reloaded: responseJson.reloaded || false
-			}
-		};
-		debugLog(`Agent API: Tab activated - ${responseJson.url}`);
-	} else {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'error',
-			error: responseJson.error || 'Tab activation failed',
-			timestamp: Date.now()
-		};
-		debugLog(`Agent API: Tab activation failed - ${responseJson.error}`);
-	}
-	
-	fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-	logAgentRequest(pending.instanceFolder, pending.request, response);
-}
-
-// Handle run slash command response from browser
-function handleRunSlashCommandResponse(responseJson: any) {
-	const agentRequestId = responseJson.agentRequestId;
-	
-	if (!agentRequestId || !pendingAgentRequests.has(agentRequestId)) {
-		// Not an Agent API request, just log it
-		if (responseJson.success) {
-			debugLog(`Slash command executed: ${responseJson.command}`);
-		} else {
-			debugLog(`Slash command failed: ${responseJson.error}`);
-		}
-		return;
-	}
-	
-	const pending = pendingAgentRequests.get(agentRequestId)!;
-	pendingAgentRequests.delete(agentRequestId);
-	
-	let response: AgentResponse;
-	
-	if (responseJson.success) {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'success',
-			timestamp: Date.now(),
-			result: {
-				executed: true,
-				slashCommand: responseJson.command,
-				tabId: responseJson.tabId,
-				autoRun: responseJson.autoRun
-			}
-		};
-		debugLog(`Agent API: Slash command executed - ${responseJson.command}`);
-	} else {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'error',
-			error: responseJson.error || 'Slash command failed',
-			timestamp: Date.now()
-		};
-		debugLog(`Agent API: Slash command failed - ${responseJson.error}`);
-	}
-	
-	fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-	logAgentRequest(pending.instanceFolder, pending.request, response);
-}
-
-// Handle switch context response from browser
-function handleSwitchContextResponse(responseJson: any) {
-	const agentRequestId = responseJson.agentRequestId;
-	
-	if (!agentRequestId || !pendingAgentRequests.has(agentRequestId)) {
-		// Not an Agent API request, just log it
-		if (responseJson.success) {
-			debugLog(`Context switched: ${responseJson.switchType} -> ${responseJson.value}`);
-		} else {
-			debugLog(`Context switch failed: ${responseJson.error}`);
-		}
-		return;
-	}
-	
-	const pending = pendingAgentRequests.get(agentRequestId)!;
-	pendingAgentRequests.delete(agentRequestId);
-	
-	let response: AgentResponse;
-	
-	if (responseJson.success) {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'success',
-			timestamp: Date.now(),
-			result: {
-				success: true,
-				switchType: responseJson.switchType,
-				value: responseJson.value,
-				reloaded: responseJson.reloaded || false
-			}
-		};
-		debugLog(`Agent API: Context switched - ${responseJson.switchType}: ${responseJson.value}`);
-	} else {
-		response = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: 'error',
-			error: responseJson.error || 'Context switch failed',
-			timestamp: Date.now()
-		};
-		debugLog(`Agent API: Context switch failed - ${responseJson.error}`);
-	}
-	
-	fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-	logAgentRequest(pending.instanceFolder, pending.request, response);
-}
-
-// Relay errors to Agent API by writing to _last_error.json
+// Write _last_error.json for every instance folder so `get_last_error` works,
+// and fail any pending HTTP/file requests pointing at that folder.
 function relayErrorToAgent(errorMessage: string, rawError?: any) {
 	try {
-		// Find instance folders in workspace and write error to each
 		const workspaceRoot = vscode.workspace.rootPath || '';
+		if (!workspaceRoot) return;
 		const folders = fs.readdirSync(workspaceRoot, { withFileTypes: true })
 			.filter(d => d.isDirectory() && !d.name.startsWith('.'));
-		
 		for (const folder of folders) {
 			const settingsPath = path.join(workspaceRoot, folder.name, '_settings.json');
 			const oldSettingsPath = path.join(workspaceRoot, folder.name, 'settings.json');
-			
-			// Only write to instance folders (those with settings files)
-			if (fs.existsSync(settingsPath) || fs.existsSync(oldSettingsPath)) {
-				const errorPath = path.join(workspaceRoot, folder.name, '_last_error.json');
-				const errorData = {
-					timestamp: Date.now(),
-					time: new Date().toISOString(),
-					error: errorMessage,
-					details: rawError?.error || null
-				};
-				fs.writeFileSync(errorPath, JSON.stringify(errorData, null, 2));
-				debugLog(`Agent API: Error relayed to ${folder.name}/_last_error.json`);
-				
-				// Also fail any pending Agent requests for this instance
-				const instanceFolder = path.join(workspaceRoot, folder.name);
-				pendingAgentRequests.forEach((pending, requestId) => {
-					if (pending.instanceFolder === instanceFolder) {
-						const response: AgentResponse = {
-							id: pending.request.id,
-							command: pending.request.command,
-							status: 'error',
-							error: errorMessage,
-							timestamp: Date.now()
-						};
-						fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-						logAgentRequest(pending.instanceFolder, pending.request, response);
-						const requestPath = path.join(pending.instanceFolder, '_requests.json');
-						fs.writeFileSync(requestPath, '{}');
-						pendingAgentRequests.delete(requestId);
-						debugLog(`Agent API: Pending request ${requestId} failed with error`);
-					}
-				});
-			}
+			if (!fs.existsSync(settingsPath) && !fs.existsSync(oldSettingsPath)) continue;
+
+			const errorPath = path.join(workspaceRoot, folder.name, '_last_error.json');
+			fs.writeFileSync(errorPath, JSON.stringify({
+				timestamp: Date.now(),
+				time: new Date().toISOString(),
+				error: errorMessage,
+				details: rawError?.error || null,
+			}, null, 2));
+			debugLog(`Agent API: Error relayed to ${folder.name}/_last_error.json`);
+
+			const instanceFolder = path.join(workspaceRoot, folder.name);
+			const code = inferCodeFromMessage(errorMessage);
+			pendingRegistry.rejectForInstance(instanceFolder, code, errorMessage);
 		}
 	} catch (e) {
-		// Silently ignore errors in error relay
 		console.log(`[sn-scriptsync] Error relaying to agent: ${e}`);
 	}
 }
@@ -1938,57 +464,29 @@ function setupWatcher() {
 	const monitorFileChanges = (settings.get('externalChanges.monitorFileChanges') as boolean) ?? true;
 	const autoSyncEnabled = monitorFileChanges && debounceSeconds > 0;
 	vscode.commands.executeCommand('setContext', 'sn-scriptsync.queueAutoSyncEnabled', autoSyncEnabled);
-	
-	// If monitoring is disabled, keep Agent API working by watching only agent request files.
+
+	// The file-based Agent API transport is wired separately in activate();
+	// this watcher only cares about queueing external code changes.
 	if (!monitorFileChanges) {
-		watcher = vscode.workspace.createFileSystemWatcher(
-			new vscode.RelativePattern(vscode.workspace.rootPath || '', '**/agent/requests/*.json')
-		);
-
-		watcher.onDidCreate(uri => {
-			debugLog(`Agent API request file created: ${uri.fsPath}`);
-			handleAgentRequest(uri.fsPath);
-		});
-
-		watcher.onDidChange(uri => {
-			debugLog(`Agent API request file changed: ${uri.fsPath}`);
-			handleAgentRequest(uri.fsPath);
-		});
 		return;
 	}
 
 	const DEBOUNCE_DELAY = debounceSeconds > 0 ? debounceSeconds * 1000 : 0;
 
 		watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.workspace.rootPath || '', "**/*"));
-		
-		watcher.onDidCreate(uri => {
-			const fileName = path.basename(uri.fsPath);
-			if (fileName.endsWith('.json') && uri.fsPath.includes(`${path.sep}agent${path.sep}requests${path.sep}`)) {
-				debugLog(`Agent API request file created: ${uri.fsPath}`);
-				handleAgentRequest(uri.fsPath);
-			}
-		});
-		
+
 		watcher.onDidChange(uri => {
 			const runId = buildRunId();
 			const fileName = path.basename(uri.fsPath);
 			auditLog('watcher_event_received', { filePath: uri.fsPath, fileName }, runId);
-			
+
 			// Ignore debug.log to prevent infinite loop
 			if (fileName === 'debug.log' || fileName === 'audit.log') {
 				auditLog('watcher_event_ignored', { reason: 'internal_log_file', filePath: uri.fsPath }, runId);
 				return;
 			}
-			
-			// Handle Agent API requests (fallback for file changes)
-			if (fileName.endsWith('.json') && uri.fsPath.includes(`${path.sep}agent${path.sep}requests${path.sep}`)) {
-				debugLog(`Agent API request file changed: ${uri.fsPath}`);
-				auditLog('watcher_event_ignored', { reason: 'agent_request_file', filePath: uri.fsPath }, runId);
-				handleAgentRequest(uri.fsPath);
-				return;
-			}
-			
-			// Ignore Agent API folders (already handled separately above)
+
+			// The file-based Agent API transport owns everything under /agent/.
 			if (uri.fsPath.includes(`${path.sep}agent${path.sep}`)) {
 				auditLog('watcher_event_ignored', { reason: 'agent_folder', filePath: uri.fsPath }, runId);
 				return;
@@ -2089,6 +587,20 @@ vscode.workspace.onDidSaveTextDocument(document => {
 });
 
 export function activate(context: vscode.ExtensionContext) {
+
+	// Wire the agent module's host shims. This must happen before any
+	// command handler runs so getRuntime()/getSyncState() don't throw.
+	setAgentRuntime({
+		sendToBrowser: (payload) => broadcastToHelperTab(payload),
+		hasBrowserClient: () => !!wss && wss.clients.size > 0,
+		isServerRunning: () => serverRunning,
+		log: (msg) => debugLog(msg),
+	});
+	setSyncStateProvider(() => ({
+		pendingFiles: Array.from(pendingFiles),
+		isPaused: !!queueProvider && queueProvider.isPaused,
+		processPendingFiles: () => processPendingFiles(),
+	}));
 
 	//initialize statusbaritem and click events
 	const toggleSyncID = 'sample.toggleScriptSync';
@@ -2308,7 +820,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 }
 
-export function deactivate() { }
+export function deactivate() {
+	stopAgentHttpServer(agentHttpState).catch(() => { /* ignore */ });
+	agentHttpState = undefined;
+	if (agentFileHandle) {
+		try { agentFileHandle.dispose(); } catch { /* ignore */ }
+		agentFileHandle = undefined;
+	}
+}
 
 
 function setScopeTreeView(jsn?: any) {
@@ -2473,10 +992,65 @@ function startServers() {
 	targetDir = path.join(workspace.rootPath, '') + nodePath.sep;
 	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
 
-	// Copy AI agent instructions
+	// Refresh AI agent instructions. Users are told to RENAME agentinstructions.md
+	// for their tool (.cursorrules, CLAUDE.md, ...), so we refresh whichever
+	// variant they actually have — otherwise the agent's real rules file would go
+	// stale and never learn about the HTTP Agent API. The generated docs carry a
+	// SN-SCRIPTSYNC managed block so user customizations outside it are preserved.
 	let agentRulesSourceDir = path.join(__filename, '..', '..', 'agentrules') + nodePath.sep;
-	let workspaceRoot = path.join(workspace.rootPath, '') + nodePath.sep;
-	eu.copyFileIfNotExists(agentRulesSourceDir + 'agentinstructions.md', workspaceRoot + 'agentinstructions.md', function () { });
+	const instructionsSource = agentRulesSourceDir + 'agentinstructions.md';
+	const instructionTargets = [
+		'agentinstructions.md',
+		'.cursorrules',
+		'.windsurfrules',
+		'.clinerules',
+		'CLAUDE.md',
+		'AGENTS.md',
+		path.join('.github', 'copilot-instructions.md'),
+	];
+	// Only bootstrap the default agentinstructions.md when the user has no
+	// instruction file at all — avoids creating a stray duplicate next to a file
+	// they already renamed.
+	const anyInstructionFileExists = instructionTargets.some(
+		rel => fs.existsSync(path.join(workspace.rootPath, rel))
+	);
+	instructionTargets.forEach(rel => {
+		const dest = path.join(workspace.rootPath, rel);
+		const exists = fs.existsSync(dest);
+		if (!exists && !(rel === 'agentinstructions.md' && !anyInstructionFileExists)) {
+			return; // don't create renamed variants that the user never had
+		}
+		eu.upsertManagedBlock(instructionsSource, dest, (err: any, status?: string) => {
+			if (err) {
+				debugLog(`instructions refresh error (${rel}): ${err?.message || err}`);
+			} else if (status && status !== 'up_to_date') {
+				debugLog(`instructions ${status}: ${rel}`);
+			}
+		});
+	});
+
+	// Start the HTTP Agent API (preferred, event-driven) and optionally the
+	// legacy file-based transport. Both sit on top of the same dispatcher.
+	startAgentHttpServer({ onLog: (m) => debugLog(m) })
+		.then((state) => {
+			agentHttpState = state;
+			debugLog(`Agent HTTP API listening on 127.0.0.1:${state.port}`);
+			// Surface the live endpoint so users can confirm the HTTP Agent API is up.
+			scriptSyncStatusBarItem.tooltip = `sn-scriptsync running\nAgent HTTP API: 127.0.0.1:${state.port}\nSee .vscode/sn-agent-port.json (port + token)`;
+		})
+		.catch((err) => {
+			debugLog(`Agent HTTP API failed to start: ${err?.message || err}`);
+			vscode.window.showWarningMessage(`SN ScriptSync: Agent HTTP API failed to start: ${err?.message || err}`);
+		});
+
+	const agentSettings = vscode.workspace.getConfiguration('sn-scriptsync');
+	const fileFallback = agentSettings.get<boolean>('agentApi.fileFallback', true);
+	if (fileFallback) {
+		agentFileHandle = startAgentFileTransport({
+			log: (m) => debugLog(m),
+			audit: (instanceFolder, request, response) => logAgentRequestToFile(instanceFolder, request, response),
+		});
+	}
 
 	//Start WebSocket Server
 	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});
@@ -2495,18 +1069,28 @@ function startServers() {
 		ws.on('message', function incoming(message) {
 			try {
 				let messageJson = JSON.parse(message)
-				if (messageJson.hasOwnProperty('error')) {
+				// Errors that belong to an Agent API round-trip carry an
+				// agentRequestId and are surfaced to the calling command via the
+				// pending registry below. Skip the global popup / queue-pause /
+				// _last_error path for those so a single agent REST failure
+				// doesn't spam the UI or clobber the shared error file.
+				if (messageJson.hasOwnProperty('error') && !messageJson.agentRequestId) {
 					auditLog('remote_result_error', { action: messageJson?.action || 'unknown', detail: messageJson.error?.detail || null });
 					let errorDetail = '';
-					if (messageJson.error?.detail){
-						if (messageJson.error.detail.includes("ACL"))
-							errorDetail = "ACL Error, try changing scope in the browser";
-						else if (messageJson.error.detail.includes("Required to provide Auth information"))
-							errorDetail = "Could not sync file, no valid token. Try typing the slashcommand /token in a active browser session and retry.";
-						else
-							errorDetail = messageJson.error.detail;
-					} 
-					else {
+					const rawDetail = messageJson.error?.detail;
+					if (rawDetail) {
+						const code = inferCodeFromMessage(rawDetail);
+						switch (code) {
+							case 'E_ACL':
+								errorDetail = 'ACL Error, try changing scope in the browser';
+								break;
+							case 'E_TOKEN_EXPIRED':
+								errorDetail = 'Could not sync file, no valid token. Try typing the slashcommand /token in a active browser session and retry.';
+								break;
+							default:
+								errorDetail = rawDetail;
+						}
+					} else {
 						errorDetail = JSON.stringify(messageJson, null, 2);
 					}
 
@@ -2554,6 +1138,9 @@ function startServers() {
 				handleRunSlashCommandResponse(messageJson);
 			else if (messageJson?.action == 'switchContextResponse')
 				handleSwitchContextResponse(messageJson);
+			else if (messageJson?.agentRequestId && resolvePending(messageJson.agentRequestId, messageJson)) {
+				// Already resolved into a pending Agent API request.
+			}
 			else if (message.instance && !message?.action)
 				refreshedToken(messageJson);
 			// end new methods to replace webserver with websocket
@@ -2568,7 +1155,10 @@ function startServers() {
                 writeResponseToWebViewPanel(messageJson);
             }
 			else if (messageJson.hasOwnProperty('actionGoal')) {
-				if (messageJson.actionGoal == 'getCurrent') {
+				if (messageJson.actionGoal == 'resolveScopeForSave') {
+					handleResolveScopeForSave(messageJson);
+				}
+				else if (messageJson.actionGoal == 'getCurrent') {
 					eu.writeFile(messageJson.fileName, messageJson.result[messageJson.fieldName], true, function () { });
 				}
 				else if (messageJson.actionGoal == 'writeInstanceMetaData') {
@@ -2606,7 +1196,11 @@ function startServers() {
 
 		//send immediatly a feedback to the incoming connection    
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
-		ws.send(JSON.stringify({ action : 'bannerMessage', message : '2025-12-06 Added support for syncing external changes (AI Agents). Enable via settings (syncDelay > 0)!', class: 'alert alert-primary' }), function () { });
+		ws.send(JSON.stringify({
+			action: 'bannerMessage',
+			message: `v4.3.0: new HTTP Agent API on 127.0.0.1 (see .vscode/sn-agent-port.json). Auth via X-Agent-Token header. File-based API still works.`,
+			class: 'alert alert-primary',
+		}), function () { });
 
 	});
 	updateScriptSyncStatusBarItem('Running');
@@ -2757,51 +1351,8 @@ function handleCreateRecordResponse(responseJson) {
 		name: responseJson?.newRecord?.name,
 		error: responseJson?.error || null
 	});
-	// Check if this is for an Agent API request
-	const agentRequestId = responseJson.agentRequestId;
-	if (agentRequestId && pendingAgentRequests.has(agentRequestId)) {
-		const pending = pendingAgentRequests.get(agentRequestId)!;
-		pendingAgentRequests.delete(agentRequestId);
-		
-		const response: AgentResponse = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: responseJson.success ? 'success' : 'error',
-			timestamp: Date.now()
-		};
-		
-		if (responseJson.success) {
-			response.result = {
-				sys_id: responseJson.newRecord.sys_id,
-				name: responseJson.newRecord.name,
-				table: responseJson.newRecord.tableName,
-				scope: responseJson.newRecord.scope
-			};
-			
-			// Update _map.json for the new artifact
-			const scopeName = pending.request.params?.scope || 'global';
-			const tableName = pending.request.params?.table;
-			const artifactName = pending.request.params?.fields?.name;
-			
-			if (tableName && artifactName) {
-				const mapPath = path.join(pending.instanceFolder, scopeName, tableName, '_map.json');
-				const nameToSysId = eu.writeOrReadNameToSysIdMapping(mapPath);
-				const cleanName = artifactName.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-');
-				nameToSysId[cleanName] = responseJson.newRecord.sys_id;
-				eu.writeOrReadNameToSysIdMapping(mapPath, nameToSysId);
-				debugLog(`Agent API: Updated _map.json with ${cleanName} -> ${responseJson.newRecord.sys_id}`);
-			}
-		} else {
-			response.error = responseJson.error || 'Unknown error creating artifact';
-		}
-		
-		fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-		debugLog(`Agent API: Create artifact response written for ${pending.request.params?.fields?.name}`);
-		
-		// Log and clear request file
-		logAgentRequest(pending.instanceFolder, pending.request, response);
-		const requestPath = path.join(pending.instanceFolder, '_requests.json');
-		fs.writeFileSync(requestPath, '{}');
+	// Agent API requests use pendingRegistry for async round-trips.
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) {
 		return;
 	}
 	
@@ -2830,6 +1381,13 @@ function handleCreateRecordResponse(responseJson) {
 
 function stopServers() {
 	wss.close();
+	stopAgentHttpServer(agentHttpState).catch(() => { /* ignore */ });
+	agentHttpState = undefined;
+	if (agentFileHandle) {
+		try { agentFileHandle.dispose(); } catch { /* ignore */ }
+		agentFileHandle = undefined;
+	}
+	scriptSyncStatusBarItem.tooltip = undefined;
 	updateScriptSyncStatusBarItem('Stopped');
 	setServerRunningContext(false);
 }
@@ -3443,12 +2001,8 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 	// Skip Agent API folders (communication files, not for sync)
 	// But still handle agent request files (Kiro/VS Code forks may create files via onDidSaveTextDocument, not onDidCreate)
 	if (filePath.includes(`${path.sep}agent${path.sep}`)) {
-		if (fileName.endsWith('.json') && filePath.includes(`${path.sep}agent${path.sep}requests${path.sep}`)) {
-			auditLog('agent_request_from_save', { filePath }, runId);
-			handleAgentRequest(filePath);
-		} else {
-			auditLog('sync_candidate_ignored', { reason: 'agent_folder', filePath }, runId);
-		}
+		// The file-based Agent API transport handles /agent/requests/*.json.
+		auditLog('sync_candidate_ignored', { reason: 'agent_folder', filePath }, runId);
 		return true;
 	}
 	
@@ -3553,16 +2107,97 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 }
 
 
+// #143: pending scope-resolution round-trips, keyed by a unique token. We stash
+// the original save payload here while the instance answers with the record's
+// real sys_scope, then re-enter saveFieldAsFile with the resolved scope.
+const pendingScopeResolves: Map<string, any> = new Map();
+
+// Ask the instance for the record's sys_scope, then re-run the save. Used when a
+// form-save payload arrives without a usable scope so we don't dump scoped
+// records (e.g. Scheduled Jobs) into the "no_scope" folder.
+function resolveScopeThenSave(postedJson: any) {
+	const resolveKey = `${postedJson.table}:${postedJson.sys_id}:${postedJson.field}:${Date.now()}`;
+	pendingScopeResolves.set(resolveKey, postedJson);
+
+	// Safety net: if the helper tab never answers (offline/error/closed), don't
+	// silently drop the save — fall back to no_scope after a short wait.
+	setTimeout(() => {
+		if (pendingScopeResolves.has(resolveKey)) {
+			pendingScopeResolves.delete(resolveKey);
+			postedJson.scopeResolveAttempted = true;
+			saveFieldAsFile(postedJson);
+		}
+	}, 8000);
+
+	const req: any = {
+		action: 'requestRecord',
+		actionGoal: 'resolveScopeForSave',
+		instance: postedJson.instance,
+		tableName: postedJson.table,
+		name: postedJson.name,
+		resolveKey,
+		// requestRecord (scriptsync.js) appends this query string to the URL.
+		sys_id: postedJson.sys_id + '?sysparm_fields=sys_scope,sys_scope.scope&sysparm_exclude_reference_link=true',
+	};
+	debugLog(`Scope resolve requested for ${postedJson.table}/${postedJson.sys_id} (#143)`);
+	broadcastToHelperTab(req);
+}
+
+function handleResolveScopeForSave(responseJson: any) {
+	const key = responseJson?.resolveKey;
+	if (!key || !pendingScopeResolves.has(key)) return;
+
+	const payload = pendingScopeResolves.get(key);
+	pendingScopeResolves.delete(key);
+	payload.scopeResolveAttempted = true; // guard against re-querying in the retry
+
+	const result = responseJson?.result || {};
+	const scopeName = result['sys_scope.scope'];
+	const scopeSysId = result['sys_scope'];
+
+	if (scopeName === 'global' || scopeSysId === 'global') {
+		payload.resolvedScopeName = 'global';
+	} else if (scopeName) {
+		// Use the resolved scope name directly as the folder, and best-effort
+		// persist name->sys_id in scopes.json for other features (scope tree etc).
+		payload.resolvedScopeName = scopeName;
+		try {
+			const scopesPath = workspace.rootPath + nodePath.sep + payload.instance.name + nodePath.sep + 'scopes.json';
+			const scopes = eu.getFileAsJson(scopesPath);
+			if (scopeSysId && scopes[scopeName] !== scopeSysId) {
+				scopes[scopeName] = scopeSysId;
+				eu.writeFile(scopesPath, JSON.stringify(scopes, null, 2), false, function () { });
+			}
+		} catch { /* best effort */ }
+	}
+	// else: genuinely scopeless -> resolvedScopeName stays undefined and the
+	// scopeResolveAttempted guard routes it to no_scope.
+
+	debugLog(`Scope resolved for ${payload.table}/${payload.sys_id} (#143): ${payload.resolvedScopeName || 'no_scope'}`);
+	saveFieldAsFile(payload);
+}
+
 function saveFieldAsFile(postedJson, retry = 0) {
 
 	
 	let basePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep;
 	
 	let scope:string;
-	if (postedJson.scope == 'global') 
+	if (postedJson.resolvedScopeName) // #143: scope resolved via an instance query below
+		scope = postedJson.resolvedScopeName;
+	else if (postedJson.scope == 'global') 
 		scope = 'global';
-	else if (postedJson.scope == '' || !postedJson.hasOwnProperty('scope'))  //sync a none metadata file
-		scope = 'no_scope';
+	else if (postedJson.scope == '' || !postedJson.hasOwnProperty('scope')) {
+		// #143: the form-save payload carried no scope (e.g. sys_scope isn't a
+		// field on the Scheduled Job form). Before dropping the record into the
+		// catch-all "no_scope" folder, ask the instance for its real sys_scope
+		// and retry once with the resolved value.
+		if (!postedJson.scopeResolveAttempted && postedJson.sys_id && wss && wss.clients.size) {
+			resolveScopeThenSave(postedJson);
+			return;
+		}
+		scope = 'no_scope'; //sync a none metadata file
+	}
 	else {
 		let scopes = eu.getFileAsJson(basePath + "scopes.json");
 		scopes = Object.entries(scopes).reduce((acc, [key, value]) => (acc[value + ''] = key, acc), {}); //invert object to have sys_id as key;
@@ -3771,35 +2406,9 @@ function requestTableStructure(tableName: string, instance: any) {
 }
 
 function handleTableStructureResponse(responseJson: any) {
-	// Check if this is for an Agent API request
-	const agentRequestId = responseJson.agentRequestId;
-	if (agentRequestId && pendingAgentRequests.has(agentRequestId)) {
-		const pending = pendingAgentRequests.get(agentRequestId)!;
-		pendingAgentRequests.delete(agentRequestId);
-		
-		const response: AgentResponse = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: responseJson.error ? 'error' : 'success',
-			timestamp: Date.now()
-		};
-		
-		if (responseJson.error) {
-			response.error = responseJson.error;
-		} else {
-			response.result = { columns: responseJson.result?.columns || responseJson.result };
-		}
-		
-		fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-		debugLog(`Agent API: Table metadata response written for ${pending.request.params?.table}`);
-		
-		// Log and clear request file
-		logAgentRequest(pending.instanceFolder, pending.request, response);
-		const requestPath = path.join(pending.instanceFolder, '_requests.json');
-		fs.writeFileSync(requestPath, '{}');
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) {
 		return;
 	}
-	
 	if (!responseJson.result) return;
 
 	// Original logic for artifact creation flow
@@ -3875,39 +2484,10 @@ async function createNewArtifact(scriptObj: any) {
 }
 
 function handleCheckNameExistsResponse(responseJson: any) {
-	// Check if this is for an Agent API request
-	const agentRequestId = responseJson.agentRequestId;
-	if (agentRequestId && pendingAgentRequests.has(agentRequestId)) {
-		const pending = pendingAgentRequests.get(agentRequestId)!;
-		pendingAgentRequests.delete(agentRequestId);
-		
-		const response: AgentResponse = {
-			id: pending.request.id,
-			command: pending.request.command,
-			status: responseJson.error ? 'error' : 'success',
-			timestamp: Date.now()
-		};
-		
-		if (responseJson.error) {
-			response.error = responseJson.error;
-		} else {
-			response.result = {
-				exists: responseJson.exists,
-				sysId: responseJson.existingRecord?.sys_id || null,
-				record: responseJson.existingRecord || null
-			};
-		}
-		
-		fs.writeFileSync(pending.responsePath, JSON.stringify(response, null, 2));
-		debugLog(`Agent API: Check name exists response written for ${pending.request.params?.name}`);
-		
-		// Log and clear request file
-		logAgentRequest(pending.instanceFolder, pending.request, response);
-		const requestPath = path.join(pending.instanceFolder, '_requests.json');
-		fs.writeFileSync(requestPath, '{}');
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) {
 		return;
 	}
-	
+
 	// Original logic for artifact creation flow
 	const creationKey = responseJson.originalRequest?.creationKey;
 	

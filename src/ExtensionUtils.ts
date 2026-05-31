@@ -46,6 +46,148 @@ export class ExtensionUtils {
         });
     }
 
+    /**
+     * Copy `sourcePath` to `destPath` when the source's `<!-- apiVersion: N -->`
+     * marker is higher than the destination's (or when destination is missing).
+     * The existing destination is preserved as `${destPath}.bak` so the user
+     * can diff local tweaks.
+     */
+    copyFileIfVersionOlder(sourcePath: string, destPath: string, cb: Function) {
+        try {
+            if (!fs.existsSync(sourcePath)) {
+                return cb(new Error(`source missing: ${sourcePath}`));
+            }
+
+            const srcVersion = ExtensionUtils.readApiVersion(sourcePath);
+            if (srcVersion === null) {
+                // Source has no marker - fall back to "copy only if missing".
+                if (fs.existsSync(destPath)) return cb(null);
+                fs.mkdir(getDirName(destPath), { recursive: true }, function (err) {
+                    if (err) return cb(err);
+                    fs.copyFile(sourcePath, destPath, (error) => cb(error));
+                });
+                return;
+            }
+
+            const destExists = fs.existsSync(destPath);
+            const destVersion = destExists ? ExtensionUtils.readApiVersion(destPath) : null;
+
+            if (destExists && destVersion !== null && destVersion >= srcVersion) {
+                return cb(null);
+            }
+
+            fs.mkdir(getDirName(destPath), { recursive: true }, function (err) {
+                if (err) return cb(err);
+                if (destExists) {
+                    try {
+                        const backup = destPath + '.bak';
+                        try { fs.unlinkSync(backup); } catch { /* no previous backup */ }
+                        fs.renameSync(destPath, backup);
+                    } catch {
+                        /* best effort; overwrite below if rename fails */
+                    }
+                }
+                fs.copyFile(sourcePath, destPath, (error) => cb(error));
+            });
+        } catch (e) {
+            return cb(e);
+        }
+    }
+
+    private static readApiVersion(filePath: string): number | null {
+        try {
+            const head = fs.readFileSync(filePath, { encoding: 'utf8', flag: 'r' }).slice(0, 4096);
+            return ExtensionUtils.readApiVersionFromText(head);
+        } catch {
+            return null;
+        }
+    }
+
+    private static readApiVersionFromText(text: string): number | null {
+        const m = /<!--\s*apiVersion:\s*(\d+)\s*-->/i.exec(text.slice(0, 4096));
+        return m ? parseInt(m[1], 10) : null;
+    }
+
+    // Markers that delimit the block this extension owns inside a user's
+    // instruction file. Anything outside the markers is the user's own content
+    // and is preserved across refreshes.
+    private static MANAGED_BEGIN_RE = /<!--\s*SN-SCRIPTSYNC:BEGIN\s+apiVersion=(\d+)\s*-->/i;
+    private static MANAGED_END_RE = /<!--\s*SN-SCRIPTSYNC:END\s*-->/i;
+
+    private static extractManagedBlock(text: string): { begin: number; end: number; version: number } | null {
+        const begin = ExtensionUtils.MANAGED_BEGIN_RE.exec(text);
+        if (!begin) return null;
+        const tail = text.slice(begin.index);
+        const end = ExtensionUtils.MANAGED_END_RE.exec(tail);
+        if (!end) return null;
+        return {
+            begin: begin.index,
+            end: begin.index + end.index + end[0].length,
+            version: parseInt(begin[1], 10),
+        };
+    }
+
+    /**
+     * Insert or refresh the SN-SCRIPTSYNC managed block in `destPath` from the
+     * generated `sourcePath`, preserving any user content outside the markers.
+     *
+     * Behaviour:
+     * - dest missing            -> write the full generated file (first-time setup).
+     * - dest has markers, newer -> replace ONLY the block, keep the user's text.
+     * - dest has markers, same/older version -> no-op.
+     * - dest has no markers (legacy file) -> version-gated whole-file replace,
+     *   preserving the previous copy as `${destPath}.bak`.
+     *
+     * Calls `cb(err, status)` where status is one of
+     * 'created' | 'updated_block' | 'replaced_legacy' | 'up_to_date'.
+     */
+    upsertManagedBlock(sourcePath: string, destPath: string, cb: Function) {
+        try {
+            if (!fs.existsSync(sourcePath)) {
+                return cb(new Error(`source missing: ${sourcePath}`));
+            }
+
+            const srcText: string = fs.readFileSync(sourcePath, 'utf8');
+            const srcBlock = ExtensionUtils.extractManagedBlock(srcText);
+            const srcVersion = srcBlock ? srcBlock.version : (ExtensionUtils.readApiVersionFromText(srcText) ?? 0);
+
+            if (!fs.existsSync(destPath)) {
+                fs.mkdirSync(getDirName(destPath), { recursive: true });
+                fs.writeFileSync(destPath, srcText);
+                return cb(null, 'created');
+            }
+
+            const destText: string = fs.readFileSync(destPath, 'utf8');
+            const destBlock = ExtensionUtils.extractManagedBlock(destText);
+
+            if (destBlock && srcBlock) {
+                if (destBlock.version >= srcVersion) return cb(null, 'up_to_date');
+                const block = srcText.slice(srcBlock.begin, srcBlock.end);
+                const merged = destText.slice(0, destBlock.begin) + block + destText.slice(destBlock.end);
+                fs.writeFileSync(destPath, merged);
+                return cb(null, 'updated_block');
+            }
+
+            // Legacy file without markers (pre-managed-block). Version-gate, then
+            // back up the user's copy and drop in the new generated file.
+            const destVersion = ExtensionUtils.readApiVersionFromText(destText);
+            if (destVersion !== null && destVersion >= srcVersion) {
+                return cb(null, 'up_to_date');
+            }
+            try {
+                const backup = destPath + '.bak';
+                try { fs.unlinkSync(backup); } catch { /* no previous backup */ }
+                fs.renameSync(destPath, backup);
+            } catch {
+                /* best effort; overwrite below if rename fails */
+            }
+            fs.writeFileSync(destPath, srcText);
+            return cb(null, 'replaced_legacy');
+        } catch (e) {
+            return cb(e);
+        }
+    }
+
 
     writeFile(path: string, contents: string, openFile, cb: Function, myThis = this) {
 

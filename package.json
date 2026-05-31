@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.2.3",
+	"version": "4.3.0",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -19,7 +19,7 @@
 		"Other"
 	],
 	"engines": {
-		"vscode": "^1.58.0"
+		"vscode": "^1.96.0"
 	},
 	"keywords": [
 		"ServiceNow",
@@ -269,32 +269,62 @@
 				"sn-scriptsync.path": {
 					"type": "string",
 					"default": "scriptsync",
+					"order": 10,
 					"description": "Scripts folder (Extension will auto activate when folder path ends with this name)"
 				},
 				"sn-scriptsync.externalChanges.monitorFileChanges": {
 					"type": "boolean",
 					"default": true,
+					"order": 20,
 					"description": "Monitor external file changes (AI agents/git/tools) and show them in the Pending Saves queue. Turn off to fully disable monitoring."
 				},
 				"sn-scriptsync.externalChanges.syncDelay": {
 					"type": "integer",
 					"default": 0,
+					"order": 21,
 					"description": "Seconds to wait before auto-syncing monitored external changes. Default is 0 (monitor-only). Use Sync Now or manual save to push changes, or set a value > 0 to enable auto-sync."
 				},
 				"sn-scriptsync.createArtifacts.enabled": {
 					"type": "boolean",
 					"default": true,
-					"description": "Allow creating new records in ServiceNow from files/Agent API. Disable to block all create-record operations."
+					"order": 30,
+					"description": "Agent API permission (1/4 — create): Allow creating new records in ServiceNow from files/Agent API. Disable to block all create-record operations."
+				},
+				"sn-scriptsync.restRequest.enabled": {
+					"type": "boolean",
+					"default": false,
+					"order": 31,
+					"description": "Agent API permission (2/4 — write): Allow the generic rest_request passthrough to perform write methods (POST/PUT/PATCH). GET is always allowed; DELETE additionally requires Delete Records."
+				},
+				"sn-scriptsync.deleteRecords.enabled": {
+					"type": "boolean",
+					"default": false,
+					"order": 32,
+					"description": "Agent API permission (3/4 — delete): Allow the Agent API to delete records in ServiceNow (delete_record, and DELETE via rest_request). Off by default — enable only when you trust the connected agent."
+				},
+				"sn-scriptsync.backgroundScripts.enabled": {
+					"type": "boolean",
+					"default": false,
+					"order": 33,
+					"description": "Agent API permission (4/4 — run scripts): Allow the Agent API to run background scripts on the instance (run_background_script, and the cascade used by delete_application). Off by default — this executes arbitrary server-side code as the connected user."
+				},
+				"sn-scriptsync.agentApi.fileFallback": {
+					"type": "boolean",
+					"default": true,
+					"order": 40,
+					"description": "Keep the legacy file-based Agent API (agent/requests/*.json) active alongside the HTTP Agent API. Disable once all your AI agents use the HTTP endpoint documented in agentinstructions.md."
 				},
 				"sn-scriptsync.showContextMenu": {
 					"type": "boolean",
 					"default": true,
 					"scope": "language-overridable",
+					"order": 50,
 					"description": "Show sn-scriptsync commands in the editor context menu. Can be configured per language (e.g., disable for markdown files)."
 				},
 				"sn-scriptsync.debugLogging": {
 					"type": "boolean",
 					"default": false,
+					"order": 60,
 					"description": "Write verbose diagnostics to debug.log in the workspace root. Useful for troubleshooting; can generate a lot of output when syncDelay > 0."
 				}
 			}
@@ -343,21 +373,25 @@
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -p ./",
+		"build:agent-docs": "tsx scripts/build-agent-docs.ts",
+		"compile": "npm run build:agent-docs && tsc -p ./",
 		"watch": "tsc -watch -p ./"
 	},
 	"devDependencies": {
 		"@types/node": "^18.15.11",
-		"@types/vscode": "^1.58.0",
-		"diff": "^5.1.0",
+		"@types/vscode": "^1.96.0",
 		"tslint": "^5.20.1",
+		"tsx": "^4.19.2",
 		"typescript": "^5.0.4"
 	},
 	"dependencies": {
-		"sass": "^1.94.0",
-		"ws": "^8.19.0"
+		"sass": "^1.100.0",
+		"ws": "^8.21.0"
 	},
 	"resolutions": {
 		"minimist": "1.2.6"
+	},
+	"overrides": {
+		"brace-expansion": "^1.1.15"
 	}
 }

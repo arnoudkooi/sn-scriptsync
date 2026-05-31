@@ -28,6 +28,14 @@ Thumbs.db
 .vscode-test/
 .idea/
 
+# Agent API (per-session token/port file + file-transport queue)
+# Note: the file-transport queue lives under the synced instance workspace
+# (<instance>/agent/requests|responses), NOT in this repo. Scope the ignore to
+# those queue dirs so it never swallows the src/agent/ source.
+.vscode/sn-agent-port.json
+**/agent/requests/
+**/agent/responses/
+
 # Temporary files
 *.tmp
 *.temp

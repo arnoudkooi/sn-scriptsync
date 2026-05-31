@@ -1,5 +1,65 @@
 # CHANGELOG.md
 
+## Unreleased
+
+**Live form / page control (Agent API):**
+- New browser commands that drive the live ServiceNow form through `g_form` (so client scripts, onChange handlers, and UI policies actually fire — unlike a REST write):
+  - **`set_field`:** set a field value on the active form (`g_form.setValue`, with optional `displayValue` for references).
+  - **`get_form_state`:** read the live form — table, sys_id, new-record flag, and field values (optionally a named subset), including unsaved edits.
+  - **`run_ui_action`:** trigger `save`, `submit`, or a named UI action (`sysverb_*`) on the active form.
+  - **`click_element`:** click a CSS selector in the content document (light DOM, best-effort).
+  - **`navigate`:** point a connected ServiceNow tab at a URL (opening one if needed) and resolve once it finishes loading.
+- All five round-trip through the SN Utils helper tab over WebSocket and return structured error codes (`E_NO_FORM`, `E_NOT_FOUND`, `E_INVALID_PARAMS`, `E_BROWSER_DISCONNECTED`, `E_TIMEOUT`). Agent instructions bumped to v6.
+- **Native dialogs no longer freeze automation:** `run_ui_action` / `click_element` auto-handle `confirm()` (accepted), `alert()`/`prompt()` (swallowed), and `navigate` drops the dirty-form "Leave site?" guard — so a `sysverb_delete` confirmation or an unsaved-changes prompt can't hang the tab with no user to answer it. Opt out per call with `suppressDialogs:false` / `discardUnsaved:false`.
+- **`run_ui_action` delete verbs are now gated:** because the confirm is auto-accepted, `sysverb_delete` (and any custom verb whose name contains `delete`) returns `E_DISABLED` unless `sn-scriptsync.deleteRecords.enabled` is on — the same guard as `delete_record`/`rest_request DELETE`. Prefer `delete_record`.
+
+## 4.3.0 (2026-05-30)
+
+**New HTTP Agent API (event-driven):**
+- Added a local HTTP server bound to `127.0.0.1` on a random port. The extension publishes `{ port, token, pid, apiVersion, startedAt }` to `.vscode/sn-agent-port.json` so AI agents can discover the endpoint without configuration.
+- All Agent API commands now accept `POST /api` with `X-Agent-Token` header and return JSON responses with structured error codes. `GET /api/health` is available for capability discovery without auth.
+- The legacy file-based transport (`{instance}/agent/requests/*.json`) still works and can be toggled with the new setting `sn-scriptsync.agentApi.fileFallback` (default `true`). The HTTP path avoids the iCloud/OneDrive/file-watcher latency that made the file transport unreliable on macOS.
+
+**New Agent API commands:**
+- **`delete_record` (guarded):** delete by `table`+`sys_id`, or bulk-delete by query with `confirm:true`+`limit`; `dryRun:true` previews matches first. Off unless `sn-scriptsync.deleteRecords.enabled`. <!-- web: **Agent API can now delete records** — single by sys_id or bulk by query, gated behind a new opt-in setting and a confirm/limit/dry-run guard. -->
+- **`get_record`:** fetch one record by `table`+`sys_id` (+ optional `fields`) — cheaper than `query_records` when you know the sys_id. <!-- web: same -->
+- **`create_application` + `add_column`:** create a scoped app (`sys_app`, scope set at insert time) and add `sys_dictionary` columns keyed by `table.element` — no more `_map.json` name collisions. <!-- web: **New scoped-app helpers for AI agents** — create an application and add columns directly via the Agent API. -->
+- **`await:true` write confirmation:** `update_record`, `update_record_batch`, and `create_artifact` can now read the value back and return `persisted` + a `warnings[]` list of fields that silently dropped (e.g. read-only `sys_scope`). <!-- web: **Agent writes can now be confirmed synchronously** — opt-in `await` re-reads the record and warns about fields that didn't stick. -->
+- **`navigate_and_screenshot` + `get_served_url`:** open/await a URL then screenshot that exact tab in one call, and resolve an artifact's real served URL (UI page `.do`, portal page, widget preview). Screenshots now support strict-tab `exactUrl` targeting, return a structured `E_SCREENSHOT_PERMISSION` code, and auto-retry once after a permission prompt. <!-- web: **One-call navigate-and-screenshot** for AI agents, plus a helper that resolves an artifact's served URL and more reliable tab targeting. -->
+- **`rest_request` (guarded passthrough):** generic ServiceNow REST call through the browser session — `GET` always; writes need `sn-scriptsync.restRequest.enabled`; `DELETE` needs `deleteRecords.enabled`. <!-- web: **Generic REST passthrough** for the Agent API, gated by new write/delete opt-in settings. -->
+- **`run_background_script` + `delete_application` (guarded):** run a server-side background script and get its output back, and cascade-delete a scoped app (its scoped metadata + the `sys_app`). Both off unless `sn-scriptsync.backgroundScripts.enabled` (delete also needs `deleteRecords.enabled` + `confirm:true`). <!-- web: **Background-script escape hatch + scoped-app deletion** for the Agent API, behind new opt-in settings and a confirm guard. -->
+
+**Structured errors:**
+- Introduced `AgentErrorCode` (`E_ACL`, `E_TOKEN_EXPIRED`, `E_TIMEOUT`, `E_BROWSER_DISCONNECTED`, `E_DISABLED`, `E_INSTANCE_NOT_FOUND`, ...) with a mapping to HTTP status codes. Replaces ad-hoc `.includes("ACL")` / `.includes("Required to provide Auth information")` string sniffing in the WebSocket error path. Added `E_NOT_FOUND`, `E_CONFIRM_REQUIRED`, `E_REFERENCE_INTEGRITY`, `E_PARTIAL_FAILURE`, and `E_SCREENSHOT_PERMISSION` for the new commands.
+
+**Modular architecture:**
+- Split the monolithic Agent API out of `src/extension.ts` into `src/agent/`: a dispatcher, a `pendingRegistry` (promise-based, with per-request timeouts), an instance resolver, a runtime shim, and per-domain command handlers (`connection`, `records`, `query`, `files`, `browser`). Transports (`http`, `file`) sit on top.
+- `extension.ts` now only wires host dependencies (WebSocket broadcast, queue state, logger) into the agent module.
+
+**Versioned agent instructions:**
+- `agentrules/agentinstructions.md` is now generated at build time from fragments in `agentrules/sections/*.md` and `agentrules/commands/*.md` via `scripts/build-agent-docs.ts`. The generated file is wrapped in a `<!-- SN-SCRIPTSYNC:BEGIN apiVersion=N -->` / `<!-- SN-SCRIPTSYNC:END -->` managed block.
+- On start, the extension now refreshes **whichever instruction file you actually use** — `agentinstructions.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `CLAUDE.md`, `AGENTS.md`, or `.github/copilot-instructions.md` — not just `agentinstructions.md`. Only files that already exist are touched (a fresh `agentinstructions.md` is created only when you have no instruction file at all, so no stray duplicate appears next to a renamed file).
+- Added `ExtensionUtils.upsertManagedBlock()`: when the bundled docs are newer, only the content **inside** the managed block is replaced, so your own additions outside the markers are preserved. Legacy files without markers fall back to a version-gated whole-file replace that backs up the previous copy as `<file>.bak`.
+
+**Banner:**
+- On-connection banner now advertises the HTTP Agent API and points to `.vscode/sn-agent-port.json`.
+- The status bar tooltip shows the live `127.0.0.1:<port>` Agent API endpoint while the server is running.
+
+**Fixes:**
+- Scheduled Jobs and other records whose form omits `sys_scope` no longer sync into the catch-all `no_scope` folder. When a save arrives without a usable scope, the extension now queries the instance for the record's real `sys_scope` and files it under the correct scope, falling back to `no_scope` only if the instance can't be reached. (`#143`)
+- Corrected the ServiceNow Client Script table name in the agent instructions: `sys_client_script` -> `sys_script_client`. (`#141`)
+
+**Dependencies:**
+- Bumped `ws` from 8.19.0 to 8.21.0. Supersedes Dependabot's 8.20.1 (`#144`) and additionally picks up the 8.21.0 fix for a remote memory-exhaustion DoS (a peer flooding tiny fragments/chunks could OOM the WebSocket server/client). Exposure is limited here since the server binds to `127.0.0.1`, is origin-restricted, and caps at one client.
+
+**Migration notes (read if you used the file-based Agent API):**
+- Both transports run for now. HTTP is the recommended path; the file transport stays **on by default** (`sn-scriptsync.agentApi.fileFallback: true`) so existing agents keep working with zero changes.
+- New recommendation — **import instead of rename.** Keep `agentinstructions.md` as the single source of truth and reference it from your tool: `@agentinstructions.md` in a Cursor rule (or `AGENTS.md`) and in `CLAUDE.md`. For tools without an import mechanism (GitHub Copilot, Windsurf) copy it once; sn-scriptsync keeps the managed block in those copies refreshed.
+- Renamed-file gotcha: if you previously renamed `agentinstructions.md` (to `.cursorrules`, `CLAUDE.md`, etc.) on an older release, that file is now refreshed in place on next start so your agent learns the HTTP endpoint. A pre-managed-block copy is backed up as `<file>.bak` the first time — diff it if you had local tweaks.
+- Discovery must be done every session: read `.vscode/sn-agent-port.json`, call `GET /api/health`, and only trust the endpoint when `health.pid` matches the file's `pid` (guards against stale port files synced by iCloud/OneDrive/git). Never cache the port/token.
+- `.vscode/sn-agent-port.json` and `**/agent/` are now gitignored to avoid committing the per-session token and the file-transport queue.
+- Deprecation timeline: the file transport is considered legacy and is planned to default **off** in a future major release (5.0). Move tooling to HTTP when you can; until then nothing breaks.
+
 ## 4.2.2 (2026-03-09)
 
 **Branding:**
