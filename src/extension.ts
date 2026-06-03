@@ -1029,6 +1029,20 @@ function startServers() {
 		});
 	});
 
+	// Mirror the on-demand agent skills (issue #148) into the workspace and
+	// reconcile against the build manifest — copies/refreshes managed skill files
+	// and deletes any marker-stamped skill no longer in the manifest (renamed or
+	// removed), while leaving user-authored files untouched.
+	const skillsSourceDir = agentRulesSourceDir + 'skills';
+	const skillsDestDir = path.join(workspace.rootPath, 'agentrules', 'skills');
+	eu.syncManagedSkills(skillsSourceDir, skillsDestDir, (err: any, res?: { copied: number; removed: number }) => {
+		if (err) {
+			debugLog(`agent skills sync error: ${err?.message || err}`);
+		} else if (res && (res.copied || res.removed)) {
+			debugLog(`agent skills synced: ${res.copied} written, ${res.removed} removed`);
+		}
+	});
+
 	// Start the HTTP Agent API (preferred, event-driven) and optionally the
 	// legacy file-based transport. Both sit on top of the same dispatcher.
 	startAgentHttpServer({ onLog: (m) => debugLog(m) })

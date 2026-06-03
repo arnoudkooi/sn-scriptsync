@@ -1,6 +1,11 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.4.0 (2026-06-03)
+
+**Token-efficient agent instructions — slim core + on-demand skills (#148):**
+- The monolithic `agentinstructions.md` (~3,700 lines) is now a **slim always-loaded core (~390 lines)**: overview, workflow, critical AI guidelines, an Agent API quickstart, an everyday-command cheat-sheet, a full command index, and a routing table.
+- Deep detail moved into discoverable skills under `agentrules/skills/<name>/SKILL.md` (`snu-agent-api`, `snu-form-automation`, `snu-artifacts`, `snu-coding-standards`, `snu-reference`) that an agent opens only when a task needs them — so the full command catalog and form-automation docs aren't force-loaded into every prompt.
+- The extension mirrors the skills into the workspace on start and **reconciles against a build manifest (`_skills.json`)**: renamed/removed skills are cleaned up automatically (marker-stamped files only — your own files are never touched), and the legacy `.bak` left by older instruction migrations is removed once the file is on the managed-block format. Agent instructions bumped to v7.
 
 **Live form / page control (Agent API):**
 - New browser commands that drive the live ServiceNow form through `g_form` (so client scripts, onChange handlers, and UI policies actually fire — unlike a REST write):

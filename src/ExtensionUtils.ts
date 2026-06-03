@@ -161,6 +161,10 @@ export class ExtensionUtils {
             const destBlock = ExtensionUtils.extractManagedBlock(destText);
 
             if (destBlock && srcBlock) {
+                // The file is fully on the managed-block format now, so any
+                // `${destPath}.bak` left behind by an earlier legacy migration is
+                // stale — drop it so old full copies don't linger (issue #148).
+                ExtensionUtils.tryUnlinkBak(destPath);
                 if (destBlock.version >= srcVersion) return cb(null, 'up_to_date');
                 const block = srcText.slice(srcBlock.begin, srcBlock.end);
                 const merged = destText.slice(0, destBlock.begin) + block + destText.slice(destBlock.end);
@@ -183,6 +187,100 @@ export class ExtensionUtils {
             }
             fs.writeFileSync(destPath, srcText);
             return cb(null, 'replaced_legacy');
+        } catch (e) {
+            return cb(e);
+        }
+    }
+
+    private static tryUnlinkBak(destPath: string) {
+        try { fs.unlinkSync(destPath + '.bak'); } catch { /* no backup to clean */ }
+    }
+
+    private static SKILL_MARKER_RE = /SN-SCRIPTSYNC:SKILL/;
+
+    private static walkFiles(dir: string): string[] {
+        const out: string[] = [];
+        let entries: any[] = [];
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+        for (const entry of entries) {
+            const abs = nodePath.join(dir, entry.name);
+            if (entry.isDirectory()) out.push(...ExtensionUtils.walkFiles(abs));
+            else out.push(abs);
+        }
+        return out;
+    }
+
+    private static removeEmptyDirs(dir: string) {
+        let entries: any[] = [];
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const sub = nodePath.join(dir, entry.name);
+            ExtensionUtils.removeEmptyDirs(sub);
+            try { if (fs.readdirSync(sub).length === 0) fs.rmdirSync(sub); } catch { /* best effort */ }
+        }
+    }
+
+    /**
+     * Mirror the extension's generated agent skills into the user's workspace and
+     * reconcile the destination against the build manifest (issue #148).
+     *
+     * - Each file listed in `_skills.json` is copied (written only when changed).
+     * - The manifest itself is mirrored so the tree is self-describing.
+     * - CONTROLLED DELETE: any file under `destSkillsDir` that carries the
+     *   `SN-SCRIPTSYNC:SKILL` marker but is NOT in the manifest is removed, so
+     *   renamed/removed skills don't accumulate across updates. Files WITHOUT the
+     *   marker (user-authored content) are never touched.
+     *
+     * Calls `cb(err, { copied, removed })`.
+     */
+    syncManagedSkills(sourceSkillsDir: string, destSkillsDir: string, cb: Function) {
+        try {
+            const manifestPath = nodePath.join(sourceSkillsDir, '_skills.json');
+            if (!fs.existsSync(manifestPath)) {
+                return cb(new Error(`skills manifest missing: ${manifestPath}`));
+            }
+
+            const srcManifestText: string = fs.readFileSync(manifestPath, 'utf8');
+            const manifest = JSON.parse(srcManifestText);
+            const files: string[] = Array.isArray(manifest.files) ? manifest.files : [];
+            const expected = new Set<string>(files.map((f) => f.split('/').join(nodePath.sep)));
+
+            fs.mkdirSync(destSkillsDir, { recursive: true });
+
+            let copied = 0;
+            for (const rel of files) {
+                const relNative = rel.split('/').join(nodePath.sep);
+                const src = nodePath.join(sourceSkillsDir, relNative);
+                const dst = nodePath.join(destSkillsDir, relNative);
+                if (!fs.existsSync(src)) continue;
+                const srcText: string = fs.readFileSync(src, 'utf8');
+                const dstText: string | null = fs.existsSync(dst) ? fs.readFileSync(dst, 'utf8') : null;
+                if (dstText !== srcText) {
+                    fs.mkdirSync(getDirName(dst), { recursive: true });
+                    fs.writeFileSync(dst, srcText);
+                    copied++;
+                }
+            }
+
+            const destManifest = nodePath.join(destSkillsDir, '_skills.json');
+            if (!fs.existsSync(destManifest) || fs.readFileSync(destManifest, 'utf8') !== srcManifestText) {
+                fs.writeFileSync(destManifest, srcManifestText);
+            }
+
+            let removed = 0;
+            for (const abs of ExtensionUtils.walkFiles(destSkillsDir)) {
+                const rel = nodePath.relative(destSkillsDir, abs);
+                if (rel === '_skills.json' || expected.has(rel)) continue;
+                let text = '';
+                try { text = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+                if (ExtensionUtils.SKILL_MARKER_RE.test(text)) {
+                    try { fs.unlinkSync(abs); removed++; } catch { /* best effort */ }
+                }
+            }
+            ExtensionUtils.removeEmptyDirs(destSkillsDir);
+
+            return cb(null, { copied, removed });
         } catch (e) {
             return cb(e);
         }

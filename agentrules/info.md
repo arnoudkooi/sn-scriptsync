@@ -50,9 +50,31 @@ cp agentinstructions.md .windsurfrules
 ```
 sn-scriptsync refreshes the managed block in `.windsurfrules` on each start.
 
+## Slim core + on-demand skills
+
+To keep AI context (and token cost) small, the instructions are split in two:
+
+- **`agentinstructions.md` — the always-loaded core (~390 lines).** Overview, file
+  structure, workflow, the critical AI guidelines, an Agent API quickstart, an
+  everyday-command cheat-sheet, a full command index, and a routing table.
+- **`agentrules/skills/<name>/SKILL.md` — on-demand skills.** The agent opens these
+  only when a task needs the depth, so the full command catalog, form-automation
+  guide, etc. aren't force-loaded into every prompt:
+  - `snu-agent-api` — full Agent API: transports, discovery, error codes, every command.
+  - `snu-form-automation` — live form control via the `g_form` bridge.
+  - `snu-artifacts` — file structure, naming, creating artifacts, `_map.json`.
+  - `snu-coding-standards` — ServiceNow coding standards + security.
+  - `snu-reference` — extended reference appendix.
+
+The skills are mirrored into your workspace at `agentrules/skills/` on start and kept
+in sync. When a skill is renamed or removed in an update, the extension cleans up the
+old managed file automatically (it only ever deletes files it generated; your own
+files are left alone). The core's routing table tells the agent which skill to read
+for which task.
+
 ## What's Included
 
-The rules files contain:
+The instruction set covers:
 
 - **File structure patterns** - How sn-scriptsync organizes ServiceNow artifacts
 - **Naming conventions** - Correct file naming for different artifact types
