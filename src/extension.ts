@@ -992,15 +992,19 @@ function startServers() {
 	targetDir = path.join(workspace.rootPath, '') + nodePath.sep;
 	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
 
-	// Refresh AI agent instructions. Users are told to RENAME agentinstructions.md
-	// for their tool (.cursorrules, CLAUDE.md, ...), so we refresh whichever
-	// variant they actually have — otherwise the agent's real rules file would go
-	// stale and never learn about the HTTP Agent API. The generated docs carry a
-	// SN-SCRIPTSYNC managed block so user customizations outside it are preserved.
+	// Refresh AI agent instructions. `agentinstructions.md` is the extension's
+	// OWN file — the single full source of truth — and is created/replaced as a
+	// whole. Tool-standard files the USER authors (CLAUDE.md, AGENTS.md,
+	// .cursorrules, ...) must never be overwritten: when present they only
+	// receive a tiny managed REFERENCE block (agentreference.md) that imports
+	// agentinstructions.md, appended after the user's own content. Everything
+	// outside the SN-SCRIPTSYNC markers is always preserved.
 	let agentRulesSourceDir = path.join(__filename, '..', '..', 'agentrules') + nodePath.sep;
 	const instructionsSource = agentRulesSourceDir + 'agentinstructions.md';
+	const referenceSource = agentRulesSourceDir + 'agentreference.md';
+	const OWN_INSTRUCTION_FILE = 'agentinstructions.md';
 	const instructionTargets = [
-		'agentinstructions.md',
+		OWN_INSTRUCTION_FILE,
 		'.cursorrules',
 		'.windsurfrules',
 		'.clinerules',
@@ -1017,16 +1021,20 @@ function startServers() {
 	instructionTargets.forEach(rel => {
 		const dest = path.join(workspace.rootPath, rel);
 		const exists = fs.existsSync(dest);
-		if (!exists && !(rel === 'agentinstructions.md' && !anyInstructionFileExists)) {
-			return; // don't create renamed variants that the user never had
+		const isOwnFile = rel === OWN_INSTRUCTION_FILE;
+		if (!exists && !(isOwnFile && !anyInstructionFileExists)) {
+			return; // never create user tool files that aren't already there
 		}
-		eu.upsertManagedBlock(instructionsSource, dest, (err: any, status?: string) => {
+		// Our own file gets the full content; user-authored tool files get only
+		// the slim reference block and are never clobbered.
+		const source = isOwnFile ? instructionsSource : referenceSource;
+		eu.upsertManagedBlock(source, dest, (err: any, status?: string) => {
 			if (err) {
 				debugLog(`instructions refresh error (${rel}): ${err?.message || err}`);
 			} else if (status && status !== 'up_to_date') {
 				debugLog(`instructions ${status}: ${rel}`);
 			}
-		});
+		}, { preserveUserFile: !isOwnFile });
 	});
 
 	// Mirror the on-demand agent skills (issue #148) into the workspace and

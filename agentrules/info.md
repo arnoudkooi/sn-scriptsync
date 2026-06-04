@@ -6,6 +6,8 @@ This folder contains AI assistant rules that help tools like Cursor, Claude, Git
 
 When you start the sn-scriptsync server, `agentinstructions.md` is placed in your workspace root and **kept up to date automatically**. The generated content lives inside `SN-SCRIPTSYNC:BEGIN` / `SN-SCRIPTSYNC:END` markers; anything you add outside those markers is preserved across updates.
 
+**Your own `CLAUDE.md` / `AGENTS.md` / `.cursorrules` are never overwritten.** If one of those files already exists, sn-scriptsync only **appends** a tiny managed block — a single `@agentinstructions.md` import wrapped in `SN-SCRIPTSYNC` markers — after your content. The full instruction set lives only in `agentinstructions.md`, so those files stay small (well under Claude's recommended size). Only `agentinstructions.md` itself holds the full content.
+
 **Recommended: import it instead of renaming it.** Keeping `agentinstructions.md` as the single source of truth means your AI tool always sees the latest version — no stale renamed copies to maintain.
 
 - **Cursor**: reference it from a rule (or use `AGENTS.md`) — see below

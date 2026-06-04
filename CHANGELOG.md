@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.4.1 (2026-06-04)
+
+**Fix: no longer overwrites your `CLAUDE.md` / `AGENTS.md` / `.cursorrules`.** Sorry — earlier builds (4.3.0–4.4.0) treated an existing one of these as the extension's own file and replaced it with the full instruction document. Now your file is never overwritten: sn-scriptsync only appends a small `@agentinstructions.md` reference inside `SN-SCRIPTSYNC` markers, so the bulk stays in `agentinstructions.md` and loads on demand. If your original was replaced and its `.bak` still exists it's restored automatically; otherwise recover it from version control or your editor's local history. Agent instructions bumped to v8.
+
 ## 4.4.0 (2026-06-03)
 
 **Token-efficient agent instructions — slim core + on-demand skills (#148):**

@@ -131,49 +131,104 @@ export class ExtensionUtils {
      * Insert or refresh the SN-SCRIPTSYNC managed block in `destPath` from the
      * generated `sourcePath`, preserving any user content outside the markers.
      *
+     * `opts.preserveUserFile` distinguishes the extension's OWN file
+     * (`agentinstructions.md`, false) from tool-standard files the user authors
+     * themselves (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, ...; true). For the
+     * latter we must NEVER replace the whole file — a `CLAUDE.md` is the user's
+     * project memory, not a renamed copy of our instructions.
+     *
      * Behaviour:
-     * - dest missing            -> write the full generated file (first-time setup).
+     * - dest missing
+     *     preserveUserFile=false -> write the full generated file (first-time setup).
+     *     preserveUserFile=true  -> write just the managed block as a new file.
      * - dest has markers, newer -> replace ONLY the block, keep the user's text.
      * - dest has markers, same/older version -> no-op.
-     * - dest has no markers (legacy file) -> version-gated whole-file replace,
-     *   preserving the previous copy as `${destPath}.bak`.
+     * - dest has no markers (user's own file / legacy)
+     *     preserveUserFile=true  -> APPEND the managed block, keep all user content
+     *                               (no backup, no clobber).
+     *     preserveUserFile=false -> version-gated whole-file replace, backing up
+     *                               the previous copy as `${destPath}.bak`.
+     *
+     * If an older release already clobbered a user file into a pure managed block
+     * and left the original as `${destPath}.bak`, the refresh self-heals: it
+     * restores the backed-up content and appends only the slim block.
      *
      * Calls `cb(err, status)` where status is one of
-     * 'created' | 'updated_block' | 'replaced_legacy' | 'up_to_date'.
+     * 'created' | 'updated_block' | 'appended_block' | 'restored_user_file'
+     * | 'replaced_legacy' | 'up_to_date'.
      */
-    upsertManagedBlock(sourcePath: string, destPath: string, cb: Function) {
+    upsertManagedBlock(sourcePath: string, destPath: string, cb: Function, opts: { preserveUserFile?: boolean } = {}) {
         try {
             if (!fs.existsSync(sourcePath)) {
                 return cb(new Error(`source missing: ${sourcePath}`));
             }
 
+            const preserveUserFile = opts.preserveUserFile === true;
             const srcText: string = fs.readFileSync(sourcePath, 'utf8');
             const srcBlock = ExtensionUtils.extractManagedBlock(srcText);
             const srcVersion = srcBlock ? srcBlock.version : (ExtensionUtils.readApiVersionFromText(srcText) ?? 0);
+            // The exact bytes we own inside the dest file: the managed block from
+            // the source (or, defensively, the whole source if it has no markers).
+            const srcManagedBlock = srcBlock ? srcText.slice(srcBlock.begin, srcBlock.end) : srcText.trim();
 
             if (!fs.existsSync(destPath)) {
                 fs.mkdirSync(getDirName(destPath), { recursive: true });
-                fs.writeFileSync(destPath, srcText);
+                fs.writeFileSync(destPath, preserveUserFile ? srcManagedBlock + '\n' : srcText);
                 return cb(null, 'created');
             }
 
             const destText: string = fs.readFileSync(destPath, 'utf8');
             const destBlock = ExtensionUtils.extractManagedBlock(destText);
 
-            if (destBlock && srcBlock) {
-                // The file is fully on the managed-block format now, so any
-                // `${destPath}.bak` left behind by an earlier legacy migration is
-                // stale — drop it so old full copies don't linger (issue #148).
-                ExtensionUtils.tryUnlinkBak(destPath);
+            if (destBlock) {
+                if (!preserveUserFile) {
+                    // Our own file: any `${destPath}.bak` is a stale copy of an
+                    // earlier version of OUR content — drop it (issue #148).
+                    ExtensionUtils.tryUnlinkBak(destPath);
+                    if (destBlock.version >= srcVersion) return cb(null, 'up_to_date');
+                    const merged = destText.slice(0, destBlock.begin) + srcManagedBlock + destText.slice(destBlock.end);
+                    fs.writeFileSync(destPath, merged);
+                    return cb(null, 'updated_block');
+                }
+
                 if (destBlock.version >= srcVersion) return cb(null, 'up_to_date');
-                const block = srcText.slice(srcBlock.begin, srcBlock.end);
-                const merged = destText.slice(0, destBlock.begin) + block + destText.slice(destBlock.end);
+
+                // A user-authored tool file. If everything OUTSIDE our markers is
+                // empty AND a `${destPath}.bak` exists, an older release clobbered
+                // the user's file into a pure managed block and stashed their
+                // original in the backup — heal it by restoring their content and
+                // appending only the slim reference block.
+                const outside = (destText.slice(0, destBlock.begin) + destText.slice(destBlock.end)).trim();
+                const backup = destPath + '.bak';
+                if (outside === '' && fs.existsSync(backup)) {
+                    let bakText = '';
+                    try { bakText = fs.readFileSync(backup, 'utf8'); } catch { /* unreadable backup */ }
+                    if (bakText.trim() !== '' && !ExtensionUtils.extractManagedBlock(bakText)) {
+                        const restored = bakText.replace(/\s*$/, '') + '\n\n' + srcManagedBlock + '\n';
+                        fs.writeFileSync(destPath, restored);
+                        try { fs.unlinkSync(backup); } catch { /* best effort */ }
+                        return cb(null, 'restored_user_file');
+                    }
+                }
+
+                // Normal in-place refresh: swap just our block, keep the user's
+                // content, and never touch their `.bak` (it may be their original).
+                const merged = destText.slice(0, destBlock.begin) + srcManagedBlock + destText.slice(destBlock.end);
                 fs.writeFileSync(destPath, merged);
                 return cb(null, 'updated_block');
             }
 
-            // Legacy file without markers (pre-managed-block). Version-gate, then
-            // back up the user's copy and drop in the new generated file.
+            // Dest has no markers. For a user-authored tool file, never clobber:
+            // append our managed block after their content (it wins as the more
+            // specific, later instruction) and leave everything they wrote intact.
+            if (preserveUserFile) {
+                const merged = destText.replace(/\s*$/, '') + '\n\n' + srcManagedBlock + '\n';
+                fs.writeFileSync(destPath, merged);
+                return cb(null, 'appended_block');
+            }
+
+            // Legacy copy of our OWN file without markers (pre-managed-block).
+            // Version-gate, then back up the user's copy and drop in the new file.
             const destVersion = ExtensionUtils.readApiVersionFromText(destText);
             if (destVersion !== null && destVersion >= srcVersion) {
                 return cb(null, 'up_to_date');

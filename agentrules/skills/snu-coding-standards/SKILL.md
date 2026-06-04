@@ -3,7 +3,7 @@ name: snu-coding-standards
 description: ServiceNow coding standards (scoped-app restrictions, server vs client APIs, best practices) and security guidance for the sn-scriptsync workflow. Read this when writing or reviewing ServiceNow script content.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=7 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=8 -->
 
 # SN ScriptSync — Coding Standards & Security
 

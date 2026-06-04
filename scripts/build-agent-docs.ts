@@ -7,6 +7,10 @@
  *       workflow, critical AI guidelines, Agent API quickstart, an everyday
  *       command cheat-sheet, a grouped command index, and a routing table that
  *       points the agent at the on-demand skills below.
+ *   - agentrules/agentreference.md         tiny managed REFERENCE block that
+ *       imports agentinstructions.md. This (not the full core) is what the
+ *       extension drops into tool-standard files (CLAUDE.md, AGENTS.md,
+ *       .cursorrules, ...) so they stay small and are never overwritten.
  *   - agentrules/skills/<name>/SKILL.md    on-demand skills the agent only opens
  *       when a task needs the depth (full command catalog, form automation, etc.).
  *   - agentrules/skills/_skills.json        manifest of generated skill files so
@@ -28,6 +32,7 @@ const SECTIONS_DIR = path.join(AGENT_DIR, 'sections');
 const COMMANDS_DIR = path.join(AGENT_DIR, 'commands');
 const SKILLS_DIR = path.join(AGENT_DIR, 'skills');
 const CORE_OUTPUT = path.join(AGENT_DIR, 'agentinstructions.md');
+const REFERENCE_OUTPUT = path.join(AGENT_DIR, 'agentreference.md');
 const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 
 // Revision of the generated instruction docs. This is INTENTIONALLY decoupled
@@ -48,7 +53,13 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //             set_field, get_form_state, run_ui_action, click_element).
 //   v6 -> v7: #148 — split the monolithic instructions into a slim core + an
 //             on-demand agentrules/skills/ set (token efficiency).
-const INSTRUCTIONS_VERSION = 7;
+//   v7 -> v8: stop clobbering tool-standard files (CLAUDE.md, AGENTS.md,
+//             .cursorrules, ...). Those now receive only a tiny managed
+//             REFERENCE block that imports agentinstructions.md, appended to
+//             the user's own content — never a whole-file replace. agentre-
+//             ference.md is the source for that block; agentinstructions.md
+//             stays the single full source of truth.
+const INSTRUCTIONS_VERSION = 8;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -238,6 +249,40 @@ function buildCore(): string {
 	return parts.filter(Boolean).join('\n\n') + '\n\n<!-- SN-SCRIPTSYNC:END -->\n';
 }
 
+// The slim REFERENCE block dropped into tool-standard instruction files
+// (CLAUDE.md, AGENTS.md, .cursorrules, ...). It deliberately carries NO content
+// of its own beyond a pointer to agentinstructions.md, so these user-authored
+// files stay tiny (well under Claude's recommended size) and never go stale.
+// The `@agentinstructions.md` line is a project-relative import for tools that
+// support it (Claude Code, Cursor); for the rest it reads as a plain reference.
+function buildReference(): string {
+	const body = [
+		'## ServiceNow Script Sync (sn-scriptsync)',
+		'',
+		'This workspace uses the **sn-scriptsync** VS Code extension to sync ServiceNow',
+		'artifacts with local files and exposes a local HTTP Agent API for AI tools.',
+		'',
+		'The full ServiceNow conventions, the Agent API reference, and the on-demand',
+		'skills live in [`agentinstructions.md`](agentinstructions.md). Read it before',
+		'working with ServiceNow artifacts or calling the Agent API.',
+		'',
+		'@agentinstructions.md',
+	].join('\n');
+
+	return [
+		`<!-- SN-SCRIPTSYNC:BEGIN apiVersion=${INSTRUCTIONS_VERSION} -->`,
+		`<!-- apiVersion: ${INSTRUCTIONS_VERSION} -->`,
+		'<!-- Managed by the sn-scriptsync VS Code extension and refreshed automatically.',
+		'     This is only a small pointer to agentinstructions.md so this file stays tiny.',
+		'     Add your own notes OUTSIDE these markers — they are preserved across updates. -->',
+		'',
+		body,
+		'',
+		'<!-- SN-SCRIPTSYNC:END -->',
+		'',
+	].join('\n');
+}
+
 function buildSkill(skill: SkillDef): string {
 	const frontmatter = ['---', `name: ${skill.name}`, `description: ${skill.description}`, '---'].join('\n');
 
@@ -307,6 +352,10 @@ function main() {
 	fs.writeFileSync(CORE_OUTPUT, core);
 	const coreLines = core.split('\n').length;
 
+	// Slim reference block for tool-standard files (CLAUDE.md, AGENTS.md, ...).
+	const reference = buildReference();
+	fs.writeFileSync(REFERENCE_OUTPUT, reference);
+
 	// Skills (fresh dir contents for the generated files; user files, if any, are
 	// left in place — we only rewrite the files we own).
 	fs.mkdirSync(SKILLS_DIR, { recursive: true });
@@ -330,8 +379,8 @@ function main() {
 	fs.writeFileSync(MANIFEST_OUTPUT, JSON.stringify(manifest, null, 2) + '\n');
 
 	console.log(
-		`[build-agent-docs] wrote core (${coreLines} lines), ${SKILLS.length} skills, ` +
-			`${COMMAND_ORDER.length} commands, manifest v${INSTRUCTIONS_VERSION}`,
+		`[build-agent-docs] wrote core (${coreLines} lines), reference (${reference.split('\n').length} lines), ` +
+			`${SKILLS.length} skills, ${COMMAND_ORDER.length} commands, manifest v${INSTRUCTIONS_VERSION}`,
 	);
 }
 
