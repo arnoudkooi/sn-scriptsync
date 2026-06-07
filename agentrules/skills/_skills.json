@@ -1,7 +1,7 @@
 {
-  "version": 8,
-  "generatedAt": "2026-06-04T18:59:21.711Z",
-  "marker": "<!-- SN-SCRIPTSYNC:SKILL apiVersion=8 -->",
+  "version": 10,
+  "generatedAt": "2026-06-05T21:29:14.941Z",
+  "marker": "<!-- SN-SCRIPTSYNC:SKILL apiVersion=10 -->",
   "files": [
     "snu-agent-api/SKILL.md",
     "snu-artifacts/SKILL.md",

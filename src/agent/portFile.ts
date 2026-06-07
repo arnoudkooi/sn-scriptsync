@@ -8,7 +8,8 @@ import { AgentPortFile } from './types';
 // confirmation on update_record/update_record_batch/create_artifact.
 // v3 -> v4: added run_background_script + delete_application (browser-side
 // agentRunBackgroundScript path), screenshot exactUrl + E_SCREENSHOT_PERMISSION.
-export const AGENT_API_VERSION = 4;
+// v4 -> v5: added code_search (SN Utils GraphQL field-index code search, Pro).
+export const AGENT_API_VERSION = 5;
 
 function portFilePath(): string | undefined {
 	const root = vscode.workspace.rootPath;

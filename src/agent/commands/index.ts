@@ -2,6 +2,7 @@ import { CommandHandler } from '../types';
 import { connectionCommands } from './connection';
 import { recordsCommands } from './records';
 import { queryCommands } from './query';
+import { searchCommands } from './search';
 import { filesCommands } from './files';
 import { browserCommands } from './browser';
 import { scopedAppCommands } from './scopedapp';
@@ -12,6 +13,7 @@ const allHandlers: CommandHandler[] = [
 	...connectionCommands,
 	...recordsCommands,
 	...queryCommands,
+	...searchCommands,
 	...filesCommands,
 	...browserCommands,
 	...scopedAppCommands,

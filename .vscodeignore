@@ -58,6 +58,11 @@ agent-transcripts/**
 test/**
 **/.eslintrc.json
 
+# Readme demo GIFs (served from GitHub via relative-path rewrite, not needed in package)
+img/sn-scriptsync.gif
+img/sn-scriptsync-css.gif
+img/treeview.gif
+
 # Unused files
 scriptsync.js
 resources/convertTernToDTS.js

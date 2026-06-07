@@ -59,7 +59,11 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //             the user's own content — never a whole-file replace. agentre-
 //             ference.md is the source for that block; agentinstructions.md
 //             stays the single full source of truth.
-const INSTRUCTIONS_VERSION = 8;
+//   v8 -> v9: added code_search (SN Utils GraphQL field-index code search, Pro).
+//   v9 -> v10: code_search — documented full response shape (words, richer
+//              stats, per-match matchingWords + lineMatches) and surfaced it in
+//              the everyday cheat-sheet for inline discoverability.
+const INSTRUCTIONS_VERSION = 10;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -74,7 +78,7 @@ const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
 	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_artifact', 'delete_record'] },
 	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'add_column', 'delete_application'] },
 	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote'] },
-	{ label: 'Queries', cmds: ['query_records', 'get_parent_options'] },
+	{ label: 'Queries', cmds: ['query_records', 'get_parent_options', 'code_search'] },
 	{ label: 'Escape hatches', cmds: ['rest_request', 'run_background_script'] },
 	{ label: 'File-system helpers', cmds: ['list_tables', 'list_artifacts', 'check_name_exists', 'get_file_structure', 'validate_path'] },
 	{ label: 'Browser helpers', cmds: ['open_in_browser', 'get_served_url', 'refresh_preview', 'take_screenshot', 'navigate_and_screenshot', 'run_slash_command', 'activate_tab', 'switch_context', 'upload_attachment'] },
@@ -95,6 +99,7 @@ const EVERYDAY: Array<{ cmd: string; blurb: string }> = [
 	{ cmd: 'update_record', blurb: 'Update fields on an existing record (pass `await:true` to read back).' },
 	{ cmd: 'create_artifact', blurb: 'Create a record incl. config fields via payload (not loose files).' },
 	{ cmd: 'navigate_and_screenshot', blurb: 'Open a page and capture it in one call to verify state.' },
+	{ cmd: 'code_search', blurb: 'Find existing code across script tables — `term` required (Pro). See the snu-agent-api skill for params/response.' },
 ];
 
 // --- Skill definitions -------------------------------------------------------

@@ -1,5 +1,5 @@
-<!-- SN-SCRIPTSYNC:BEGIN apiVersion=8 -->
-<!-- apiVersion: 8 -->
+<!-- SN-SCRIPTSYNC:BEGIN apiVersion=10 -->
+<!-- apiVersion: 10 -->
 <!-- Managed by the sn-scriptsync VS Code extension and refreshed automatically.
      This is only a small pointer to agentinstructions.md so this file stays tiny.
      Add your own notes OUTSIDE these markers — they are preserved across updates. -->

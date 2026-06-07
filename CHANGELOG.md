@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+## 4.5.0 (2026-06-05)
+
+**New Agent API command — `code_search` (SN Utils Pro):**
+- Runs the SN Utils GraphQL field-index code search across ServiceNow script tables and returns structured matches, so AI agents can discover existing code before writing new artifacts (far better than a `query_records` `LIKE`). Matches come back as excerpts (context + matching lines); follow up with `get_record` to pull a full script.
+- Requires an active SN Utils **Pro / Trial / Enterprise** license in the connected browser helper tab — otherwise the command returns `E_DISABLED`. Round-trips through the helper tab over WebSocket like the other agent commands. Returns structured matches with line-level detail (`lineMatches`), `matchingWords`, per-search `words`/`stats`, and `parentRef`/`sysClassName` per hit. Agent API protocol bumped to v5; agent instructions bumped to v10 (full response shape documented + surfaced in the everyday cheat-sheet).
+
 ## 4.4.1 (2026-06-04)
 
 **Fix: no longer overwrites your `CLAUDE.md` / `AGENTS.md` / `.cursorrules`.** Sorry — earlier builds (4.3.0–4.4.0) treated an existing one of these as the extension's own file and replaced it with the full instruction document. Now your file is never overwritten: sn-scriptsync only appends a small `@agentinstructions.md` reference inside `SN-SCRIPTSYNC` markers, so the bulk stays in `agentinstructions.md` and loads on demand. If your original was replaced and its `.bak` still exists it's restored automatically; otherwise recover it from version control or your editor's local history. Agent instructions bumped to v8.

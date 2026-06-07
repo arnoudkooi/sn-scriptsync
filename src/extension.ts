@@ -348,6 +348,9 @@ function handleAgentParentOptionsResponse(responseJson: any) {
 function handleAgentQueryRecordsResponse(responseJson: any) {
 	if (responseJson?.agentRequestId) resolvePending(responseJson.agentRequestId, responseJson);
 }
+function handleAgentCodeSearchResponse(responseJson: any) {
+	if (responseJson?.agentRequestId) resolvePending(responseJson.agentRequestId, responseJson);
+}
 function handleActivateTabResponse(responseJson: any) {
 	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) return;
 	debugLog(`activateTabResponse (non-agent): ${responseJson?.url || responseJson?.error}`);
@@ -1150,6 +1153,8 @@ function startServers() {
 				handleAgentParentOptionsResponse(messageJson);
 			else if (messageJson?.action == 'agentQueryRecordsResponse')
 				handleAgentQueryRecordsResponse(messageJson);
+			else if (messageJson?.action == 'agentCodeSearchResponse')
+				handleAgentCodeSearchResponse(messageJson);
 			else if (messageJson?.action == 'screenshotResponse')
 				handleScreenshotResponse(messageJson);
 			else if (messageJson?.action == 'uploadAttachmentResponse')

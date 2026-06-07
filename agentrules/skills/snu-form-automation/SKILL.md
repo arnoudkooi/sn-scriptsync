@@ -3,7 +3,7 @@ name: snu-form-automation
 description: Drive live ServiceNow forms via the g_form bridge (navigate, set_field, get_form_state, run_ui_action, click_element): insert vs update verbs, optimistic-write verification, auto-handled native dialogs, and auto-filling mandatory reference fields. Read this when automating or visually verifying a form/UI page/widget.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=8 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=10 -->
 
 # SN ScriptSync — Live Form Automation
 
