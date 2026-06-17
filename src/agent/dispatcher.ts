@@ -72,7 +72,7 @@ export async function dispatchAgentCommand(request: AgentRequest): Promise<Agent
 		if (err instanceof AgentError) {
 			return errorResponse(request.id, request.command, err.code, err.message);
 		}
-		console.error(`[agent] command "${request.command}" failed:`, err?.stack || err);
+		console.error('[agent] command handler failed:', request.command, err?.stack || err);
 		return errorResponse(request.id, request.command, 'E_INTERNAL', 'Internal error while handling the command');
 	}
 }
