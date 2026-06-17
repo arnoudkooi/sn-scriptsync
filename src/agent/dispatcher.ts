@@ -41,8 +41,11 @@ export async function dispatchAgentCommand(request: AgentRequest): Promise<Agent
 	try {
 		instanceFolder = resolveInstanceFolder(request.instance, handler.noInstance);
 	} catch (e: any) {
-		const code = e?.code || 'E_INTERNAL';
-		return errorResponse(request.id, request.command, code, e?.message || String(e));
+		if (e instanceof AgentError) {
+			return errorResponse(request.id, request.command, e.code, e.message);
+		}
+		console.error('[agent] instance resolution failed:', e?.stack || e);
+		return errorResponse(request.id, request.command, 'E_INTERNAL', 'Failed to resolve instance folder');
 	}
 
 	const ctx = buildContext(request, instanceFolder);
@@ -69,6 +72,7 @@ export async function dispatchAgentCommand(request: AgentRequest): Promise<Agent
 		if (err instanceof AgentError) {
 			return errorResponse(request.id, request.command, err.code, err.message);
 		}
-		return errorResponse(request.id, request.command, 'E_INTERNAL', err?.message || String(err));
+		console.error(`[agent] command "${request.command}" failed:`, err?.stack || err);
+		return errorResponse(request.id, request.command, 'E_INTERNAL', 'Internal error while handling the command');
 	}
 }
