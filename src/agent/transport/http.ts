@@ -95,8 +95,9 @@ export async function startAgentHttpServer(opts: {
 				try {
 					body = await readJsonBody(req);
 				} catch (e: any) {
+					log(`[agent-http] bad request body: ${e?.message || e}`);
 					return sendJson(res, 400, {
-						status: 'error', code: 'E_INVALID_REQUEST', error: e?.message || String(e),
+						status: 'error', code: 'E_INVALID_REQUEST', error: 'Invalid or oversized JSON body',
 					});
 				}
 				if (!body || typeof body !== 'object') {
@@ -115,7 +116,8 @@ export async function startAgentHttpServer(opts: {
 
 			sendJson(res, 404, { status: 'error', code: 'E_UNKNOWN_COMMAND', error: `No route for ${req.method} ${url.pathname}` });
 		} catch (e: any) {
-			try { sendJson(res, 500, { status: 'error', code: 'E_INTERNAL', error: e?.message || String(e) }); } catch { /* ignore */ }
+			log(`[agent-http] internal error: ${e?.stack || e?.message || e}`);
+			try { sendJson(res, 500, { status: 'error', code: 'E_INTERNAL', error: 'Internal error' }); } catch { /* ignore */ }
 		}
 	});
 
