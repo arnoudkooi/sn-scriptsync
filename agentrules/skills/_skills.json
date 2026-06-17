@@ -1,10 +1,11 @@
 {
-  "version": 10,
-  "generatedAt": "2026-06-05T21:29:14.941Z",
-  "marker": "<!-- SN-SCRIPTSYNC:SKILL apiVersion=10 -->",
+  "version": 13,
+  "generatedAt": "2026-06-17T22:49:36.205Z",
+  "marker": "<!-- SN-SCRIPTSYNC:SKILL apiVersion=13 -->",
   "files": [
     "snu-agent-api/SKILL.md",
     "snu-artifacts/SKILL.md",
+    "snu-browser-debug/SKILL.md",
     "snu-coding-standards/SKILL.md",
     "snu-form-automation/SKILL.md",
     "snu-reference/SKILL.md"

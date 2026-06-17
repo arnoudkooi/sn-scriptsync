@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.5.0",
+	"version": "4.6.0",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -308,11 +308,23 @@
 					"order": 33,
 					"description": "Agent API permission (4/4 — run scripts): Allow the Agent API to run background scripts on the instance (run_background_script, and the cascade used by delete_application). Off by default — this executes arbitrary server-side code as the connected user."
 				},
+				"sn-scriptsync.browserDebugger.enabled": {
+					"type": "boolean",
+					"default": false,
+					"order": 34,
+					"description": "Agent API (beta): Allow the Agent API to drive the connected ServiceNow tab through the Chrome DevTools Protocol browser debugger — network/console capture, full-page screenshots, and native dialog handling (start_network_capture, capture_full_page, set_dialog_handler, etc.). Off by default: attaching the debugger shows Chrome's 'started debugging this browser' banner, and it's a SN Utils Pro browser feature. Enable to opt into the beta."
+				},
 				"sn-scriptsync.agentApi.fileFallback": {
 					"type": "boolean",
 					"default": true,
 					"order": 40,
 					"description": "Keep the legacy file-based Agent API (agent/requests/*.json) active alongside the HTTP Agent API. Disable once all your AI agents use the HTTP endpoint documented in agentinstructions.md."
+				},
+				"sn-scriptsync.agentInstructions.autoUpdate": {
+					"type": "boolean",
+					"default": true,
+					"order": 45,
+					"description": "On start, add and refresh the managed sn-scriptsync reference block inside your own agent instruction files (CLAUDE.md / AGENTS.md / .cursorrules / .windsurfrules / .clinerules / .github/copilot-instructions.md). Turn off if you maintain your own agent instructions and don't want sn-scriptsync touching those files. NOTE: agentinstructions.md and the agentrules/skills folder are always kept up to date either way, so you can still reference them on demand (e.g. @agentinstructions.md) — opting out only stops the block being injected into your files."
 				},
 				"sn-scriptsync.showContextMenu": {
 					"type": "boolean",

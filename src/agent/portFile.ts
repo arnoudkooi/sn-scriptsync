@@ -9,7 +9,9 @@ import { AgentPortFile } from './types';
 // v3 -> v4: added run_background_script + delete_application (browser-side
 // agentRunBackgroundScript path), screenshot exactUrl + E_SCREENSHOT_PERMISSION.
 // v4 -> v5: added code_search (SN Utils GraphQL field-index code search, Pro).
-export const AGENT_API_VERSION = 5;
+// v5 -> v6: added get_capabilities (helper-tab capability probe: license tier +
+// CDP/browser-debugger availability, so agents can preflight instead of probing).
+export const AGENT_API_VERSION = 6;
 
 function portFilePath(): string | undefined {
 	const root = vscode.workspace.rootPath;

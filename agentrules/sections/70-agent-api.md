@@ -109,6 +109,39 @@ HTTP status codes map to codes:
 | `E_SERVER_NOT_RUNNING` / `E_BROWSER_DISCONNECTED` | 503 | Can't reach ServiceNow |
 | `E_TIMEOUT` | 504 | Round-trip exceeded deadline |
 
+### Resolving `E_INSTANCE_REQUIRED` (multiple instances)
+
+When a command returns `E_INSTANCE_REQUIRED`, the workspace has more than one
+instance folder and you didn't pass `"instance"`. **A single helper tab relays
+for every instance the browser has a session for**, so more than one instance
+can answer as "live" — don't treat any single one as exclusive, and don't
+immediately ask the user to pick either.
+
+Use freshness as a *default pick*, not an exclusivity test. The extension
+rewrites `<instance>/_settings.json` (refreshing `g_ck`) every time it relays for
+that instance, so the **most recently modified `_settings.json` is the
+most-recently-active session**.
+
+The fastest path — and the one to prefer — is the one-shot **`list_instances`**
+command. It's purely local (no browser round-trip, never returns
+`E_INSTANCE_REQUIRED`) and returns the whole roster, each `url`, a freshest-first
+ranking, and a suggested `defaultInstance`:
+
+1. Call `list_instances`. If `defaultInstance` is set (exactly one instance was
+   recently active), retry your command with `"instance": defaultInstance`.
+2. If `needsConfirmation` is `true` (none recent, or two-plus recent — e.g.
+   `ven08329` + `ven08331`), or the operation is a write / destructive action,
+   confirm the target with the user instead of guessing.
+3. Optionally confirm the chosen instance's bridge actually responds with a cheap
+   `get_instance_info` (check `recentlyActive` / `lastActiveAgeMs`) or
+   `query_records` round-trip before committing — `connected` is bridge-level and
+   is `true` for every instance whenever the helper tab is up, so it doesn't
+   disambiguate.
+
+If `list_instances` isn't available (older extension), fall back to reading the
+`<instance>/_settings.json` mtimes yourself and applying the same rule. Once
+resolved, reuse that `instance` for the rest of the session.
+
 ## Transport 2: File (legacy fallback)
 
 If the HTTP transport is unavailable (container without localhost access, old agent tooling, etc.), the extension still watches `{instance_folder}/agent/requests/*.json`. Drop a request file, poll `{instance_folder}/agent/responses/res_<id>.json`, then clean up. See the Legacy File API section below for examples.

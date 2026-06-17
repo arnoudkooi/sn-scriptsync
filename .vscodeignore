@@ -8,6 +8,7 @@ tslint.json
 .vscodeignore
 
 # Build artifacts
+out/.tsbuildinfo
 **/*.map
 *.vsix
 **/*.vsix

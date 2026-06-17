@@ -105,3 +105,11 @@ The extension automatically includes `?sysparm_transaction_scope=<SCOPE_SYS_ID>`
 }
 ```
 
+**⚠️ Large / multi-field payloads (widgets etc.):** A widget's four big code fields (`template`, `css`, `script`, `client_script`) are escaping-hell to pass inline on a shell command line (`curl -d '...'`). Don't hand-build the JSON string — write the request body to a file and send it with `curl -d @body.json` (build the file with `JSON.stringify` so newlines/quotes are encoded correctly), or use the file transport. This applies to any multiline or large field value.
+
+**Errors:**
+- `E_DISABLED` — artifact creation is off (`sn-scriptsync.createArtifacts.enabled`). This setting **defaults to `true`**, so creation works out of the box; it only fails here if the user explicitly turned it off. Check `get_capabilities` → `gates.createArtifacts` to preflight.
+- `E_INVALID_PARAMS` — missing `table`, missing `fields`, or missing `fields.name`.
+
+**⚠️ `fields.name` is required for every table.** For a *data* table whose display field isn't `name` (e.g. a custom table whose display column is `title`), don't fight this command — seed rows with `rest_request` instead: `POST /api/now/table/<table>` with the row in `body` (requires `sn-scriptsync.restRequest.enabled`). `create_artifact` is for metadata/code artifacts; `rest_request` POST is the blessed path for plain data rows.
+

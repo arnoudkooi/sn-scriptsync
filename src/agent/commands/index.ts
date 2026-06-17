@@ -5,6 +5,7 @@ import { queryCommands } from './query';
 import { searchCommands } from './search';
 import { filesCommands } from './files';
 import { browserCommands } from './browser';
+import { cdpCommands } from './cdp';
 import { scopedAppCommands } from './scopedapp';
 import { restCommands } from './rest';
 import { backgroundCommands } from './background';
@@ -16,6 +17,7 @@ const allHandlers: CommandHandler[] = [
 	...searchCommands,
 	...filesCommands,
 	...browserCommands,
+	...cdpCommands,
 	...scopedAppCommands,
 	...restCommands,
 	...backgroundCommands,

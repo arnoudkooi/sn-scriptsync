@@ -5,17 +5,17 @@
 {
 	"version": "0.2.0",
 	"configurations": [{
-			"name": "Run Extension",
+			"name": "Run Extension (sn-scriptsync)",
 			"type": "extensionHost",
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}"
+				"--extensionDevelopmentPath=${workspaceFolder:sn-scriptsync}"
 			],
 			"outFiles": [
-				"${workspaceFolder}/out/**/*.js"
+				"${workspaceFolder:sn-scriptsync}/out/**/*.js"
 			],
-			"preLaunchTask": "npm: watch"
+			"preLaunchTask": "scriptsync: watch"
 		}
 	]
 }

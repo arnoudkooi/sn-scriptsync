@@ -20,6 +20,12 @@ export type AgentErrorCode =
 	| 'E_REFERENCE_INTEGRITY'
 	| 'E_PARTIAL_FAILURE'
 	| 'E_SCREENSHOT_PERMISSION'
+	// Browser debugger (CDP) family — see commands/cdp.ts.
+	| 'E_PRO_REQUIRED'
+	| 'E_CDP_UNAVAILABLE'
+	| 'E_DEBUGGER_BUSY'
+	| 'E_NO_TAB'
+	| 'E_NO_ELEMENT'
 	| 'E_INTERNAL';
 
 export class AgentError extends Error {
@@ -44,11 +50,18 @@ export function httpStatusForCode(code?: string): number {
 		case 'E_UNAUTHORIZED':
 		case 'E_SECURITY':
 			return 401;
+		case 'E_PRO_REQUIRED':
+			return 402;
 		case 'E_UNKNOWN_COMMAND':
 		case 'E_NOT_FOUND':
+		case 'E_NO_TAB':
+		case 'E_NO_ELEMENT':
 			return 404;
 		case 'E_REFERENCE_INTEGRITY':
+		case 'E_DEBUGGER_BUSY':
 			return 409;
+		case 'E_CDP_UNAVAILABLE':
+			return 501;
 		case 'E_INSTANCE_REQUIRED':
 		case 'E_INSTANCE_NOT_FOUND':
 			return 422;

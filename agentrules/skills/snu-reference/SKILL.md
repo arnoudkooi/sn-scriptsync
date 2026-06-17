@@ -3,7 +3,7 @@ name: snu-reference
 description: Extended reference appendix: detailed file-structure notes, table metadata caching, agent best-practices, and edge cases not covered by the core. Read this when you need depth the other skills do not cover.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=10 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=13 -->
 
 # SN ScriptSync — Deep Reference
 
@@ -223,6 +223,15 @@ This refreshes all browser tabs showing the widget preview.
 6. refresh_preview            → Refresh browser to see changes
 7. Report completion to user
 ```
+
+**Verifying the rendered widget (component-only screenshot):**
+
+To capture just the widget without a per-tab screenshot grant, pair `activate_tab` with the CDP `capture_full_page` selector:
+```json
+{ "id": "act", "command": "activate_tab", "params": { "urlPattern": "sp-preview", "openIfNotFound": true, "waitForLoad": true } }
+{ "id": "shot", "command": "capture_full_page", "params": { "selector": ".my-widget" } }
+```
+The `selector` trick returns a clean, component-only image (no full page, no per-tab grant). `capture_full_page` is part of the browser-debugger beta — preflight with `get_capabilities` (`cdp.available`).
 
 ### Step-by-Step Workflow
 

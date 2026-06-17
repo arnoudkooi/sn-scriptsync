@@ -3,11 +3,11 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=10 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=13 -->
 
 # SN ScriptSync — Agent API
 
-Full reference for the SN ScriptSync Agent API and every command except the live-form g_form bridge (see the snu-form-automation skill).
+Full reference for the SN ScriptSync Agent API and every command except the live-form g_form bridge (see the snu-form-automation skill) and the browser debugger (see the snu-browser-debug skill).
 
 # SN ScriptSync - Agent API
 
@@ -119,6 +119,39 @@ HTTP status codes map to codes:
 | `E_ACL` / `E_TOKEN_EXPIRED` / `E_SCREENSHOT_PERMISSION` | 502 | ServiceNow rejected the request, or a tab needs a one-time capture grant (click the SN Utils icon on it, then retry) |
 | `E_SERVER_NOT_RUNNING` / `E_BROWSER_DISCONNECTED` | 503 | Can't reach ServiceNow |
 | `E_TIMEOUT` | 504 | Round-trip exceeded deadline |
+
+### Resolving `E_INSTANCE_REQUIRED` (multiple instances)
+
+When a command returns `E_INSTANCE_REQUIRED`, the workspace has more than one
+instance folder and you didn't pass `"instance"`. **A single helper tab relays
+for every instance the browser has a session for**, so more than one instance
+can answer as "live" — don't treat any single one as exclusive, and don't
+immediately ask the user to pick either.
+
+Use freshness as a *default pick*, not an exclusivity test. The extension
+rewrites `<instance>/_settings.json` (refreshing `g_ck`) every time it relays for
+that instance, so the **most recently modified `_settings.json` is the
+most-recently-active session**.
+
+The fastest path — and the one to prefer — is the one-shot **`list_instances`**
+command. It's purely local (no browser round-trip, never returns
+`E_INSTANCE_REQUIRED`) and returns the whole roster, each `url`, a freshest-first
+ranking, and a suggested `defaultInstance`:
+
+1. Call `list_instances`. If `defaultInstance` is set (exactly one instance was
+   recently active), retry your command with `"instance": defaultInstance`.
+2. If `needsConfirmation` is `true` (none recent, or two-plus recent — e.g.
+   `ven08329` + `ven08331`), or the operation is a write / destructive action,
+   confirm the target with the user instead of guessing.
+3. Optionally confirm the chosen instance's bridge actually responds with a cheap
+   `get_instance_info` (check `recentlyActive` / `lastActiveAgeMs`) or
+   `query_records` round-trip before committing — `connected` is bridge-level and
+   is `true` for every instance whenever the helper tab is up, so it doesn't
+   disambiguate.
+
+If `list_instances` isn't available (older extension), fall back to reading the
+`<instance>/_settings.json` mtimes yourself and applying the same rule. Once
+resolved, reuse that `instance` for the rest of the session.
 
 ## Transport 2: File (legacy fallback)
 
@@ -303,21 +336,131 @@ Verify WebSocket server is running and browser helper tab is connected. **Always
 }
 ```
 
-### `get_instance_info`
-Get instance connection info.
+### `get_capabilities` ⚡ (preflight Pro / debugger / settings gates)
+Ask the connected SN Utils helper tab what it can do **right now** — the license tier, whether the Chrome DevTools Protocol **browser debugger** (network/console capture, full-page screenshots, native dialog handling) is usable, and the **`gates`** block telling you which write/create/delete/script permissions are enabled. Call this once up front so you can preflight `E_DISABLED` instead of discovering it mid-operation, and before reaching for the `snu-browser-debug` skill instead of firing a CDP command and parsing the error.
+
+Requires a connected helper tab (`E_BROWSER_DISCONNECTED` otherwise — run `check_connection` first).
 
 **Request:**
 ```json
-{ "id": "2", "command": "get_instance_info" }
+{ "id": "cap_1", "command": "get_capabilities" }
+```
+
+**Response (Pro, debugger usable):**
+```json
+{
+  "status": "success",
+  "result": {
+    "tier": "pro",
+    "proFeatures": true,
+    "cdp": { "available": true, "reason": null },
+    "gates": {
+      "createArtifacts": true,
+      "restRequest": false,
+      "deleteRecords": false,
+      "backgroundScripts": false,
+      "browserDebugger": true,
+      "fileFallback": true
+    }
+  }
+}
+```
+
+**Response (debugger beta not enabled — the default):**
+```json
+{
+  "status": "success",
+  "result": {
+    "tier": "pro",
+    "proFeatures": true,
+    "cdp": { "available": false, "reason": "E_DISABLED" },
+    "gates": {
+      "createArtifacts": true,
+      "restRequest": false,
+      "deleteRecords": false,
+      "backgroundScripts": false,
+      "browserDebugger": false,
+      "fileFallback": true
+    }
+  }
+}
+```
+
+- `tier` — `community` | `pro` | `trial` | `enterprise` (license of the connected helper tab).
+- `proFeatures` — `true` when the tier unlocks Pro features (e.g. `code_search`).
+- `cdp.available` — `true` only when the browser-debugger beta is enabled (`sn-scriptsync.browserDebugger.enabled`) **and** the debugger adapter is present (Pro build) **and** the license is Pro/Trial/Enterprise.
+- `cdp.reason` — when `available` is `false`, the code you would otherwise have hit: `E_DISABLED` (beta off — enable `sn-scriptsync.browserDebugger.enabled`), `E_CDP_UNAVAILABLE` (Community build / no debugger adapter) or `E_PRO_REQUIRED` (adapter present but license isn't Pro).
+- `gates` — the VS Code settings that produce `E_DISABLED`, so you can preflight before calling a gated command:
+  - `createArtifacts` — `create_artifact`, `create_application`, `create_table`, `add_column` (default **on**).
+  - `restRequest` — POST/PUT/PATCH via `rest_request` (default off).
+  - `deleteRecords` — `delete_record`, DELETE via `rest_request`, delete UI verbs in `run_ui_action` (default off).
+  - `backgroundScripts` — `run_background_script` and the `delete_application` cascade (default off).
+  - `browserDebugger` — the CDP browser-debugger beta (default off); same flag reflected in `cdp.available`.
+  - `fileFallback` — legacy file-based transport (`agent/requests/*.json`) is active alongside HTTP (default on).
+- When a gate is `false`, tell the user exactly which setting to enable (e.g. `sn-scriptsync.deleteRecords.enabled`) rather than retrying.
+
+### `list_instances`
+List every instance in the workspace with its URL and per-instance activity
+freshness, plus a suggested default. **Purely local** — it reads the
+`*/​_settings.json` files directly, so it needs no browser helper tab and never
+returns `E_INSTANCE_REQUIRED`. Use it as the first step when you don't yet know
+which instance to target.
+
+`instances` is sorted freshest-first (`lastActiveAgeMs` ascending; never-active
+folders last). `recentlyActive` means the instance's `_settings.json` was
+rewritten within ~10h — the extension refreshes that file (and `g_ck`) whenever
+the helper tab relays for that instance, so it's a freshness proxy, not proof of
+a live tab. `defaultInstance` is set **only** when exactly one instance is
+recently active; when `needsConfirmation` is `true` (none recent, or two-plus
+recent) pick with the user before any write. `connected` is bridge-level (the one
+helper tab relays for every instance), not per-instance.
+
+**Request:**
+```json
+{ "id": "1", "command": "list_instances" }
 ```
 
 **Response:**
 ```json
 {
   "result": {
-    "instanceName": "myinstance",
+    "instances": [
+      { "name": "ven08329", "url": "https://ven08329.service-now.com", "recentlyActive": true, "lastActiveAgeMs": 425000, "hasSettings": true },
+      { "name": "ven08331", "url": "https://ven08331.service-now.com", "recentlyActive": true, "lastActiveAgeMs": 980000, "hasSettings": true },
+      { "name": "empakooi", "url": "https://empakooi.service-now.com", "recentlyActive": false, "lastActiveAgeMs": 10500000000, "hasSettings": true }
+    ],
+    "count": 3,
+    "connected": true,
+    "defaultInstance": null,
+    "needsConfirmation": true
+  }
+}
+```
+
+### `get_instance_info`
+Get instance connection info, including per-instance activity freshness.
+
+Pass `"instance"` to inspect a specific candidate (useful for disambiguating
+`E_INSTANCE_REQUIRED`). `connected` is bridge-level — it is `true` for every
+instance whenever the WS server is up with the helper tab connected, because the
+single helper tab relays for every instance the browser has a session for. Use
+`recentlyActive` / `lastActiveAgeMs` (derived from the `_settings.json` mtime) to
+tell *which* instance is the most-recently-active session.
+
+**Request:**
+```json
+{ "id": "2", "command": "get_instance_info", "instance": "ven08329" }
+```
+
+**Response:**
+```json
+{
+  "result": {
+    "instanceName": "ven08329",
     "hasSettings": true,
-    "connected": true
+    "connected": true,
+    "recentlyActive": true,
+    "lastActiveAgeMs": 425000
   }
 }
 ```
@@ -625,6 +768,14 @@ The extension automatically includes `?sysparm_transaction_scope=<SCOPE_SYS_ID>`
 }
 ```
 
+**⚠️ Large / multi-field payloads (widgets etc.):** A widget's four big code fields (`template`, `css`, `script`, `client_script`) are escaping-hell to pass inline on a shell command line (`curl -d '...'`). Don't hand-build the JSON string — write the request body to a file and send it with `curl -d @body.json` (build the file with `JSON.stringify` so newlines/quotes are encoded correctly), or use the file transport. This applies to any multiline or large field value.
+
+**Errors:**
+- `E_DISABLED` — artifact creation is off (`sn-scriptsync.createArtifacts.enabled`). This setting **defaults to `true`**, so creation works out of the box; it only fails here if the user explicitly turned it off. Check `get_capabilities` → `gates.createArtifacts` to preflight.
+- `E_INVALID_PARAMS` — missing `table`, missing `fields`, or missing `fields.name`.
+
+**⚠️ `fields.name` is required for every table.** For a *data* table whose display field isn't `name` (e.g. a custom table whose display column is `title`), don't fight this command — seed rows with `rest_request` instead: `POST /api/now/table/<table>` with the row in `body` (requires `sn-scriptsync.restRequest.enabled`). `create_artifact` is for metadata/code artifacts; `rest_request` POST is the blessed path for plain data rows.
+
 ### `delete_record` ⚠️ (DESTRUCTIVE — guarded)
 
 Delete a record by `table` + `sys_id`, or bulk-delete by query. **Disabled by default.** Enable `sn-scriptsync.deleteRecords.enabled` in VS Code settings to allow it.
@@ -699,6 +850,39 @@ Create a scoped application (`sys_app`). The **scope is set at insert time** —
 - `E_DISABLED` — `sn-scriptsync.createArtifacts.enabled` is off.
 - `E_INVALID_PARAMS` — neither `scope` nor `prefix` provided.
 
+### `create_table`
+
+Create a custom table by inserting a `sys_db_object` record. ServiceNow auto-creates the physical table and its base `sys_*` fields (`sys_id`, `sys_created_on`, `sys_updated_on`, etc.). Pair it with `add_column` for your own fields, and set the display column via `add_column` `display: true`. This mirrors the `create_application` / `add_column` ergonomics so you don't have to drive `create_artifact` against `sys_db_object` by hand.
+
+**Request:**
+```json
+{
+  "id": "tbl_1",
+  "command": "create_table",
+  "params": { "name": "project", "label": "Project", "scope": "x_acme_myapp", "extends": "task" }
+}
+```
+
+**Parameters:**
+- `name` (required): Table name. When a non-global `scope` is given and the name isn't already prefixed, it is prefixed for you as `<scope>_<name>` (e.g. `x_acme_myapp_project`). An already-prefixed `x_...` name is left as-is.
+- `label` (optional): Human label (defaults to a title-cased `name`).
+- `scope` (optional): Scope name; when known (in `scopes.json`) the table is created with `sysparm_transaction_scope` set so it lands in the right app. Omit (or `global`) for a global table.
+- `extends` / `super_class` (optional): Parent table to extend (e.g. `task`). Omit for a standalone table.
+
+**Response:**
+```json
+{ "status": "success", "result": { "created": true, "name": "x_acme_myapp_project", "label": "Project", "sys_id": "...", "scope": "x_acme_myapp" } }
+```
+
+**Typical table-build flow:**
+1. `create_table` → get the prefixed `name` back.
+2. `add_column` for each field (set `display: true` on the one you want as the display value, plus `mandatory` / `choices` / etc. inline).
+3. Seed data rows with `rest_request` `POST /api/now/table/<name>` (display field need not be `name`).
+
+**Errors:**
+- `E_DISABLED` — `sn-scriptsync.createArtifacts.enabled` is off (defaults to `true`). Preflight with `get_capabilities` → `gates.createArtifacts`.
+- `E_INVALID_PARAMS` — missing `name`.
+
 ### `add_column`
 
 Add a column to a table by creating a `sys_dictionary` entry (keyed by `table.element`). Use this instead of `create_artifact` for dictionary entries — it avoids the `_map.json` name collision where every column would share `name = <table>`.
@@ -708,23 +892,54 @@ Add a column to a table by creating a `sys_dictionary` entry (keyed by `table.el
 {
   "id": "col_1",
   "command": "add_column",
-  "params": { "table": "x_acme_myapp_widget", "element": "priority", "type": "integer", "label": "Priority", "scope": "x_acme_myapp" }
+  "params": { "table": "x_acme_myapp_widget", "element": "priority", "type": "integer", "label": "Priority", "display": true, "mandatory": true, "scope": "x_acme_myapp" }
 }
 ```
 
 **Parameters:**
 - `table` (required): Table to add the column to.
 - `element` (required): Column name (the `element`).
-- `type` (optional, default `string`): Internal type, e.g. `string`, `integer`, `boolean`, `glide_date_time`, `reference`.
+- `type` (optional, default `string`): Internal type, e.g. `string`, `integer`, `boolean`, `glide_date_time`, `reference`, `choice`.
 - `label` (optional): Column label (defaults to a title-cased `element`).
 - `max_length` (optional): For string columns.
 - `reference` (optional): Referenced table when `type` is `reference`.
-- `scope` (optional): Scope name; when known (in `scopes.json`) the column is created with `sysparm_transaction_scope` set so it lands in the right app.
+- `display` (optional, boolean): Make this the table's display column — no separate `update_record` needed.
+- `mandatory` (optional, boolean): Mark the column mandatory.
+- `read_only` (optional, boolean): Mark the column read-only.
+- `default` (optional): Default value for the column.
+- `reference_qual` (optional): Reference qualifier (for `reference` columns).
+- `choice` (optional): Dropdown mode — `0` none, `1` dropdown with `--None--`, `3` dropdown without `--None--`.
+- `choices` (optional, array): Create the choice list values in the same call. Each entry is either a plain string (used for both label and value) or `{ "label": "...", "value": "...", "sequence": 0 }`. Supplying `choices` defaults `choice` to `1` unless you set it explicitly.
+- `scope` (optional): Scope name; when known (in `scopes.json`) the column (and its choices) are created with `sysparm_transaction_scope` set so they land in the right app.
+
+**Example with attributes + choices:**
+```json
+{
+  "id": "col_2",
+  "command": "add_column",
+  "params": {
+    "table": "x_acme_myapp_project",
+    "element": "stage",
+    "type": "choice",
+    "label": "Stage",
+    "display": true,
+    "mandatory": true,
+    "default": "planning",
+    "choices": [
+      { "label": "Planning", "value": "planning" },
+      { "label": "In Progress", "value": "in_progress" },
+      "Done"
+    ]
+  }
+}
+```
 
 **Response:**
 ```json
-{ "status": "success", "result": { "created": true, "table": "x_acme_myapp_widget", "element": "priority", "type": "integer", "label": "Priority", "sys_id": "..." } }
+{ "status": "success", "result": { "created": true, "table": "x_acme_myapp_widget", "element": "priority", "type": "integer", "label": "Priority", "sys_id": "...", "choices": ["planning", "in_progress", "Done"] } }
 ```
+
+`choices` is present in the response only when you passed a `choices` array; it lists the values that were created.
 
 **Errors:**
 - `E_DISABLED` — `sn-scriptsync.createArtifacts.enabled` is off.

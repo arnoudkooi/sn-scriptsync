@@ -1,5 +1,23 @@
 # CHANGELOG.md
 
+## 4.6.0 (2026-06-17)
+
+**`get_capabilities` now reports a `gates` block:** Alongside `tier`/`proFeatures`/`cdp`, it returns which Agent API permissions are on (`createArtifacts`, `restRequest`, `deleteRecords`, `backgroundScripts`, `browserDebugger`, `fileFallback`) so an agent can preflight `E_DISABLED` from the API alone instead of discovering it mid-operation. Additive — older clients that ignore the new field are unaffected.
+
+**New Agent API command — `create_table`:** Creates a custom table (`sys_db_object`); ServiceNow auto-creates the physical table and base `sys_*` fields. Prefixes the name to `x_<scope>_<name>` for a scoped app and supports `extends`, mirroring `create_application` / `add_column` ergonomics. Gated by the existing `sn-scriptsync.createArtifacts.enabled`.
+
+**`add_column` can set column attributes in one call:** New optional params `display`, `mandatory`, `default`, `read_only`, `reference_qual`, `choice`, and `choices[]` (creates the `sys_choice` values too) — no follow-up `update_record` needed just to make a column the display field or mandatory.
+
+**Docs:** Documented the table-creation recipe (`create_table` → `add_column` → seed rows with `rest_request`), recommended `curl -d @body.json` for large/multi-field payloads like widget code, blessed `rest_request` POST as the seeding path for data tables whose display field isn't `name`, and added the `activate_tab` → `capture_full_page(selector)` widget-preview verify recipe. Agent instructions bumped to v13.
+
+**Fix: stopping the server from the status bar then starting it again now works.** Clicking sn-scriptsync to stop left the helper-tab connection open, which kept port 1978 bound and made the next start silently fail; the connection is now closed on stop (and a port-in-use error is surfaced instead of failing quietly).
+
+**Opt out of injecting instructions into your own files (#150):** New setting `sn-scriptsync.agentInstructions.autoUpdate` (default on). Turn it off and sn-scriptsync stops adding/refreshing its managed reference block inside *your* `CLAUDE.md` / `AGENTS.md` / `.cursorrules` / etc. `agentinstructions.md` and the `agentrules/skills` folder are still kept current either way, so you can reference them on demand (e.g. `@agentinstructions.md`). The header now documents how the docs/skills stay up to date.
+
+**Browser debugger (CDP) is now opt-in (beta):** The Chrome DevTools Protocol commands (network/console capture, full-page screenshots, dialog handling) are off by default behind `sn-scriptsync.browserDebugger.enabled` and return `E_DISABLED` until you turn them on — so existing setups are never disrupted by an unexpected debugger attach.
+
+**New Agent API command — `get_capabilities`:** Asks the connected SN Utils helper tab what it can do right now — license tier and whether the browser debugger is usable (`cdp.available`, with a `reason` of `E_DISABLED` / `E_PRO_REQUIRED` / `E_CDP_UNAVAILABLE` when not). Lets an agent preflight the `snu-browser-debug` skill instead of firing a CDP command and parsing the error. Agent API protocol bumped to v6.
+
 ## 4.5.0 (2026-06-05)
 
 **New Agent API command — `code_search` (SN Utils Pro):**

@@ -206,6 +206,7 @@ sn-scriptsync is designed to work seamlessly with AI coding assistants. Changes 
 - `externalChanges.monitorFileChanges`: Monitor external changes (AI agents/git/tools) and show them in the Pending Saves queue (default: true)
 - `externalChanges.syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 0 monitor-only, set to `> 0` to enable auto-sync)
 - `createArtifacts.enabled`: Allow creating new records in ServiceNow from file/agent flows (default: true). Disable to block all create-record operations.
+- `agentInstructions.autoUpdate`: Add/refresh the managed sn-scriptsync reference block inside *your own* agent instruction files (`CLAUDE.md` / `AGENTS.md` / `.cursorrules` / `.windsurfrules` / `.clinerules` / `.github/copilot-instructions.md`) on start (default: true). Turn off if you maintain your own agent instructions and don't want those files touched. Either way `agentinstructions.md` and the `agentrules/skills` folder are always kept current — opting out only stops the block being injected into your files, so you can still reference the docs on demand (e.g. `@agentinstructions.md`, or a specific `agentrules/skills/<name>/SKILL.md`).
 - Manual saves (Ctrl+S) always sync immediately, bypassing the queue
 
 ### Forensic Audit Logging

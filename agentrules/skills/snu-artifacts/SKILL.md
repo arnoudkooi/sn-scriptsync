@@ -3,7 +3,7 @@ name: snu-artifacts
 description: How sn-scriptsync maps ServiceNow artifacts to files: the instance/scope/table layout, naming conventions per artifact type, creating new artifacts, and the _map.json / structure.json files. Read this when creating, naming, or organizing ServiceNow files.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=10 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=13 -->
 
 # SN ScriptSync — Artifacts & File Structure
 
@@ -134,6 +134,30 @@ Before creating files in a new scope folder:
 3. Use the extension to pull/sync that artifact
 4. The extension creates: `<instance>/x_abc_my_app/<table>/`
 5. Now you can create new files in that scope folder
+
+### Creating Custom Tables
+
+Use the typed **`create_table`** command — don't drive `create_artifact` against `sys_db_object` by hand. ServiceNow auto-creates the physical table plus its base `sys_*` fields (`sys_id`, `sys_created_on`, `sys_updated_on`, …); you only add your own columns.
+
+**Recipe:**
+1. **`create_table`** with `name`, `label`, optional `scope` and `extends`. With a non-global `scope`, the name is prefixed for you as `<scope>_<name>` (e.g. `x_acme_myapp_project`). The prefixed-vs-unprefixed naming is the usual stumbling block — let the command handle it, or pass an already-prefixed `x_...` name.
+2. **`add_column`** for each field. Set `display: true` on the column you want as the display value (no separate `update_record` needed), and pass `mandatory` / `default` / `choices` inline so the column is usable in one call.
+3. **Seed data rows** with `rest_request` `POST /api/now/table/<name>` (requires `sn-scriptsync.restRequest.enabled`). This is the blessed path for plain data rows — `create_artifact` requires `fields.name`, which is awkward when the display field isn't `name`.
+
+**Fallback (no typed command available):** create the table via `create_artifact`/`rest_request` against `sys_db_object` using the **full scoped name** (`x_<scope>_<name>`); the base `sys_*` fields are created automatically; then `add_column` for the rest and set the display field.
+
+### Large / multi-field payloads (widgets)
+
+When a payload has several large or multiline code fields — e.g. a widget's `template` / `css` / `script` / `client_script` — do **not** hand-build the JSON on a shell command line; the escaping is error-prone. Write the request body to a file with `JSON.stringify` (so newlines and quotes are encoded correctly) and send it with `curl -d @body.json`, or use the file transport. This applies to any artifact with multiline/large field values.
+
+### Verifying a widget preview (component-only screenshot)
+
+To show just the rendered widget without a per-tab screenshot grant, combine `activate_tab` with the CDP `capture_full_page` selector:
+
+1. `activate_tab` with `openIfNotFound: true` and `waitForLoad: true` (open/activate the widget preview).
+2. `capture_full_page` with `selector: ".my-widget"` (or the widget's root class) for a clean, component-only screenshot — no per-tab grant required.
+
+(`capture_full_page` is part of the browser-debugger beta — preflight with `get_capabilities` → `cdp.available`.)
 
 ### Step-by-Step: Creating Simple Artifacts
 

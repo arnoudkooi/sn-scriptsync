@@ -63,7 +63,42 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v9 -> v10: code_search — documented full response shape (words, richer
 //              stats, per-match matchingWords + lineMatches) and surfaced it in
 //              the everyday cheat-sheet for inline discoverability.
-const INSTRUCTIONS_VERSION = 10;
+//   v10 -> v11: browser debugger (CDP, Pro) — new snu-browser-debug skill +
+//               commands (start/stop_network_capture, start/stop_console_capture,
+//               capture_full_page, set/clear_dialog_handler, debugger_detach);
+//               agent-api skill — how to resolve E_INSTANCE_REQUIRED with
+//               multiple instances via _settings.json mtime (freshness as a
+//               default pick, not an exclusivity test; one helper tab relays
+//               for many instances), plus get_instance_info per-instance
+//               recentlyActive / lastActiveAgeMs freshness fields, plus a new
+//               one-shot list_instances command (local roster + freshest-first
+//               ranking + suggested defaultInstance, no browser round-trip);
+//               steer agents to fall back to capture_full_page (CDP, no per-tab
+//               grant) on E_SCREENSHOT_PERMISSION when Pro/CDP is available.
+//   v11 -> v12: #150 — `sn-scriptsync.agentInstructions.autoUpdate` opt-out:
+//               when off, the extension stops injecting/refreshing the managed
+//               reference block inside the user's own tool files (CLAUDE.md,
+//               AGENTS.md, .cursorrules, ...) but still keeps agentinstructions.md
+//               and agentrules/skills/ current for on-demand reference; header
+//               documents how to keep the docs/skills up to date. Added
+//               get_capabilities (helper-tab probe for license tier + CDP/browser-
+//               debugger availability) so agents can preflight the snu-browser-debug
+//               skill instead of probing with a CDP command. The browser-debugger
+//               (CDP) commands are now OFF by default behind a beta opt-in
+//               (`sn-scriptsync.browserDebugger.enabled`) — they return E_DISABLED
+//               until enabled, and get_capabilities reports cdp.available:false
+//               (reason E_DISABLED) when off.
+//   v12 -> v13: get_capabilities now returns a `gates` block (createArtifacts,
+//               restRequest, deleteRecords, backgroundScripts, browserDebugger,
+//               fileFallback) so agents can preflight E_DISABLED from the API
+//               alone. New typed create_table command (sys_db_object insert,
+//               scope-prefixed name, base sys_ fields auto-created). add_column
+//               gained optional attributes (display, mandatory, default,
+//               read_only, reference_qual, choice, choices[]) so a column is
+//               usable in one call. Docs: table-creation recipe, large/multi-
+//               field payload encoding tip, and the activate_tab ->
+//               capture_full_page(selector) widget-preview verify recipe.
+const INSTRUCTIONS_VERSION = 13;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -74,22 +109,25 @@ const SKILL_MARKER = `<!-- SN-SCRIPTSYNC:SKILL apiVersion=${INSTRUCTIONS_VERSION
 // Grouped for the auto-generated command index in the core. The flattened list
 // is also the canonical command order inside the skills that own them.
 const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
-	{ label: 'Connection & state', cmds: ['check_connection', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
+	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
 	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_artifact', 'delete_record'] },
-	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'add_column', 'delete_application'] },
+	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'create_table', 'add_column', 'delete_application'] },
 	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote'] },
 	{ label: 'Queries', cmds: ['query_records', 'get_parent_options', 'code_search'] },
 	{ label: 'Escape hatches', cmds: ['rest_request', 'run_background_script'] },
 	{ label: 'File-system helpers', cmds: ['list_tables', 'list_artifacts', 'check_name_exists', 'get_file_structure', 'validate_path'] },
 	{ label: 'Browser helpers', cmds: ['open_in_browser', 'get_served_url', 'refresh_preview', 'take_screenshot', 'navigate_and_screenshot', 'run_slash_command', 'activate_tab', 'switch_context', 'upload_attachment'] },
 	{ label: 'Live form / page (g_form bridge)', cmds: ['navigate', 'set_field', 'get_form_state', 'run_ui_action', 'click_element'] },
+	{ label: 'Browser debugger (CDP · Pro)', cmds: ['start_network_capture', 'stop_network_capture', 'start_console_capture', 'stop_console_capture', 'capture_full_page', 'set_dialog_handler', 'clear_dialog_handler', 'debugger_detach'] },
 ];
 
 const COMMAND_ORDER = COMMAND_GROUPS.flatMap((g) => g.cmds);
 
-// Commands handled by the g_form bridge live in the form-automation skill; all
-// others live in the agent-api skill.
+// Commands handled by the g_form bridge live in the form-automation skill;
+// debugger/CDP commands live in the browser-debug skill; all others live in the
+// agent-api skill.
 const FORM_COMMANDS = new Set(['navigate', 'set_field', 'get_form_state', 'run_ui_action', 'click_element']);
+const CDP_COMMANDS = new Set(['start_network_capture', 'stop_network_capture', 'start_console_capture', 'stop_console_capture', 'capture_full_page', 'set_dialog_handler', 'clear_dialog_handler', 'debugger_detach']);
 
 // The everyday cheat-sheet that stays inline in the core so common tasks are
 // zero-hop. Keep this short — it is a teaser, not the catalog.
@@ -120,9 +158,9 @@ const SKILLS: SkillDef[] = [
 		title: 'SN ScriptSync — Agent API',
 		description:
 			'SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.',
-		intro: 'Full reference for the SN ScriptSync Agent API and every command except the live-form g_form bridge (see the snu-form-automation skill).',
+		intro: 'Full reference for the SN ScriptSync Agent API and every command except the live-form g_form bridge (see the snu-form-automation skill) and the browser debugger (see the snu-browser-debug skill).',
 		sections: ['70-agent-api', '71-legacy-file-api'],
-		commands: COMMAND_ORDER.filter((c) => !FORM_COMMANDS.has(c)),
+		commands: COMMAND_ORDER.filter((c) => !FORM_COMMANDS.has(c) && !CDP_COMMANDS.has(c)),
 	},
 	{
 		name: 'snu-form-automation',
@@ -132,6 +170,15 @@ const SKILLS: SkillDef[] = [
 		intro: 'How to control and verify live ServiceNow forms through the authenticated browser session.',
 		sections: ['65-form-automation'],
 		commands: ['navigate', 'set_field', 'get_form_state', 'run_ui_action', 'click_element'],
+	},
+	{
+		name: 'snu-browser-debug',
+		title: 'SN ScriptSync — Browser Debugger (CDP)',
+		description:
+			'Drive the connected ServiceNow tab through the Chrome DevTools Protocol (Pro): capture network requests + response bodies, capture console output and uncaught exceptions, take full-page/element screenshots beyond the viewport, and auto-handle (and record) native confirm/alert/prompt/beforeunload dialogs. Read this when you need network bodies, console errors, a whole-page screenshot, or dialog text — capabilities the normal content-script bridge cannot provide. Note the unavoidable Chrome debugger banner and the Pro requirement.',
+		intro: 'Escalation layer that uses the Chrome debugger for what content scripts cannot do: network/console capture, full-page screenshots, and native dialog handling.',
+		sections: ['66-browser-debug'],
+		commands: ['start_network_capture', 'stop_network_capture', 'start_console_capture', 'stop_console_capture', 'capture_full_page', 'set_dialog_handler', 'clear_dialog_handler', 'debugger_detach'],
 	},
 	{
 		name: 'snu-artifacts',
@@ -217,10 +264,21 @@ function renderEverydayCheatSheet(): string {
 	].join('\n');
 }
 
+// Map each command to the skill that owns its docs, derived from SKILLS so the
+// command index always points at the right SKILL.md.
+function buildCommandHome(): Map<string, string> {
+	const home = new Map<string, string>();
+	for (const skill of SKILLS) {
+		for (const cmd of skill.commands) home.set(cmd, skill.name);
+	}
+	return home;
+}
+
 function renderCommandIndex(): string {
+	const commandHome = buildCommandHome();
 	const groups = COMMAND_GROUPS.map((g) => {
 		const names = g.cmds.map((c) => `\`${c}\``).join(', ');
-		const home = g.cmds.every((c) => FORM_COMMANDS.has(c)) ? 'snu-form-automation' : 'snu-agent-api';
+		const home = commandHome.get(g.cmds[0]) || 'snu-agent-api';
 		return `- **${g.label}** — ${names}  \n  _docs: \`agentrules/skills/${home}/SKILL.md\`_`;
 	}).join('\n');
 	return [

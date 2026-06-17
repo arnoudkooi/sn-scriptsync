@@ -1002,48 +1002,74 @@ function startServers() {
 	// receive a tiny managed REFERENCE block (agentreference.md) that imports
 	// agentinstructions.md, appended after the user's own content. Everything
 	// outside the SN-SCRIPTSYNC markers is always preserved.
+	//
+	// Opt-out (issue #150): `sn-scriptsync.agentInstructions.autoUpdate=false`
+	// stops us from injecting the managed REFERENCE block into the user's own
+	// tool files (CLAUDE.md, AGENTS.md, .cursorrules, ...). It does NOT hide the
+	// docs: the extension's own `agentinstructions.md` and the on-demand
+	// `agentrules/skills/` folder are ALWAYS kept current so an opted-out user
+	// can point their agent at `@agentinstructions.md` / the skills on demand.
+	const autoUpdateAgentInstructions = vscode.workspace
+		.getConfiguration('sn-scriptsync')
+		.get<boolean>('agentInstructions.autoUpdate', true);
 	let agentRulesSourceDir = path.join(__filename, '..', '..', 'agentrules') + nodePath.sep;
 	const instructionsSource = agentRulesSourceDir + 'agentinstructions.md';
 	const referenceSource = agentRulesSourceDir + 'agentreference.md';
 	const OWN_INSTRUCTION_FILE = 'agentinstructions.md';
-	const instructionTargets = [
-		OWN_INSTRUCTION_FILE,
-		'.cursorrules',
-		'.windsurfrules',
-		'.clinerules',
-		'CLAUDE.md',
-		'AGENTS.md',
-		path.join('.github', 'copilot-instructions.md'),
-	];
-	// Only bootstrap the default agentinstructions.md when the user has no
-	// instruction file at all — avoids creating a stray duplicate next to a file
-	// they already renamed.
-	const anyInstructionFileExists = instructionTargets.some(
-		rel => fs.existsSync(path.join(workspace.rootPath, rel))
-	);
-	instructionTargets.forEach(rel => {
-		const dest = path.join(workspace.rootPath, rel);
-		const exists = fs.existsSync(dest);
-		const isOwnFile = rel === OWN_INSTRUCTION_FILE;
-		if (!exists && !(isOwnFile && !anyInstructionFileExists)) {
-			return; // never create user tool files that aren't already there
-		}
-		// Our own file gets the full content; user-authored tool files get only
-		// the slim reference block and are never clobbered.
-		const source = isOwnFile ? instructionsSource : referenceSource;
-		eu.upsertManagedBlock(source, dest, (err: any, status?: string) => {
-			if (err) {
-				debugLog(`instructions refresh error (${rel}): ${err?.message || err}`);
-			} else if (status && status !== 'up_to_date') {
-				debugLog(`instructions ${status}: ${rel}`);
+
+	if (autoUpdateAgentInstructions) {
+		const instructionTargets = [
+			OWN_INSTRUCTION_FILE,
+			'.cursorrules',
+			'.windsurfrules',
+			'.clinerules',
+			'CLAUDE.md',
+			'AGENTS.md',
+			path.join('.github', 'copilot-instructions.md'),
+		];
+		// Only bootstrap the default agentinstructions.md when the user has no
+		// instruction file at all — avoids creating a stray duplicate next to a
+		// file they already renamed.
+		const anyInstructionFileExists = instructionTargets.some(
+			rel => fs.existsSync(path.join(workspace.rootPath, rel))
+		);
+		instructionTargets.forEach(rel => {
+			const dest = path.join(workspace.rootPath, rel);
+			const exists = fs.existsSync(dest);
+			const isOwnFile = rel === OWN_INSTRUCTION_FILE;
+			if (!exists && !(isOwnFile && !anyInstructionFileExists)) {
+				return; // never create user tool files that aren't already there
 			}
-		}, { preserveUserFile: !isOwnFile });
-	});
+			// Our own file gets the full content; user-authored tool files get
+			// only the slim reference block and are never clobbered.
+			const source = isOwnFile ? instructionsSource : referenceSource;
+			eu.upsertManagedBlock(source, dest, (err: any, status?: string) => {
+				if (err) {
+					debugLog(`instructions refresh error (${rel}): ${err?.message || err}`);
+				} else if (status && status !== 'up_to_date') {
+					debugLog(`instructions ${status}: ${rel}`);
+				}
+			}, { preserveUserFile: !isOwnFile });
+		});
+	} else {
+		// Opted out of touching the user's own tool files: still keep our own
+		// agentinstructions.md present and current so it stays referenceable.
+		const ownDest = path.join(workspace.rootPath, OWN_INSTRUCTION_FILE);
+		eu.upsertManagedBlock(instructionsSource, ownDest, (err: any, status?: string) => {
+			if (err) {
+				debugLog(`instructions refresh error (${OWN_INSTRUCTION_FILE}): ${err?.message || err}`);
+			} else if (status && status !== 'up_to_date') {
+				debugLog(`instructions ${status}: ${OWN_INSTRUCTION_FILE}`);
+			}
+		}, { preserveUserFile: false });
+		debugLog('agent instructions: tool-file injection opted out (sn-scriptsync.agentInstructions.autoUpdate=false) — maintaining agentinstructions.md + skills only');
+	}
 
 	// Mirror the on-demand agent skills (issue #148) into the workspace and
 	// reconcile against the build manifest — copies/refreshes managed skill files
 	// and deletes any marker-stamped skill no longer in the manifest (renamed or
-	// removed), while leaving user-authored files untouched.
+	// removed), while leaving user-authored files untouched. Always runs so the
+	// skills stay available on demand even when tool-file injection is opted out.
 	const skillsSourceDir = agentRulesSourceDir + 'skills';
 	const skillsDestDir = path.join(workspace.rootPath, 'agentrules', 'skills');
 	eu.syncManagedSkills(skillsSourceDir, skillsDestDir, (err: any, res?: { copied: number; removed: number }) => {
@@ -1078,7 +1104,26 @@ function startServers() {
 	}
 
 	//Start WebSocket Server
+	// Defensive: if a previous instance is somehow still around (e.g. a rapid
+	// stop→start), tear it down so we don't try to bind port 1978 twice.
+	if (wss) {
+		try {
+			wss.clients.forEach((client) => { try { client.terminate(); } catch { /* ignore */ } });
+			wss.close();
+		} catch { /* ignore */ }
+		wss = undefined;
+	}
 	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});
+	// Without an error handler an EADDRINUSE (port not yet released) is thrown as
+	// an uncaught exception and the server silently never starts. Surface it.
+	wss.on('error', (err: any) => {
+		debugLog(`WebSocket server error: ${err?.message || err}`);
+		if (err && err.code === 'EADDRINUSE') {
+			updateScriptSyncStatusBarItem('click to start.');
+			setServerRunningContext(false);
+			vscode.window.showWarningMessage('SN ScriptSync: port 1978 is still in use. Wait a second, then click sn-scriptsync to start again.');
+		}
+	});
 	wss.on('connection', (ws: WebSocket, req) => {
 
 		if (!serverRunning) return;
@@ -1407,7 +1452,19 @@ function handleCreateRecordResponse(responseJson) {
 }
 
 function stopServers() {
-	wss.close();
+	// `wss.close()` only stops accepting NEW connections — it leaves existing
+	// sockets (the connected helper tab) open, which keeps port 1978 bound and
+	// makes the next startServers() fail with EADDRINUSE. Terminate the clients
+	// first so the port is actually released and the server can start again.
+	if (wss) {
+		try {
+			wss.clients.forEach((client) => { try { client.terminate(); } catch { /* ignore */ } });
+			wss.close();
+		} catch (e) {
+			debugLog(`stopServers: error closing WebSocket server: ${e}`);
+		}
+		wss = undefined;
+	}
 	stopAgentHttpServer(agentHttpState).catch(() => { /* ignore */ });
 	agentHttpState = undefined;
 	if (agentFileHandle) {

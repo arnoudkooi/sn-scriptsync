@@ -1,7 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { CommandHandler } from '../types';
+import { AgentError } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
+import { listInstanceFolders } from '../instanceResolver';
+import { getSetting } from './_shared';
+import { isBrowserDebuggerEnabled } from './cdp';
 
 const eu = new ExtensionUtils();
 
@@ -122,18 +126,171 @@ const sync_now: CommandHandler = {
 	},
 };
 
+// _settings.json is rewritten (refreshing g_ck) every time this instance's
+// helper tab talks to the extension, so its mtime is a per-instance freshness
+// proxy. Within this window the cached g_ck is almost certainly still valid.
+const RECENT_ACTIVITY_WINDOW_MS = 10 * 60 * 60 * 1000; // 10h
+
 const get_instance_info: CommandHandler = {
 	name: 'get_instance_info',
 	docs: {
-		summary: 'Return the resolved instance name and connection flags.',
+		summary: 'Return the resolved instance name, connection flags, and per-instance activity freshness.',
 	},
 	async handle(ctx) {
 		const instanceName = path.basename(ctx.instanceFolder);
 		const settings = eu.getInstanceSettings(instanceName);
+
+		// Per-instance freshness from the _settings.json mtime. A single helper
+		// tab relays for every instance the browser has a session for, so
+		// `connected` (bridge-level) is true for every instance whenever the
+		// helper tab is up; `recentlyActive` is the signal that distinguishes
+		// the most-recently-active instance.
+		let lastActiveAgeMs: number | null = null;
+		let recentlyActive = false;
+		try {
+			const { mtimeMs } = fs.statSync(path.join(ctx.instanceFolder, '_settings.json'));
+			lastActiveAgeMs = Math.max(0, Date.now() - mtimeMs);
+			recentlyActive = lastActiveAgeMs < RECENT_ACTIVITY_WINDOW_MS;
+		} catch {
+			// No _settings.json → this instance was never connected.
+		}
+
 		return {
 			instanceName,
 			hasSettings: !!(settings && settings.url),
+			// Bridge-level: WS server up + the helper tab connected. NOT
+			// exclusive to this instance — the one helper tab relays for many.
 			connected: ctx.isServerRunning() && ctx.hasBrowserClient(),
+			// Per-instance: was this instance's session refreshed within ~10h?
+			recentlyActive,
+			lastActiveAgeMs,
+		};
+	},
+};
+
+const list_instances: CommandHandler = {
+	name: 'list_instances',
+	noInstance: true,
+	docs: {
+		summary: 'List every instance folder in the workspace with its URL and per-instance activity freshness, plus a suggested default — purely local, no browser round-trip.',
+		response: {
+			status: 'success',
+			result: {
+				instances: [
+					{ name: 'ven08329', url: 'https://ven08329.service-now.com', recentlyActive: true, lastActiveAgeMs: 425000, hasSettings: true },
+				],
+				count: 1,
+				connected: true,
+				defaultInstance: 'ven08329',
+				needsConfirmation: false,
+			},
+		},
+	},
+	async handle(ctx) {
+		const now = Date.now();
+		const instances = listInstanceFolders().map((folder) => {
+			const name = path.basename(folder);
+			const settings = eu.getInstanceSettings(name);
+			let lastActiveAgeMs: number | null = null;
+			let recentlyActive = false;
+			try {
+				const { mtimeMs } = fs.statSync(path.join(folder, '_settings.json'));
+				lastActiveAgeMs = Math.max(0, now - mtimeMs);
+				recentlyActive = lastActiveAgeMs < RECENT_ACTIVITY_WINDOW_MS;
+			} catch {
+				// No _settings.json mtime → treat as never-active.
+			}
+			return {
+				name,
+				url: (settings && settings.url) || null,
+				hasSettings: !!(settings && settings.url),
+				recentlyActive,
+				lastActiveAgeMs,
+			};
+		});
+
+		// Freshest first; instances that were never active (null age) sink last.
+		instances.sort((a, b) => {
+			if (a.lastActiveAgeMs == null) return b.lastActiveAgeMs == null ? 0 : 1;
+			if (b.lastActiveAgeMs == null) return -1;
+			return a.lastActiveAgeMs - b.lastActiveAgeMs;
+		});
+
+		// Default only when exactly one instance is recently active; otherwise
+		// (none recent, or two-plus recent) the agent should confirm with the user.
+		const recent = instances.filter((i) => i.recentlyActive);
+		const defaultInstance = recent.length === 1 ? recent[0].name : null;
+
+		return {
+			instances,
+			count: instances.length,
+			connected: ctx.isServerRunning() && ctx.hasBrowserClient(),
+			defaultInstance,
+			needsConfirmation: recent.length !== 1,
+		};
+	},
+};
+
+const get_capabilities: CommandHandler = {
+	name: 'get_capabilities',
+	noInstance: true,
+	requiresBrowser: true,
+	docs: {
+		summary: 'Ask the connected SN Utils helper tab what it can do RIGHT NOW: the license tier, whether the Chrome DevTools Protocol browser debugger (network/console capture, full-page screenshots, native dialog handling) is usable, and the `gates` settings block (which write/create/delete/script permissions are enabled). Call this once up front to preflight E_DISABLED instead of discovering it mid-operation.',
+		request: { command: 'get_capabilities', id: 'cap_1' },
+		response: {
+			status: 'success',
+			result: {
+				tier: 'pro',
+				proFeatures: true,
+				cdp: { available: true, reason: null },
+				gates: {
+					createArtifacts: true,
+					restRequest: false,
+					deleteRecords: false,
+					backgroundScripts: false,
+					browserDebugger: false,
+					fileFallback: true,
+				},
+			},
+		},
+		notes: 'Requires a connected helper tab (E_BROWSER_DISCONNECTED otherwise). `cdp.available` is true only when both the CDP adapter is present (Pro build) and the license is Pro/Trial/Enterprise; when false, `cdp.reason` is the code you would have hit (`E_CDP_UNAVAILABLE` for a Community build, `E_PRO_REQUIRED` for a non-Pro license). `gates` mirrors the VS Code settings that produce `E_DISABLED`: `createArtifacts` (create_artifact/create_application/create_table/add_column), `restRequest` (POST/PUT/PATCH via rest_request), `deleteRecords` (deletes + delete UI verbs), `backgroundScripts` (run_background_script + delete_application cascade), `browserDebugger` (CDP beta), and `fileFallback` (legacy file transport).',
+	},
+	async handle(ctx) {
+		const correlationId = `agent_${ctx.request.id}_${Date.now()}`;
+		const pending = ctx.waitForBrowserResponse<any>(correlationId);
+		ctx.sendToBrowser({ action: 'agentGetCapabilities', agentRequestId: correlationId, appName: 'VS Code' });
+		ctx.log('Agent API: Sent agentGetCapabilities');
+		const r = await pending;
+		if (r?.success === false) {
+			throw new AgentError(r?.code || 'E_INTERNAL', r?.error || 'get_capabilities failed');
+		}
+		const cdp = r?.cdp || {};
+		// The browser reports whether the adapter + Pro license make CDP usable,
+		// but the debugger beta is also gated server-side. The VS Code setting
+		// wins: when it's off, report unavailable with E_DISABLED regardless of
+		// what the browser can technically do.
+		const debuggerEnabled = isBrowserDebuggerEnabled();
+		const cdpAvailable = debuggerEnabled && !!cdp.available;
+		const cdpReason = !debuggerEnabled ? 'E_DISABLED' : (cdp.reason || null);
+		return {
+			tier: typeof r?.tier === 'string' ? r.tier : null,
+			proFeatures: !!r?.proFeatures,
+			cdp: {
+				available: cdpAvailable,
+				reason: cdpReason,
+			},
+			// Settings gates so an agent can preflight E_DISABLED instead of
+			// discovering it mid-operation. Read straight from VS Code settings;
+			// no browser round-trip needed.
+			gates: {
+				createArtifacts: getSetting('createArtifacts.enabled', true),
+				restRequest: getSetting('restRequest.enabled', false),
+				deleteRecords: getSetting('deleteRecords.enabled', false),
+				backgroundScripts: getSetting('backgroundScripts.enabled', false),
+				browserDebugger: debuggerEnabled,
+				fileFallback: getSetting('agentApi.fileFallback', true),
+			},
 		};
 	},
 };
@@ -145,6 +302,8 @@ export const connectionCommands: CommandHandler[] = [
 	clear_last_error,
 	sync_now,
 	get_instance_info,
+	list_instances,
+	get_capabilities,
 ];
 
 // ---------------------------------------------------------------------------
