@@ -392,7 +392,6 @@
 	"devDependencies": {
 		"@types/node": "^18.15.11",
 		"@types/vscode": "^1.96.0",
-		"tslint": "^5.20.1",
 		"tsx": "^4.19.2",
 		"typescript": "^5.0.4"
 	},
@@ -404,6 +403,7 @@
 		"minimist": "1.2.6"
 	},
 	"overrides": {
-		"brace-expansion": "^1.1.15"
+		"brace-expansion": "^1.1.15",
+		"esbuild": "^0.28.1"
 	}
 }
