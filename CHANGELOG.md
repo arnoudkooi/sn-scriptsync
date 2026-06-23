@@ -1,6 +1,8 @@
 # CHANGELOG.md
 
-## 4.6.0 (2026-06-17)
+## 4.6.2 (2026-06-23)
+
+**Picks the right folder in a multi-root workspace:** ScriptSync no longer always syncs into the first workspace folder. It now targets the folder that's already a ScriptSync folder, matches your configured sync path, or is empty/dedicated — and when more than one folder qualifies it prompts you once to pick and remembers your choice (run `sn-scriptsync: Select Sync Folder (multi-root)` to change it). Single-folder and unambiguous workspaces are never prompted and behave as before.
 
 **New Welcome / What's New tab:** On first install and after each update, sn-scriptsync opens a tab that summarizes what changed and surfaces the key agent-capability settings as inline toggles — instruction-file writes (`CLAUDE.md` / `AGENTS.md` / `.cursorrules`), the Agent API create / write / delete / run-scripts / browser-debugger gates, and the legacy file API — so you can review and control what AI agents are allowed to do. Reopen it anytime from the **Info** side panel ("Welcome / What's New") or the `sn-scriptsync: Show Welcome / What's New` command.
 

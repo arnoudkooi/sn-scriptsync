@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import { dispatchAgentCommand } from '../dispatcher';
 import { AgentRequest, AgentResponse } from '../types';
 import { instanceFolderFromRequestFile } from '../instanceResolver';
+import { getWorkspaceRoot } from '../../workspaceRoot';
 
 const processedIds = new Set<string>();
 
@@ -42,7 +43,7 @@ export async function handleAgentRequestFile(requestPath: string, deps: FileTran
 		// Inject the instance name into the request so the dispatcher doesn't
 		// go hunting again.
 		const instanceFolder = instanceFolderFromRequestFile(requestPath);
-		const workspaceRoot = vscode.workspace.rootPath || '';
+		const workspaceRoot = getWorkspaceRoot() || '';
 		if (!workspaceRoot || !instanceFolder.startsWith(workspaceRoot)) {
 			deps.log(`Agent API (file): refusing request outside workspace: ${requestPath}`);
 			return;
@@ -70,7 +71,7 @@ export interface FileTransportHandle {
 
 export function startAgentFileTransport(deps: FileTransportDeps): FileTransportHandle {
 	const watcher = vscode.workspace.createFileSystemWatcher(
-		new vscode.RelativePattern(vscode.workspace.rootPath || '', '**/agent/requests/*.json')
+		new vscode.RelativePattern(getWorkspaceRoot() || '', '**/agent/requests/*.json')
 	);
 
 	const onEvent = (uri: vscode.Uri) => {

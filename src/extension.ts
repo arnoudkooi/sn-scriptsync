@@ -7,6 +7,14 @@ import { InfoTreeViewProvider } from "./InfoTreeViewProvider";
 import { QueueTreeViewProvider } from "./QueueTreeViewProvider";
 import { ExtensionUtils } from "./ExtensionUtils";
 import { Constants } from "./constants";
+import {
+	getWorkspaceRoot,
+	resetWorkspaceRoot,
+	setRememberedWorkspaceRoot,
+	getSyncFolderCandidates,
+	needsFolderChoice,
+	isMultiRootWorkspace,
+} from "./workspaceRoot";
 import * as path from "path";
 import nodePath = require('path');
 import * as fs from 'fs';
@@ -38,6 +46,60 @@ let agentFileHandle: FileTransportHandle | undefined;
 //let openFiles = {};
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
+
+// Multi-root: the folder the user explicitly chose for this workspace, persisted
+// across reloads so we never re-prompt once answered.
+let extensionContext: vscode.ExtensionContext;
+const CHOSEN_FOLDER_KEY = 'sn-scriptsync.chosenFolder';
+
+// Let the user pick which workspace folder ScriptSync syncs into and remember
+// it. Returns the chosen fsPath, or undefined if the user dismissed the picker.
+async function pickSyncFolder(): Promise<string | undefined> {
+	const folders = vscode.workspace.workspaceFolders || [];
+	if (folders.length <= 1) {
+		return folders[0]?.uri.fsPath;
+	}
+
+	const candidates = getSyncFolderCandidates();
+	const reasonLabel: Record<string, string> = {
+		initialized: 'already a ScriptSync folder',
+		name: 'matches the configured sync-folder name',
+		empty: 'empty — ready to use',
+	};
+	const candidatePaths = new Set(candidates.map((c) => c.path));
+
+	const items: (vscode.QuickPickItem & { fsPath: string })[] = folders.map((f) => {
+		const hit = candidates.find((c) => c.path === f.uri.fsPath);
+		return {
+			label: f.name,
+			description: f.uri.fsPath,
+			detail: hit ? `Detected: ${reasonLabel[hit.reason]}` : undefined,
+			fsPath: f.uri.fsPath,
+		};
+	});
+	// Surface detected candidates first.
+	items.sort((a, b) => Number(candidatePaths.has(b.fsPath)) - Number(candidatePaths.has(a.fsPath)));
+
+	const picked = await vscode.window.showQuickPick(items, {
+		title: 'ScriptSync — choose the folder to sync into',
+		placeHolder: 'Select which workspace folder ScriptSync should use',
+		ignoreFocusOut: true,
+	});
+	if (!picked) return undefined;
+
+	await extensionContext.workspaceState.update(CHOSEN_FOLDER_KEY, picked.fsPath);
+	setRememberedWorkspaceRoot(picked.fsPath);
+	debugLog(`ScriptSync sync folder chosen: ${picked.fsPath}`);
+	return picked.fsPath;
+}
+
+// Make sure we have a sync folder before starting. Prompts only when the choice
+// is genuinely ambiguous and hasn't been answered yet.
+async function ensureSyncFolderChosen(): Promise<void> {
+	if (needsFolderChoice()) {
+		await pickSyncFolder();
+	}
+}
 
 // Update context menu visibility based on settings and active editor
 function updateContextMenuVisibility() {
@@ -155,7 +217,7 @@ function debugLog(message: string) {
 		const enabled = settings.get('debugLogging') as boolean;
 		if (!enabled) return;
 
-		const logPath = path.join(vscode.workspace.rootPath || '', 'debug.log');
+		const logPath = path.join(getWorkspaceRoot() || '', 'debug.log');
 		const timestamp = new Date().toISOString();
 		const logLine = `[${timestamp}] ${message}\n`;
 		fs.appendFileSync(logPath, logLine);
@@ -194,7 +256,7 @@ function auditLog(event: string, data: Record<string, any> = {}, runId?: string)
 		const enabled = settings.get('debugLogging') as boolean;
 		if (!enabled) return;
 
-		const logPath = path.join(vscode.workspace.rootPath || '', 'audit.log');
+		const logPath = path.join(getWorkspaceRoot() || '', 'audit.log');
 		const payload = {
 			timestamp: new Date().toISOString(),
 			event,
@@ -208,7 +270,7 @@ function auditLog(event: string, data: Record<string, any> = {}, runId?: string)
 }
 
 function getInstanceRootForPath(filePath: string): string | undefined {
-	const workspaceRoot = vscode.workspace.rootPath || '';
+	const workspaceRoot = getWorkspaceRoot() || '';
 	if (!workspaceRoot || !filePath.startsWith(workspaceRoot)) {
 		return undefined;
 	}
@@ -235,7 +297,7 @@ function isValidInstanceSettingsObject(settings: any, expectedName?: string): bo
 }
 
 function isValidInstanceRoot(instanceFolder: string): boolean {
-	const workspaceRoot = vscode.workspace.rootPath || '';
+	const workspaceRoot = getWorkspaceRoot() || '';
 	if (!workspaceRoot || !instanceFolder || !instanceFolder.startsWith(workspaceRoot)) {
 		return false;
 	}
@@ -387,7 +449,7 @@ function handleScreenshotResponse(responseJson: any) {
 		return;
 	}
 	try {
-		const workspacePath = workspace.rootPath;
+		const workspacePath = getWorkspaceRoot();
 		if (!workspacePath) throw new Error('No workspace folder open');
 		const screenshotsFolder = path.join(workspacePath, 'screenshots');
 		if (!fs.existsSync(screenshotsFolder)) fs.mkdirSync(screenshotsFolder, { recursive: true });
@@ -411,7 +473,7 @@ function handleScreenshotResponse(responseJson: any) {
 // and fail any pending HTTP/file requests pointing at that folder.
 function relayErrorToAgent(errorMessage: string, rawError?: any) {
 	try {
-		const workspaceRoot = vscode.workspace.rootPath || '';
+		const workspaceRoot = getWorkspaceRoot() || '';
 		if (!workspaceRoot) return;
 		const folders = fs.readdirSync(workspaceRoot, { withFileTypes: true })
 			.filter(d => d.isDirectory() && !d.name.startsWith('.'));
@@ -476,7 +538,7 @@ function setupWatcher() {
 
 	const DEBOUNCE_DELAY = debounceSeconds > 0 ? debounceSeconds * 1000 : 0;
 
-		watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.workspace.rootPath || '', "**/*"));
+		watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(getWorkspaceRoot() || '', "**/*"));
 
 		watcher.onDidChange(uri => {
 			const runId = buildRunId();
@@ -504,7 +566,7 @@ function setupWatcher() {
 
 			// Only queue files in instance folders (folders containing _settings.json)
 			// Path structure: workspace/instance/table/file.js (minimum 3 levels)
-			const relativePath = uri.fsPath.replace(vscode.workspace.rootPath || '', '');
+			const relativePath = uri.fsPath.replace(getWorkspaceRoot() || '', '');
 			const pathParts = relativePath.split(path.sep).filter(p => p);
 			
 			// Must be at least: instance/table/file (3 parts minimum)
@@ -514,7 +576,7 @@ function setupWatcher() {
 				return; // Not in a table folder
 			}
 			
-			const instanceFolder = path.join(vscode.workspace.rootPath || '', pathParts[0]);
+			const instanceFolder = path.join(getWorkspaceRoot() || '', pathParts[0]);
 			if (!isValidInstanceRoot(instanceFolder)) {
 				auditLog('watcher_event_ignored', { reason: 'invalid_instance_root', filePath: uri.fsPath, instanceFolder }, runId);
 				return; // Not a synced instance folder
@@ -591,6 +653,11 @@ vscode.workspace.onDidSaveTextDocument(document => {
 
 export function activate(context: vscode.ExtensionContext) {
 
+	extensionContext = context;
+	// Re-hydrate the remembered multi-root sync folder so resolution is stable
+	// from the first call (before any picker prompt).
+	setRememberedWorkspaceRoot(context.workspaceState.get<string>(CHOSEN_FOLDER_KEY));
+
 	// Wire the agent module's host shims. This must happen before any
 	// command handler runs so getRuntime()/getSyncState() don't throw.
 	setAgentRuntime({
@@ -643,13 +710,23 @@ export function activate(context: vscode.ExtensionContext) {
 			if (e.affectsConfiguration('sn-scriptsync.showContextMenu')) {
 				updateContextMenuVisibility();
 			}
+			// The configured sync-dir name feeds the multi-root folder resolver.
+			if (e.affectsConfiguration('sn-scriptsync.path')) {
+				resetWorkspaceRoot();
+			}
 		})
 	);
 
-	if (typeof workspace.rootPath == 'undefined') {
+	// Re-resolve the sync folder when folders are added/removed/reordered.
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeWorkspaceFolders(() => resetWorkspaceRoot())
+	);
+
+	const resolvedRoot = getWorkspaceRoot();
+	if (!resolvedRoot) {
 		//
 	}
-	else if (vscode.workspace.rootPath.endsWith(syncDir)) {
+	else if (resolvedRoot.endsWith(syncDir)) {
 		startServers();
 	}
 	setupWatcher();
@@ -660,6 +737,21 @@ export function activate(context: vscode.ExtensionContext) {
 
 	vscode.commands.registerCommand('extension.snScriptSyncEnable', () => {
 		startServers();
+	});
+
+	vscode.commands.registerCommand('extension.snScriptSyncSelectFolder', async () => {
+		if (!isMultiRootWorkspace()) {
+			vscode.window.showInformationMessage('ScriptSync: folder selection only applies to multi-root workspaces.');
+			return;
+		}
+		const wasRunning = serverRunning;
+		const picked = await pickSyncFolder();
+		if (!picked) return;
+		// Re-target a running server at the newly chosen folder.
+		if (wasRunning) {
+			stopServers();
+			startServers();
+		}
 	});
 
 	vscode.commands.registerCommand('extension.bgScriptGlobal', (context) => {
@@ -1178,7 +1270,7 @@ function setScopeTree(showWarning = false) {
 	} 
 
 
-	let basePath = workspace.rootPath + nodePath.sep + scriptObj.instance.name + nodePath.sep;
+	let basePath = getWorkspaceRoot() + nodePath.sep + scriptObj.instance.name + nodePath.sep;
 	let scopePath = basePath + scriptObj.scopeName + nodePath.sep ;
 
 	let scopeTree  = eu.getFileAsJson(path.join(scopePath + "scope.json"));
@@ -1224,20 +1316,30 @@ function markFileAsDirty(file: TextDocument): void {
 	});
 }
 
-function startServers() {
+async function startServers() {
 
-	if (typeof workspace.rootPath == 'undefined') {
+	if (!getWorkspaceRoot()) {
 		vscode.window.showWarningMessage("Please open a folder, before running ScriptSync");
 		return;
 	}
 
+	// In an ambiguous multi-root workspace, confirm the target folder once.
+	await ensureSyncFolderChosen();
+
+	const syncRoot = getWorkspaceRoot();
+	if (!syncRoot) {
+		vscode.window.showWarningMessage("Please open a folder, before running ScriptSync");
+		return;
+	}
+	debugLog(`ScriptSync sync folder: ${syncRoot}`);
+
 
 	let sourceDir = path.join(__filename, '..', '..', 'autocomplete') + nodePath.sep;
-	let targetDir = path.join(workspace.rootPath, 'autocomplete') + nodePath.sep;
+	let targetDir = path.join(getWorkspaceRoot() || '', 'autocomplete') + nodePath.sep;
 	eu.copyFile(sourceDir + 'client.d.ts.txt', targetDir + 'client.d.ts', function () { });
 	eu.copyFile(sourceDir + 'server.d.ts.txt', targetDir + 'server.d.ts', function () { });
 	eu.copyFile(sourceDir + 'GlideQuery.js.txt', targetDir + 'GlideQuery.js', function () { });
-	targetDir = path.join(workspace.rootPath, '') + nodePath.sep;
+	targetDir = path.join(getWorkspaceRoot() || '', '') + nodePath.sep;
 	eu.copyFileIfNotExists(sourceDir + 'jsconfig.json.txt', targetDir + 'jsconfig.json', function () { });
 
 	// Refresh AI agent instructions. `agentinstructions.md` is the extension's
@@ -1276,10 +1378,10 @@ function startServers() {
 		// instruction file at all — avoids creating a stray duplicate next to a
 		// file they already renamed.
 		const anyInstructionFileExists = instructionTargets.some(
-			rel => fs.existsSync(path.join(workspace.rootPath, rel))
+			rel => fs.existsSync(path.join(getWorkspaceRoot() || '', rel))
 		);
 		instructionTargets.forEach(rel => {
-			const dest = path.join(workspace.rootPath, rel);
+			const dest = path.join(getWorkspaceRoot() || '', rel);
 			const exists = fs.existsSync(dest);
 			const isOwnFile = rel === OWN_INSTRUCTION_FILE;
 			if (!exists && !(isOwnFile && !anyInstructionFileExists)) {
@@ -1299,7 +1401,7 @@ function startServers() {
 	} else {
 		// Opted out of touching the user's own tool files: still keep our own
 		// agentinstructions.md present and current so it stays referenceable.
-		const ownDest = path.join(workspace.rootPath, OWN_INSTRUCTION_FILE);
+		const ownDest = path.join(getWorkspaceRoot() || '', OWN_INSTRUCTION_FILE);
 		eu.upsertManagedBlock(instructionsSource, ownDest, (err: any, status?: string) => {
 			if (err) {
 				debugLog(`instructions refresh error (${OWN_INSTRUCTION_FILE}): ${err?.message || err}`);
@@ -1316,7 +1418,7 @@ function startServers() {
 	// removed), while leaving user-authored files untouched. Always runs so the
 	// skills stay available on demand even when tool-file injection is opted out.
 	const skillsSourceDir = agentRulesSourceDir + 'skills';
-	const skillsDestDir = path.join(workspace.rootPath, 'agentrules', 'skills');
+	const skillsDestDir = path.join(getWorkspaceRoot() || '', 'agentrules', 'skills');
 	eu.syncManagedSkills(skillsSourceDir, skillsDestDir, (err: any, res?: { copied: number; removed: number }) => {
 		if (err) {
 			debugLog(`agent skills sync error: ${err?.message || err}`);
@@ -1723,7 +1825,7 @@ function stopServers() {
 
 function requestInstanceScope(instance, scopeId) {
 
-	var filePath = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep;
+	var filePath = getWorkspaceRoot() + nodePath.sep + instance.name + nodePath.sep;
 
 	let requestJson = <any>{};
 	requestJson.action = 'requestRecords';
@@ -1758,7 +1860,7 @@ function requestScopeArtifacts(includeEmpty = false, scriptObj = null, showWarni
 
 	if (scriptObj === true) return; //not a valid file 
 
-	var basePath = workspace.rootPath + nodePath.sep + scriptObj.instance.name + nodePath.sep;
+	var basePath = getWorkspaceRoot() + nodePath.sep + scriptObj.instance.name + nodePath.sep;
 	var scopePath = basePath + scriptObj.scopeName + nodePath.sep ;
 
 	//first request fields
@@ -1790,7 +1892,7 @@ function requestInstanceMetaData(showWarning = false) {
 		return; //not a valid file
 	} 
 
-	var filePath = workspace.rootPath + nodePath.sep + scriptObj.instance.name + nodePath.sep;
+	var filePath = getWorkspaceRoot() + nodePath.sep + scriptObj.instance.name + nodePath.sep;
 
 	//first request tablemnames
 	let requestJson = <any>{};
@@ -1831,7 +1933,7 @@ function writeInstanceMetaData(messageJson) {
 
 function writeInstanceMetaDataScope(messageJson){
 
-	let basePath = workspace.rootPath + nodePath.sep + messageJson.instance.name + nodePath.sep;
+	let basePath = getWorkspaceRoot() + nodePath.sep + messageJson.instance.name + nodePath.sep;
 	let scopes = eu.getFileAsJson(basePath + 'scopes.json');
 	let scope = scopes[messageJson.scopeName];
 
@@ -2137,7 +2239,7 @@ function writeInstanceScope(messageJson) {
 
 function saveWidget(postedJson, retry = 0) {
 	//lastsend = 0;
-	let basePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep;
+	let basePath = getWorkspaceRoot() + nodePath.sep + postedJson.instance.name + nodePath.sep;
 	let scope:string;
 	if (postedJson.widget.sys_scope.value == 'global') 
 		scope = 'global';
@@ -2261,7 +2363,7 @@ function linkAppToVSCode(postedJson) {
 	req.instance = postedJson.instance;
 
 
-	let scopesPath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep + "scopes.json";
+	let scopesPath = getWorkspaceRoot() + nodePath.sep + postedJson.instance.name + nodePath.sep + "scopes.json";
 	let scopes = eu.getFileAsJson(scopesPath);
 	if (!(scopes[req.scopeName] && scopes[req.scopeName] == req.scope)){
 		scopes[req.scopeName] = req.scope;
@@ -2491,7 +2593,7 @@ function handleResolveScopeForSave(responseJson: any) {
 		// persist name->sys_id in scopes.json for other features (scope tree etc).
 		payload.resolvedScopeName = scopeName;
 		try {
-			const scopesPath = workspace.rootPath + nodePath.sep + payload.instance.name + nodePath.sep + 'scopes.json';
+			const scopesPath = getWorkspaceRoot() + nodePath.sep + payload.instance.name + nodePath.sep + 'scopes.json';
 			const scopes = eu.getFileAsJson(scopesPath);
 			if (scopeSysId && scopes[scopeName] !== scopeSysId) {
 				scopes[scopeName] = scopeSysId;
@@ -2509,7 +2611,7 @@ function handleResolveScopeForSave(responseJson: any) {
 function saveFieldAsFile(postedJson, retry = 0) {
 
 	
-	let basePath = workspace.rootPath + nodePath.sep + postedJson.instance.name + nodePath.sep;
+	let basePath = getWorkspaceRoot() + nodePath.sep + postedJson.instance.name + nodePath.sep;
 	
 	let scope:string;
 	if (postedJson.resolvedScopeName) // #143: scope resolved via an instance query below
@@ -2650,7 +2752,7 @@ vscode.commands.registerCommand('openFile', (meta) => {
 	let separtorCharacter = (isFolderRecordTable) ? nodePath.sep : ".";
 	let cleanName = meta.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-').replace(/\s\s+/g, '_');
 
-	let fileName = workspace.rootPath + nodePath.sep + meta.instance.name + nodePath.sep + meta.scope.name + nodePath.sep +
+	let fileName = getWorkspaceRoot() + nodePath.sep + meta.instance.name + nodePath.sep + meta.scope.name + nodePath.sep +
 		meta.tableName + nodePath.sep + cleanName + separtorCharacter + meta.fieldName + meta.extension;
 
 	if (fs.existsSync(fileName)) {
@@ -2748,7 +2850,7 @@ function handleTableStructureResponse(responseJson: any) {
 	const tableName = responseJson.tableName;
 	const content = JSON.stringify(responseJson.result, null, 4);
 	
-	const basePath = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep;
+	const basePath = getWorkspaceRoot() + nodePath.sep + instanceName + nodePath.sep;
 	
 	// Quick heuristic: Check if we can find the folder. 
 	// Since we don't have the scope here readily available without passing it through, 
@@ -2858,7 +2960,7 @@ function proceedWithArtifactCreation(scriptObj: any) {
 		return;
 	}
 
-	const basePath = workspace.rootPath + nodePath.sep + scriptObj.instance.name + nodePath.sep;
+	const basePath = getWorkspaceRoot() + nodePath.sep + scriptObj.instance.name + nodePath.sep;
 	const tablePath = path.join(basePath, scriptObj.scopeName, scriptObj.tableName);
 
     // 1:1 Mapping: Pass the fields exactly as they should appear on the record.
@@ -3102,7 +3204,7 @@ async function takeScreenshot(url?: string) {
 	const fileName = `screenshot_${timestamp}.png`;
 
 	// Get workspace path for saving
-	const workspacePath = workspace.rootPath;
+	const workspacePath = getWorkspaceRoot();
 	if (!workspacePath) {
 		vscode.window.showErrorMessage("No workspace folder open. Please open a folder first.");
 		return;

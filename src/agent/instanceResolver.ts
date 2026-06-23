@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
+import { getWorkspaceRoot } from '../workspaceRoot';
 import { AgentError } from './errors';
 
 const NON_INSTANCE_FOLDERS = new Set([
@@ -15,7 +15,7 @@ function hasSettings(folder: string): boolean {
 
 /** Return every child folder of the workspace root that looks like an instance. */
 export function listInstanceFolders(): string[] {
-	const root = vscode.workspace.rootPath || '';
+	const root = getWorkspaceRoot() || '';
 	if (!root || !fs.existsSync(root)) return [];
 	let entries: fs.Dirent[];
 	try {
@@ -41,7 +41,7 @@ export function listInstanceFolders(): string[] {
  * connection-check style commands still have a context folder to log into.
  */
 export function resolveInstanceFolder(requestInstance: string | undefined, noInstance = false): string {
-	const root = vscode.workspace.rootPath || '';
+	const root = getWorkspaceRoot() || '';
 	if (!root) {
 		throw new AgentError('E_INSTANCE_REQUIRED', 'No workspace folder open');
 	}

@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.6.0",
+	"version": "4.6.2",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -116,6 +116,10 @@
 			{
 				"command": "extension.snScriptSyncWelcome",
 				"title": "sn-scriptsync: Show Welcome / What's New"
+			},
+			{
+				"command": "extension.snScriptSyncSelectFolder",
+				"title": "sn-scriptsync: Select Sync Folder (multi-root)"
 			}
 		],
 		"keybindings": [

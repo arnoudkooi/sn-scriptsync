@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
+import { getWorkspaceRoot } from '../../workspaceRoot';
 import { CommandHandler, AgentContext } from '../types';
 import { AgentError, inferCodeFromMessage } from '../errors';
 import { mustGetInstanceSettings, readBackRecord, restRequest, getSetting } from './_shared';
@@ -492,7 +492,7 @@ const upload_attachment: CommandHandler = {
 			const resolvedPath = path.isAbsolute(filePath)
 				? path.resolve(filePath)
 				: path.resolve(ctx.instanceFolder, filePath);
-			if (!resolvedPath.startsWith(vscode.workspace.rootPath || '')) {
+			if (!resolvedPath.startsWith(getWorkspaceRoot() || '')) {
 				throw new AgentError('E_SECURITY', 'Security: File path outside workspace not allowed');
 			}
 			if (!fs.existsSync(resolvedPath)) {

@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
+import { getWorkspaceRoot } from '../workspaceRoot';
 import { AgentPortFile } from './types';
 
 // v2 -> v3: added get_record, delete_record, create_application, add_column,
@@ -14,7 +14,7 @@ import { AgentPortFile } from './types';
 export const AGENT_API_VERSION = 6;
 
 function portFilePath(): string | undefined {
-	const root = vscode.workspace.rootPath;
+	const root = getWorkspaceRoot();
 	if (!root) return undefined;
 	return path.join(root, '.vscode', 'sn-agent-port.json');
 }

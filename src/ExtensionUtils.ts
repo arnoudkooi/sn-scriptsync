@@ -4,6 +4,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { open } from 'fs';
 import { Constants } from "./constants";
+import { getWorkspaceRoot } from "./workspaceRoot";
 
 let idx = 0;
 
@@ -385,7 +386,7 @@ export class ExtensionUtils {
 
 
     writeInstanceSettings(instance) {
-        var path = workspace.rootPath + nodePath.sep + instance.name + nodePath.sep + "_settings.json";
+        var path = getWorkspaceRoot() + nodePath.sep + instance.name + nodePath.sep + "_settings.json";
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
         });
@@ -397,8 +398,8 @@ export class ExtensionUtils {
             return instanceSettings[instanceName];
         }
         else {
-            const newPath = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep + "_settings.json";
-            const oldPath = workspace.rootPath + nodePath.sep + instanceName + nodePath.sep + "settings.json";
+            const newPath = getWorkspaceRoot() + nodePath.sep + instanceName + nodePath.sep + "_settings.json";
+            const oldPath = getWorkspaceRoot() + nodePath.sep + instanceName + nodePath.sep + "settings.json";
             
             // Check new path first, fall back to old path for backwards compatibility
             if (fs.existsSync(newPath)) {
@@ -461,9 +462,9 @@ export class ExtensionUtils {
             return true;
         }
 
-        var fileNameUse = fileName.replace(workspace.rootPath, "");
+        var fileNameUse = fileName.replace(getWorkspaceRoot(), "");
         var fileNameArr = fileNameUse.split(/\\|\/|\.|\^/).slice(1);//
-        var basePath = workspace.rootPath + nodePath.sep + fileNameArr[0]+ nodePath.sep;
+        var basePath = getWorkspaceRoot() + nodePath.sep + fileNameArr[0]+ nodePath.sep;
         let fullPath = basePath + fileNameArr[1]+ nodePath.sep + fileNameArr[2]+ nodePath.sep
 
         if (fileNameArr[5] === "ts") {

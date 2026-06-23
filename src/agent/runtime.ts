@@ -5,7 +5,7 @@
 
 import { AgentContext, AgentRequest } from './types';
 import * as pendingRegistry from './pendingRegistry';
-import * as vscode from 'vscode';
+import { getWorkspaceRoot } from '../workspaceRoot';
 
 export interface Runtime {
 	sendToBrowser(payload: any): void;
@@ -35,7 +35,7 @@ export function buildContext(request: AgentRequest, instanceFolder: string): Age
 	return {
 		request,
 		instanceFolder,
-		workspaceRoot: vscode.workspace.rootPath || '',
+		workspaceRoot: getWorkspaceRoot() || '',
 		sendToBrowser: (payload) => r.sendToBrowser(payload),
 		hasBrowserClient: () => r.hasBrowserClient(),
 		isServerRunning: () => r.isServerRunning(),
