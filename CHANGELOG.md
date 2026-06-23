@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.6.3 (2026-06-23)
+
+**Don't mistake a regular repo for the ScriptSync folder in multi-root workspaces:** Folder auto-detection now recognises a sync folder by an actual synced instance (a subfolder with `_settings.json`), not by the presence of `autocomplete/server.d.ts` — so a project that merely tracks that file is no longer picked over your real (empty/dedicated) sync folder.
+
 ## 4.6.2 (2026-06-23)
 
 **Picks the right folder in a multi-root workspace:** ScriptSync no longer always syncs into the first workspace folder. It now targets the folder that's already a ScriptSync folder, matches your configured sync path, or is empty/dedicated — and when more than one folder qualifies it prompts you once to pick and remembers your choice (run `sn-scriptsync: Select Sync Folder (multi-root)` to change it). Single-folder and unambiguous workspaces are never prompted and behave as before.

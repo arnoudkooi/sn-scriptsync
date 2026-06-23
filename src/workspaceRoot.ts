@@ -14,8 +14,10 @@ import * as vscode from 'vscode';
 //   0. A remembered user choice (the folder picker stores its fsPath in
 //      workspace state and pushes it here) — always wins when it still matches
 //      an open folder.
-//   1. A folder that is already a ScriptSync sync folder
-//      (contains `autocomplete/server.d.ts`, which startServers() creates).
+//   1. A folder that is already a ScriptSync sync folder (contains a synced
+//      instance folder — a child dir with `_settings.json`). NOTE: we do NOT
+//      key off `autocomplete/server.d.ts`; a regular repo can legitimately
+//      track that file and would be misdetected as a sync folder.
 //   2. A folder whose name ends with the configured `sn-scriptsync.path`
 //      value (the documented auto-activation convention, default "scriptsync").
 //   3. The first empty folder (a fresh, dedicated sync folder).
@@ -49,8 +51,23 @@ function getConfiguredSyncDirName(): string {
 	return syncDir;
 }
 
+// A real ScriptSync sync folder has at least one synced instance: an immediate
+// child directory containing `_settings.json` (or the legacy `settings.json`).
+// This is the definitive signature — far more reliable than the autocomplete
+// scaffolding, which any project may happen to contain.
 function isScriptSyncFolder(folder: string): boolean {
-	return fs.existsSync(path.join(folder, 'autocomplete', 'server.d.ts'));
+	let entries: fs.Dirent[];
+	try {
+		entries = fs.readdirSync(folder, { withFileTypes: true });
+	} catch {
+		return false;
+	}
+	return entries.some((d) => {
+		if (!d.isDirectory() || d.name.startsWith('.')) return false;
+		const child = path.join(folder, d.name);
+		return fs.existsSync(path.join(child, '_settings.json'))
+			|| fs.existsSync(path.join(child, 'settings.json'));
+	});
 }
 
 function isEmptyFolder(folder: string): boolean {
