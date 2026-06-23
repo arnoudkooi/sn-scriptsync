@@ -8,6 +8,7 @@ export class InfoTreeViewProvider implements vscode.TreeDataProvider<TreeItem> {
   constructor() {
     this.data = [
       new TreeItem('Actions',{},[
+        new TreeItem('Welcome / What\'s New', { action : 'showWelcome'}),
         new TreeItem('Load / Refresh Tree', { action : 'refreshTree'}),
         new TreeItem('Load Scope', { action : 'loadScope'}),
         new TreeItem('Open in Instance', { action : 'openInInstance'}),

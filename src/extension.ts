@@ -700,6 +700,11 @@ export function activate(context: vscode.ExtensionContext) {
 		takeScreenshot();
 	});
 
+	vscode.commands.registerCommand('extension.snScriptSyncWelcome', () => {
+		const version: string = context.extension?.packageJSON?.version || '';
+		showWelcomePanel(context, version, false);
+	});
+
 
 
 
@@ -821,6 +826,9 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 });
 
+	// First run / after an update: open the welcome + settings tab once per version.
+	maybeShowWelcomePanel(context);
+
 }
 
 export function deactivate() {
@@ -830,6 +838,243 @@ export function deactivate() {
 		try { agentFileHandle.dispose(); } catch { /* ignore */ }
 		agentFileHandle = undefined;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Welcome / what's-new tab (first install + after each version update)
+// ---------------------------------------------------------------------------
+
+// Settings surfaced as inline toggles in the welcome tab. Labels/descriptions
+// mirror package.json so the tab is a one-stop place to review them on first run.
+const WELCOME_SETTINGS: { key: string; label: string; description: string; default: boolean }[] = [
+	{
+		key: 'agentInstructions.autoUpdate',
+		label: 'Keep my agent instruction files updated',
+		description: 'Add and refresh the managed sn-scriptsync reference block inside your own CLAUDE.md / AGENTS.md / .cursorrules / etc. Turn this off to leave those files untouched — agentinstructions.md and the skills folder are kept current either way.',
+		default: true,
+	},
+	{
+		key: 'createArtifacts.enabled',
+		label: 'Agent API: create records',
+		description: 'Allow creating new records in ServiceNow from files and the Agent API.',
+		default: true,
+	},
+	{
+		key: 'restRequest.enabled',
+		label: 'Agent API: write via rest_request',
+		description: 'Allow the generic rest_request passthrough to perform write methods (POST/PUT/PATCH). GET is always allowed; DELETE additionally requires Delete records.',
+		default: false,
+	},
+	{
+		key: 'deleteRecords.enabled',
+		label: 'Agent API: delete records',
+		description: 'Allow the Agent API to delete records (delete_record, and DELETE via rest_request).',
+		default: false,
+	},
+	{
+		key: 'backgroundScripts.enabled',
+		label: 'Agent API: run background scripts',
+		description: 'Allow the Agent API to run server-side background scripts as the connected user. This executes arbitrary code on the instance.',
+		default: false,
+	},
+	{
+		key: 'browserDebugger.enabled',
+		label: 'Agent API: browser debugger (beta)',
+		description: 'Allow the Agent API to drive the connected ServiceNow tab through the Chrome DevTools Protocol (network/console capture, screenshots, dialogs). Needs SN Utils Pro and the Debug edition browser build.',
+		default: false,
+	},
+	{
+		key: 'agentApi.fileFallback',
+		label: 'Legacy file-based Agent API',
+		description: 'Keep the legacy file-based Agent API (agent/requests/*.json) active alongside the HTTP Agent API. Disable once all your agents use the HTTP endpoint.',
+		default: true,
+	},
+];
+
+function maybeShowWelcomePanel(context: vscode.ExtensionContext) {
+	try {
+		const currentVersion: string = context.extension?.packageJSON?.version || '';
+		if (!currentVersion) return;
+		const lastVersion = context.globalState.get<string>('snScriptSyncWelcomeVersion');
+		if (lastVersion === currentVersion) return; // already shown for this version
+		showWelcomePanel(context, currentVersion, !lastVersion);
+		context.globalState.update('snScriptSyncWelcomeVersion', currentVersion);
+	} catch (e) {
+		debugLog(`welcome panel error: ${e}`);
+	}
+}
+
+function showWelcomePanel(context: vscode.ExtensionContext, version: string, isFirstRun: boolean) {
+	const panel = vscode.window.createWebviewPanel(
+		'snScriptSyncWelcome',
+		'Welcome to sn-scriptsync',
+		vscode.ViewColumn.One,
+		{ enableScripts: true, retainContextWhenHidden: true }
+	);
+
+	const config = vscode.workspace.getConfiguration('sn-scriptsync');
+	const settings = WELCOME_SETTINGS.map(s => ({ ...s, value: config.get<boolean>(s.key, s.default) }));
+	const highlights = getChangelogHighlightsHtml(context);
+
+	panel.webview.html = getWelcomeHtml(version, isFirstRun, settings, highlights);
+
+	panel.webview.onDidReceiveMessage((msg: any) => {
+		if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
+			vscode.workspace.getConfiguration('sn-scriptsync')
+				.update(msg.key, !!msg.value, vscode.ConfigurationTarget.Global)
+				.then(
+					() => debugLog(`welcome: set sn-scriptsync.${msg.key} = ${!!msg.value}`),
+					(err: any) => debugLog(`welcome: failed to set ${msg.key}: ${err?.message || err}`)
+				);
+		} else if (msg?.type === 'openSettings') {
+			vscode.commands.executeCommand('workbench.action.openSettings', 'sn-scriptsync');
+		}
+	}, undefined, context.subscriptions);
+}
+
+function getChangelogHighlightsHtml(context: vscode.ExtensionContext): string {
+	try {
+		const file = path.join(context.extensionPath, 'CHANGELOG.md');
+		const md = fs.readFileSync(file, 'utf8');
+		const lines = md.split(/\r?\n/);
+		const start = lines.findIndex(l => l.startsWith('## '));
+		if (start === -1) return '';
+		let end = lines.findIndex((l, i) => i > start && l.startsWith('## '));
+		if (end === -1) end = lines.length;
+		return markdownToHtml(lines.slice(start, end).join('\n'));
+	} catch (e) {
+		debugLog(`welcome changelog read error: ${e}`);
+		return '';
+	}
+}
+
+// Minimal, safe Markdown -> HTML for the curated changelog block. Escapes HTML
+// first, then re-applies a small allow-list (headings, bold, inline code, links,
+// lists). Not a general Markdown engine — just enough for our changelog style.
+function markdownToHtml(md: string): string {
+	const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	const inline = (s: string) => esc(s)
+		.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+		.replace(/`([^`]+?)`/g, '<code>$1</code>')
+		.replace(/\[([^\]]+?)\]\((https?:\/\/[^)\s]+?)\)/g, '<a href="$2">$1</a>');
+	const out: string[] = [];
+	let inList = false;
+	const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+	for (const raw of md.split(/\r?\n/)) {
+		const line = raw.trim();
+		if (line.startsWith('## ')) { closeList(); out.push(`<h2>${inline(line.slice(3))}</h2>`); continue; }
+		if (line.startsWith('### ')) { closeList(); out.push(`<h3>${inline(line.slice(4))}</h3>`); continue; }
+		if (/^[-*] /.test(line)) {
+			if (!inList) { out.push('<ul>'); inList = true; }
+			out.push(`<li>${inline(line.replace(/^[-*] /, ''))}</li>`);
+			continue;
+		}
+		closeList();
+		if (line === '') continue;
+		out.push(`<p>${inline(line)}</p>`);
+	}
+	closeList();
+	return out.join('\n');
+}
+
+function getWelcomeNonce(): string {
+	let text = '';
+	const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+	for (let i = 0; i < 32; i++) text += chars.charAt(Math.floor(Math.random() * chars.length));
+	return text;
+}
+
+function getWelcomeHtml(
+	version: string,
+	isFirstRun: boolean,
+	settings: { key: string; label: string; description: string; value: boolean }[],
+	highlightsHtml: string
+): string {
+	const nonce = getWelcomeNonce();
+	const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	const intro = isFirstRun
+		? 'Thanks for installing sn-scriptsync. Here are the key settings — you can change any of these later in Settings.'
+		: `Updated to v${esc(version)}. Here's what's new, plus the settings you may want to review.`;
+
+	const toggles = settings.map(s => `
+		<label class="setting">
+			<input type="checkbox" data-key="${esc(s.key)}" ${s.value ? 'checked' : ''} />
+			<span class="setting-text">
+				<span class="setting-label">${esc(s.label)}</span>
+				<span class="setting-desc">${esc(s.description)}</span>
+				<span class="setting-key">sn-scriptsync.${esc(s.key)}</span>
+			</span>
+		</label>`).join('\n');
+
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Welcome to sn-scriptsync</title>
+<style>
+	body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 24px 28px; line-height: 1.5; }
+	.wrap { max-width: 760px; margin: 0 auto; }
+	h1 { font-size: 1.5rem; margin: 0 0 4px; }
+	.version { color: var(--vscode-descriptionForeground); font-size: 0.85rem; }
+	.intro { margin: 12px 0 12px; color: var(--vscode-descriptionForeground); }
+	.note { margin: 0 0 24px; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; background: var(--vscode-editorWidget-background, rgba(127,127,127,0.08)); border-left: 3px solid var(--vscode-textLink-foreground, #4daafc); color: var(--vscode-descriptionForeground); }
+	.card { background: var(--vscode-editorWidget-background, rgba(127,127,127,0.08)); border: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.25)); border-radius: 8px; padding: 16px 18px; margin-bottom: 22px; }
+	h2 { font-size: 1.05rem; margin: 0 0 12px; }
+	.changelog h2 { font-size: 1rem; }
+	.changelog h3 { font-size: 0.92rem; margin: 14px 0 6px; }
+	.changelog p { margin: 8px 0; }
+	.changelog code { background: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.15)); padding: 1px 5px; border-radius: 4px; font-family: var(--vscode-editor-font-family, monospace); font-size: 0.85em; }
+	.changelog a { color: var(--vscode-textLink-foreground); }
+	.setting { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.18)); align-items: flex-start; }
+	.setting:first-of-type { border-top: none; }
+	.setting input { margin-top: 3px; }
+	.setting-text { display: flex; flex-direction: column; gap: 2px; }
+	.setting-label { font-weight: 600; }
+	.setting-desc { color: var(--vscode-descriptionForeground); font-size: 0.85rem; }
+	.setting-key { color: var(--vscode-descriptionForeground); font-size: 0.75rem; opacity: 0.7; font-family: var(--vscode-editor-font-family, monospace); }
+	.actions { margin-top: 12px; display: flex; align-items: center; }
+	button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
+	button:hover { background: var(--vscode-button-hoverBackground); }
+	.saved { color: var(--vscode-descriptionForeground); font-size: 0.8rem; margin-left: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+	<h1>Welcome to sn-scriptsync</h1>
+	<div class="version">v${esc(version)}</div>
+	<p class="intro">${intro}</p>
+
+	<div class="note">You're seeing this because sn-scriptsync added or changed what AI agents can do. Review the agent capabilities below so you stay in control of what an agent is allowed to do on your instance.</div>
+
+	<div class="card">
+		<h2>Settings</h2>
+		${toggles}
+		<div class="actions">
+			<button id="openSettings" type="button">Open all settings</button>
+			<span class="saved" id="saved"></span>
+		</div>
+	</div>
+
+	${highlightsHtml ? `<div class="card changelog"><h2>What's new</h2>${highlightsHtml}</div>` : ''}
+</div>
+<script nonce="${nonce}">
+	const vscode = acquireVsCodeApi();
+	document.querySelectorAll('input[type=checkbox][data-key]').forEach(function (el) {
+		el.addEventListener('change', function () {
+			vscode.postMessage({ type: 'updateSetting', key: el.getAttribute('data-key'), value: el.checked });
+			const saved = document.getElementById('saved');
+			saved.textContent = 'Saved';
+			setTimeout(function () { saved.textContent = ''; }, 1500);
+		});
+	});
+	document.getElementById('openSettings').addEventListener('click', function () {
+		vscode.postMessage({ type: 'openSettings' });
+	});
+</script>
+</body>
+</html>`;
 }
 
 
@@ -2391,6 +2636,9 @@ vscode.commands.registerCommand('infoTreeCommand', (arg) => {
 	}
 	else if (arg.action == "selectionToBG"){
 		selectionToBG(arg.global);
+	}
+	else if (arg.action == "showWelcome"){
+		vscode.commands.executeCommand('extension.snScriptSyncWelcome');
 	}
 });
 

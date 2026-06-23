@@ -2,6 +2,10 @@
 
 ## 4.6.0 (2026-06-17)
 
+**New Welcome / What's New tab:** On first install and after each update, sn-scriptsync opens a tab that summarizes what changed and surfaces the key agent-capability settings as inline toggles — instruction-file writes (`CLAUDE.md` / `AGENTS.md` / `.cursorrules`), the Agent API create / write / delete / run-scripts / browser-debugger gates, and the legacy file API — so you can review and control what AI agents are allowed to do. Reopen it anytime from the **Info** side panel ("Welcome / What's New") or the `sn-scriptsync: Show Welcome / What's New` command.
+
+**Opt out of injecting instructions into your own files (#150):** New setting `sn-scriptsync.agentInstructions.autoUpdate` (default on). Turn it off and sn-scriptsync stops adding/refreshing its managed reference block inside *your* `CLAUDE.md` / `AGENTS.md` / `.cursorrules` / etc. `agentinstructions.md` and the `agentrules/skills` folder are still kept current either way, so you can reference them on demand (e.g. `@agentinstructions.md`). The header now documents how the docs/skills stay up to date.
+
 **`get_capabilities` now reports a `gates` block:** Alongside `tier`/`proFeatures`/`cdp`, it returns which Agent API permissions are on (`createArtifacts`, `restRequest`, `deleteRecords`, `backgroundScripts`, `browserDebugger`, `fileFallback`) so an agent can preflight `E_DISABLED` from the API alone instead of discovering it mid-operation. Additive — older clients that ignore the new field are unaffected.
 
 **New Agent API command — `create_table`:** Creates a custom table (`sys_db_object`); ServiceNow auto-creates the physical table and base `sys_*` fields. Prefixes the name to `x_<scope>_<name>` for a scoped app and supports `extends`, mirroring `create_application` / `add_column` ergonomics. Gated by the existing `sn-scriptsync.createArtifacts.enabled`.
@@ -11,8 +15,6 @@
 **Docs:** Documented the table-creation recipe (`create_table` → `add_column` → seed rows with `rest_request`), recommended `curl -d @body.json` for large/multi-field payloads like widget code, blessed `rest_request` POST as the seeding path for data tables whose display field isn't `name`, and added the `activate_tab` → `capture_full_page(selector)` widget-preview verify recipe. Agent instructions bumped to v13.
 
 **Fix: stopping the server from the status bar then starting it again now works.** Clicking sn-scriptsync to stop left the helper-tab connection open, which kept port 1978 bound and made the next start silently fail; the connection is now closed on stop (and a port-in-use error is surfaced instead of failing quietly).
-
-**Opt out of injecting instructions into your own files (#150):** New setting `sn-scriptsync.agentInstructions.autoUpdate` (default on). Turn it off and sn-scriptsync stops adding/refreshing its managed reference block inside *your* `CLAUDE.md` / `AGENTS.md` / `.cursorrules` / etc. `agentinstructions.md` and the `agentrules/skills` folder are still kept current either way, so you can reference them on demand (e.g. `@agentinstructions.md`). The header now documents how the docs/skills stay up to date.
 
 **Browser debugger (CDP) is now opt-in (beta):** The Chrome DevTools Protocol commands (network/console capture, full-page screenshots, dialog handling) are off by default behind `sn-scriptsync.browserDebugger.enabled` and return `E_DISABLED` until you turn them on — so existing setups are never disrupted by an unexpected debugger attach.
 

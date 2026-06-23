@@ -112,6 +112,10 @@
 				"command": "extension.takeScreenshot",
 				"title": "sn-scriptsync: Take Screenshot of ServiceNow Page",
 				"icon": "$(device-camera)"
+			},
+			{
+				"command": "extension.snScriptSyncWelcome",
+				"title": "sn-scriptsync: Show Welcome / What's New"
 			}
 		],
 		"keybindings": [
