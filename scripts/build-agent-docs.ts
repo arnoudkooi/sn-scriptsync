@@ -111,7 +111,7 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               rules, why creation needs a background script (REST = E_ACL),
 //               the widget compile-metadata pattern, and the OOTB-widget /
 //               app-shell gotchas.
-const INSTRUCTIONS_VERSION = 15;
+const INSTRUCTIONS_VERSION = 16;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the

@@ -112,10 +112,23 @@ const sync_now: CommandHandler = {
 	name: 'sync_now',
 	noInstance: true,
 	docs: {
-		summary: 'Flush every pending file in the sync queue immediately.',
+		summary: 'Flush every pending file in the sync queue immediately. Disabled while review mode (sn-scriptsync.agentApi.reviewWrites) is on — the user approves the queue in VS Code instead.',
 	},
-	async handle() {
+	async handle(ctx) {
 		const state = getSyncState();
+		// Review mode is on: the user signs off on the queue in VS Code (per-file ✓
+		// or the Sync Now button). An agent must not be able to flush pending
+		// changes itself — otherwise editing a file directly and then calling
+		// sync_now bypasses review entirely.
+		if (ctx.reviewWritesEnabled()) {
+			return {
+				synced: false,
+				blocked: true,
+				count: state.pendingFiles.length,
+				files: state.pendingFiles.slice(),
+				message: 'Review mode is on (sn-scriptsync.agentApi.reviewWrites): pending changes are held for the user to approve in VS Code (per-file ✓ or the Sync Now button). sync_now is disabled for agents while review is on.',
+			};
+		}
 		if (state.pendingFiles.length === 0) {
 			return { synced: false, message: 'No pending files to sync', count: 0 };
 		}

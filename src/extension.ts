@@ -744,10 +744,18 @@ function enqueuePendingFile(
 	pendingFiles.add(filePath);
 	auditLog('queue_decision', { filePath, queued: true, reason }, runId);
 
+	// While review mode is on, nothing the watcher sees may auto-push: staged agent
+	// writes AND files an agent edited directly on disk must wait for the user's
+	// explicit approval in VS Code, even when auto-sync (syncDelay) is otherwise on.
+	// (The user's own in-editor saves still go through onDidSaveTextDocument.)
+	const holdForReview = reviewWritesEnabled()
+		|| agentCreateFilesByPath.has(filePath)
+		|| reviewBaselines.has(filePath);
+
 	// Monitor-only: update queue/badge but don't schedule auto sync.
-	if (debounceSeconds <= 0) {
+	if (debounceSeconds <= 0 || holdForReview) {
 		queueProvider.updateQueue(pendingFiles, 0);
-		auditLog('queue_monitor_only', { filePath, pendingCount: pendingFiles.size }, runId);
+		auditLog('queue_monitor_only', { filePath, pendingCount: pendingFiles.size, reviewHold: holdForReview }, runId);
 		return;
 	}
 
@@ -1024,11 +1032,13 @@ vscode.workspace.onDidSaveTextDocument(document => {
 	// Treat as manual save if: explicitly flagged as manual, OR onWillSaveTextDocument
 	// never fired (which means "Save without formatting" was used). #119
 	if (wasManual || !wasSeenByWillSave) {
-		// A staged agent CREATE review file: a brand-new record's config fields
-		// (collection, when, …) live in the payload, not the file, so a file-based
-		// create would drop them. Keep it queued and let Sync Now replay the full
-		// create instead of pushing on save.
-		if (agentCreateFilesByPath.has(document.fileName)) {
+		// A staged agent review file (reviewWrites is on): hold it in the queue on
+		// manual save so the change is only synced via the per-file ✓ / Sync Now —
+		// never pushed straight to the instance just because the user saved while
+		// reviewing it. Creates are tracked in agentCreateFilesByPath (and must be
+		// replayed from the original payload so non-code config fields survive);
+		// updates are tracked in reviewBaselines.
+		if (agentCreateFilesByPath.has(document.fileName) || reviewBaselines.has(document.fileName)) {
 			recentManualSaves.set(document.fileName, Date.now());
 			return;
 		}

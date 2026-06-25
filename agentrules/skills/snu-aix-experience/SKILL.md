@@ -3,7 +3,7 @@ name: snu-aix-experience
 description: Build/edit ServiceNow AI Experience (AIX) apps on the sys_aix_* tables: experiences, pages, containers, custom Lit widgets + server data scripts, left-nav menus, and record click-through. Covers routing/cache rules, why creation needs a background script (REST = E_ACL), the widget compile-metadata pattern, and the OOTB-widget/app-shell gotchas. Read this before creating or modifying anything on the sys_aix_* tables.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=15 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=16 -->
 
 # SN ScriptSync — AI Experience (AIX)
 
