@@ -107,6 +107,8 @@ The extension automatically includes `?sysparm_transaction_scope=<SCOPE_SYS_ID>`
 
 **⚠️ Large / multi-field payloads (widgets etc.):** A widget's four big code fields (`template`, `css`, `script`, `client_script`) are escaping-hell to pass inline on a shell command line (`curl -d '...'`). Don't hand-build the JSON string — write the request body to a file and send it with `curl -d @body.json` (build the file with `JSON.stringify` so newlines/quotes are encoded correctly), or use the file transport. This applies to any multiline or large field value.
 
+**Review mode:** when `sn-scriptsync.agentApi.reviewWrites` is on (default off), the record is **not** created. The request is parked in the VS Code "Pending Saves" queue and the response is `{ "staged": true, "reviewId": "...", "message": "..." }`. The user approves it with **Sync Now** (which then creates the record and updates `_map.json`) or discards it; `await` is ignored while staged. Treat a `staged: true` response as "queued for human approval", not "created" — the `sys_id` is only assigned on approval.
+
 **Errors:**
 - `E_DISABLED` — artifact creation is off (`sn-scriptsync.createArtifacts.enabled`). This setting **defaults to `true`**, so creation works out of the box; it only fails here if the user explicitly turned it off. Check `get_capabilities` → `gates.createArtifacts` to preflight.
 - `E_INVALID_PARAMS` — missing `table`, missing `fields`, or missing `fields.name`.

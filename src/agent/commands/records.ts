@@ -48,6 +48,49 @@ function pick(obj: any, keys: string[]): Record<string, any> {
 	return out;
 }
 
+/** Set by the host when replaying a staged write — skips the review gate so the
+ * approved write actually executes. */
+function isReviewBypass(params: any): boolean {
+	return params?.__review_bypass === true;
+}
+
+/** File extension for a preview language, so the review diff highlights + titles nicely. */
+function extForLanguage(lang: string): string {
+	switch (lang) {
+		case 'javascript':
+			return 'js';
+		case 'scss':
+			return 'scss';
+		case 'html':
+			return 'html';
+		case 'json':
+			return 'json';
+		default:
+			return 'txt';
+	}
+}
+
+/** Best-effort language id for a field's review preview. */
+function languageForField(field: string): string {
+	switch (field) {
+		case 'css':
+			return 'scss';
+		case 'template':
+		case 'html':
+			return 'html';
+		case 'script':
+		case 'client_script':
+		case 'server_script':
+		case 'processing_script':
+		case 'operation_script':
+		case 'link':
+		case 'calculation':
+			return 'javascript';
+		default:
+			return 'plaintext';
+	}
+}
+
 const update_record: CommandHandler = {
 	name: 'update_record',
 	requiresBrowser: true,
@@ -63,6 +106,17 @@ const update_record: CommandHandler = {
 		const { sys_id, table, field, content } = params || {};
 		if (!sys_id || !table || !field || content === undefined) {
 			throw new AgentError('E_INVALID_PARAMS', 'Missing required params: sys_id, table, field, content');
+		}
+
+		if (ctx.reviewWritesEnabled() && !isReviewBypass(params)) {
+			const lang = languageForField(field);
+			return ctx.stageWrite({
+				label: `update ${table} · ${field}`,
+				description: `${table}/${sys_id}`,
+				preview: typeof content === 'string' ? content : JSON.stringify(content, null, 2),
+				previewLanguage: lang,
+				fileName: `${field}.${extForLanguage(lang)}`,
+			});
 		}
 
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
@@ -111,6 +165,16 @@ const update_record_batch: CommandHandler = {
 		const fieldNames = Object.keys(fields);
 		if (fieldNames.length === 0) {
 			throw new AgentError('E_INVALID_PARAMS', 'Fields object cannot be empty');
+		}
+
+		if (ctx.reviewWritesEnabled() && !isReviewBypass(params)) {
+			return ctx.stageWrite({
+				label: `update ${table} · ${fieldNames.length} field${fieldNames.length !== 1 ? 's' : ''}`,
+				description: `${table}/${sys_id} (${fieldNames.join(', ')})`,
+				preview: JSON.stringify(fields, null, 2),
+				previewLanguage: 'json',
+				fileName: 'fields.json',
+			});
 		}
 
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
@@ -173,6 +237,16 @@ const create_artifact: CommandHandler = {
 			throw new AgentError('E_INVALID_PARAMS', 'Missing required param: fields (object)');
 		}
 		if (!fields.name) throw new AgentError('E_INVALID_PARAMS', 'Missing required field: name');
+
+		if (ctx.reviewWritesEnabled() && !isReviewBypass(params)) {
+			return ctx.stageWrite({
+				label: `create ${table} · ${fields.name}`,
+				description: `${table} in ${scope}`,
+				preview: JSON.stringify(fields, null, 2),
+				previewLanguage: 'json',
+				fileName: `${String(fields.name).replace(/[^a-z0-9._\-+]+/gi, '_')}.json`,
+			});
+		}
 
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
 

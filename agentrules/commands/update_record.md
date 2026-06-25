@@ -41,6 +41,8 @@ Update a single field on an existing record. Fire-and-forget (the extension send
 { "id": "upd_2", "command": "update_record", "params": { "table": "sys_script_include", "sys_id": "abc...", "field": "active", "content": "false", "await": true } }
 ```
 
+**Review mode:** when `sn-scriptsync.agentApi.reviewWrites` is on (default off), this write is **not** sent. It is parked in the VS Code "Pending Saves" queue and the response is `{ "staged": true, "reviewId": "...", "message": "..." }`. The user reviews it and approves it with **Sync Now** (or discards it); `await` is ignored while staged. Treat a `staged: true` response as "queued for human approval", not "applied".
+
 **Errors:**
 - `E_INVALID_PARAMS` - missing sys_id/table/field/content
 - `E_BROWSER_DISCONNECTED` - no helper tab available

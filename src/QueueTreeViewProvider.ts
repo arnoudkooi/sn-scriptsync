@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 
-export class QueueTreeViewProvider implements vscode.TreeDataProvider<QueueItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<QueueItem | undefined | null | void> = new vscode.EventEmitter<QueueItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<QueueItem | undefined | null | void> = this._onDidChangeTreeData.event;
+export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+    private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
+    readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     private pendingFiles: Set<string> = new Set();
     private currentDeadline: number = 0;
-    private view: vscode.TreeView<QueueItem>;
+    private view: vscode.TreeView<vscode.TreeItem>;
     private countdownInterval: NodeJS.Timeout | undefined;
     private syncNowCallback: (() => void) | undefined;
     private _isPaused: boolean = false;
@@ -20,7 +20,11 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<QueueItem>
         return this._isPaused;
     }
 
-    setView(view: vscode.TreeView<QueueItem>) {
+    private totalCount(): number {
+        return this.pendingFiles.size;
+    }
+
+    setView(view: vscode.TreeView<vscode.TreeItem>) {
         this.view = view;
     }
 
@@ -29,7 +33,7 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<QueueItem>
     }
 
     syncNow() {
-        if (this.syncNowCallback && this.pendingFiles.size > 0) {
+        if (this.syncNowCallback && this.totalCount() > 0) {
             this._isPaused = false;
             this.syncNowCallback();
         }
@@ -127,18 +131,21 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<QueueItem>
 
     private updateBadge() {
         if (this.view) {
-            const count = this.pendingFiles.size;
+            const count = this.totalCount();
+            // With no file countdown in play (monitor-only), surface a manual-sync
+            // hint instead of a timer.
+            const noCountdown = this.isMonitorOnly;
             if (count > 0) {
-                if (this._isPaused) {
+                if (this._isPaused && this.pendingFiles.size > 0) {
                     const remainingSeconds = Math.max(0, Math.ceil(this.pausedTimeRemaining / 1000));
                     this.view.badge = {
-                        tooltip: `${count} pending save${count !== 1 ? 's' : ''} - PAUSED (${remainingSeconds}s remaining)`,
+                        tooltip: `${count} pending - PAUSED (${remainingSeconds}s remaining)`,
                         value: count
                     };
                     this.view.description = `⏸ Paused (${remainingSeconds}s)`;
-                } else if (this.isMonitorOnly) {
+                } else if (noCountdown) {
                     this.view.badge = {
-                        tooltip: `${count} pending save${count !== 1 ? 's' : ''} - monitoring (manual sync)`,
+                        tooltip: `${count} pending - manual sync (Sync Now)`,
                         value: count
                     };
                     this.view.description = `Monitoring`;
@@ -157,16 +164,16 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<QueueItem>
         }
     }
 
-    getTreeItem(element: QueueItem): vscode.TreeItem {
+    getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
         return element;
     }
 
-    getChildren(element?: QueueItem): Thenable<QueueItem[]> {
+    getChildren(element?: vscode.TreeItem): Thenable<vscode.TreeItem[]> {
         if (element) {
             return Promise.resolve([]);
         }
-        
-        const items = Array.from(this.pendingFiles).map((filePath) => {
+
+        const fileItems = Array.from(this.pendingFiles).map((filePath) => {
             const fileName = path.basename(filePath);
             const relativePath = vscode.workspace.asRelativePath(filePath);
             
@@ -178,7 +185,7 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<QueueItem>
             );
         });
 
-        return Promise.resolve(items);
+        return Promise.resolve(fileItems);
     }
 
     getFilePath(item: QueueItem): string {

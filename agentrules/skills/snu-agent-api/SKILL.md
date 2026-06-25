@@ -3,7 +3,7 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=13 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=15 -->
 
 # SN ScriptSync — Agent API
 
@@ -609,6 +609,8 @@ Update a single field on an existing record. Fire-and-forget (the extension send
 { "id": "upd_2", "command": "update_record", "params": { "table": "sys_script_include", "sys_id": "abc...", "field": "active", "content": "false", "await": true } }
 ```
 
+**Review mode:** when `sn-scriptsync.agentApi.reviewWrites` is on (default off), this write is **not** sent. It is parked in the VS Code "Pending Saves" queue and the response is `{ "staged": true, "reviewId": "...", "message": "..." }`. The user reviews it and approves it with **Sync Now** (or discards it); `await` is ignored while staged. Treat a `staged: true` response as "queued for human approval", not "applied".
+
 **Errors:**
 - `E_INVALID_PARAMS` - missing sys_id/table/field/content
 - `E_BROWSER_DISCONNECTED` - no helper tab available
@@ -655,6 +657,8 @@ Update multiple fields on the same record in one round-trip. Preferred for multi
 ```
 
 **Synchronous confirmation:** add `"await": true` to write via the Table API and read the values back. The response includes `awaited: true`, `persisted`, and a `warnings[]` array for fields that came back empty. Note: `sys_scope` is read-only after insert — it is stripped from the payload and reported as a warning (use `create_application`/`create_artifact` to set scope at insert time).
+
+**Review mode:** when `sn-scriptsync.agentApi.reviewWrites` is on (default off), this write is **not** sent. It is parked in the VS Code "Pending Saves" queue and the response is `{ "staged": true, "reviewId": "...", "message": "..." }`. The user approves it with **Sync Now** (or discards it); `await` is ignored while staged.
 
 **Errors:**
 - `E_INVALID_PARAMS` - missing sys_id/table/fields, or `fields` object is empty
@@ -769,6 +773,8 @@ The extension automatically includes `?sysparm_transaction_scope=<SCOPE_SYS_ID>`
 ```
 
 **⚠️ Large / multi-field payloads (widgets etc.):** A widget's four big code fields (`template`, `css`, `script`, `client_script`) are escaping-hell to pass inline on a shell command line (`curl -d '...'`). Don't hand-build the JSON string — write the request body to a file and send it with `curl -d @body.json` (build the file with `JSON.stringify` so newlines/quotes are encoded correctly), or use the file transport. This applies to any multiline or large field value.
+
+**Review mode:** when `sn-scriptsync.agentApi.reviewWrites` is on (default off), the record is **not** created. The request is parked in the VS Code "Pending Saves" queue and the response is `{ "staged": true, "reviewId": "...", "message": "..." }`. The user approves it with **Sync Now** (which then creates the record and updates `_map.json`) or discards it; `await` is ignored while staged. Treat a `staged: true` response as "queued for human approval", not "created" — the `sys_id` is only assigned on approval.
 
 **Errors:**
 - `E_DISABLED` — artifact creation is off (`sn-scriptsync.createArtifacts.enabled`). This setting **defaults to `true`**, so creation works out of the box; it only fails here if the user explicitly turned it off. Check `get_capabilities` → `gates.createArtifacts` to preflight.

@@ -98,7 +98,20 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               usable in one call. Docs: table-creation recipe, large/multi-
 //               field payload encoding tip, and the activate_tab ->
 //               capture_full_page(selector) widget-preview verify recipe.
-const INSTRUCTIONS_VERSION = 13;
+//   v13 -> v14: review-before-sync for Agent API writes
+//               (`sn-scriptsync.agentApi.reviewWrites`, default off). When on,
+//               update_record / update_record_batch / create_artifact are NOT
+//               pushed — they return `{ staged: true, reviewId, message }` and
+//               wait in the VS Code Pending Saves queue for the user to approve
+//               with Sync Now (or discard); `await` is ignored while staged.
+//   v14 -> v15: new snu-aix-experience skill — build/edit ServiceNow AI
+//               Experience (AIX) apps on the sys_aix_* tables: experiences,
+//               pages, containers, custom Lit widgets + server data scripts,
+//               left-nav menus, and record click-through. Covers routing/cache
+//               rules, why creation needs a background script (REST = E_ACL),
+//               the widget compile-metadata pattern, and the OOTB-widget /
+//               app-shell gotchas.
+const INSTRUCTIONS_VERSION = 15;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -196,6 +209,16 @@ const SKILLS: SkillDef[] = [
 			'ServiceNow coding standards (scoped-app restrictions, server vs client APIs, best practices) and security guidance for the sn-scriptsync workflow. Read this when writing or reviewing ServiceNow script content.',
 		intro: 'Coding standards and security practices for ServiceNow script content.',
 		sections: ['40-coding-standards', '75-security'],
+		commands: [],
+	},
+	{
+		name: 'snu-aix-experience',
+		title: 'SN ScriptSync — AI Experience (AIX)',
+		description:
+			'Build/edit ServiceNow AI Experience (AIX) apps on the sys_aix_* tables: experiences, pages, containers, custom Lit widgets + server data scripts, left-nav menus, and record click-through. Covers routing/cache rules, why creation needs a background script (REST = E_ACL), the widget compile-metadata pattern, and the OOTB-widget/app-shell gotchas. Read this before creating or modifying anything on the sys_aix_* tables.',
+		intro:
+			'How to build a working AI Experience end-to-end on the sys_aix_* tables: the data model, routing/cache rules, custom Lit widgets with server data, left-nav menus, and record click-through. This is a new, lightly-documented framework — the notes below are the field-tested recipe, including the dead ends to avoid.',
+		sections: ['80-aix'],
 		commands: [],
 	},
 	{

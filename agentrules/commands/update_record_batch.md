@@ -40,6 +40,8 @@ Update multiple fields on the same record in one round-trip. Preferred for multi
 
 **Synchronous confirmation:** add `"await": true` to write via the Table API and read the values back. The response includes `awaited: true`, `persisted`, and a `warnings[]` array for fields that came back empty. Note: `sys_scope` is read-only after insert — it is stripped from the payload and reported as a warning (use `create_application`/`create_artifact` to set scope at insert time).
 
+**Review mode:** when `sn-scriptsync.agentApi.reviewWrites` is on (default off), this write is **not** sent. It is parked in the VS Code "Pending Saves" queue and the response is `{ "staged": true, "reviewId": "...", "message": "..." }`. The user approves it with **Sync Now** (or discards it); `await` is ignored while staged.
+
 **Errors:**
 - `E_INVALID_PARAMS` - missing sys_id/table/fields, or `fields` object is empty
 - `E_BROWSER_DISCONNECTED` - no helper tab available

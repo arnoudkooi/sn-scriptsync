@@ -40,6 +40,34 @@ export interface AgentContext {
 	hasBrowserClient(): boolean;
 	/** True if the WS server is up (irrespective of clients). */
 	isServerRunning(): boolean;
+	/** True when Agent API writes must be held for manual review
+	 * (sn-scriptsync.agentApi.reviewWrites). */
+	reviewWritesEnabled(): boolean;
+	/** Stage a write for manual review instead of pushing it now. Returns the
+	 * staged response a command should hand straight back to the caller. */
+	stageWrite(meta: StagedWriteMeta): StagedWriteResult;
+}
+
+/** What a command hands to ctx.stageWrite() when review-before-sync is on. */
+export interface StagedWriteMeta {
+	/** Short label for the Pending Saves entry, e.g. "update sys_script_include · script". */
+	label: string;
+	/** Secondary line, e.g. "sys_script_include/<sys_id>". */
+	description?: string;
+	/** Proposed content the user can open and review before approving. */
+	preview?: string;
+	/** Language id for the preview document (javascript, scss, html, json, ...). */
+	previewLanguage?: string;
+	/** Suggested file name for the review diff (gives the diff editor syntax
+	 * highlighting and a meaningful title), e.g. "script.js" / "fields.json". */
+	fileName?: string;
+}
+
+/** Returned to the agent in place of the write result when a write is staged. */
+export interface StagedWriteResult {
+	staged: true;
+	reviewId: string;
+	message: string;
 }
 
 export interface CommandExample {

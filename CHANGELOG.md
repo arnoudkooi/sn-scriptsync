@@ -1,6 +1,10 @@
 # CHANGELOG.md
 
-## 4.6.3 (2026-06-23)
+## 4.6.7 (2026-06-25)
+
+**Review Agent API writes before they hit the instance:** New setting `sn-scriptsync.agentApi.reviewWrites` (default **off**). When you turn it on, `update_record`, `update_record_batch` and `create_artifact` no longer push straight to ServiceNow — the proposed change is written to its real local file (`\instance\scope\table\name.field.ext`) and parked in the "Pending Saves" panel, exactly like a monitored file edit. Open it, see the diff, tweak it if you want, then push everything with **Sync Now** (or discard with ✕ / "Clear All Pending"). This closes the gap where AI agents using the HTTP/file Agent API (e.g. Windsurf/Devin) synced changes immediately with no chance to review — the existing `externalChanges.syncDelay` only governed the file-watcher path, not the Agent API. Off by default, so current setups are unchanged.
+
+**New agent skill — AI Experience (AIX):** Added an on-demand `snu-aix-experience` skill so AI agents can build and edit ServiceNow AI Experience apps on the `sys_aix_*` tables end-to-end — experiences, pages, containers, custom Lit widgets with server data scripts, left-nav menus, and record click-through. It captures the field-tested recipe and the non-obvious framework behavior: the `/aiux/<suffix>` routing and config-cache rules, why records must be created via a background script (REST returns `E_ACL`), the widget compile-metadata pattern, and the OOTB-widget / app-shell dead ends. Read on demand like the other skills. Agent instructions bumped to v15.
 
 **Don't mistake a regular repo for the ScriptSync folder in multi-root workspaces:** Folder auto-detection now recognises a sync folder by an actual synced instance (a subfolder with `_settings.json`), not by the presence of `autocomplete/server.d.ts` — so a project that merely tracks that file is no longer picked over your real (empty/dedicated) sync folder.
 

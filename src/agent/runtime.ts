@@ -3,7 +3,7 @@
 // status of the WS server. Rather than importing the whole extension.ts
 // (circular) the host wires up this shim during activate().
 
-import { AgentContext, AgentRequest } from './types';
+import { AgentContext, AgentRequest, StagedWriteMeta, StagedWriteResult } from './types';
 import * as pendingRegistry from './pendingRegistry';
 import { getWorkspaceRoot } from '../workspaceRoot';
 
@@ -12,6 +12,11 @@ export interface Runtime {
 	hasBrowserClient(): boolean;
 	isServerRunning(): boolean;
 	log(message: string): void;
+	/** True when Agent API writes should be staged for review (optional;
+	 * absent/false means writes go straight through). */
+	reviewWritesEnabled?(): boolean;
+	/** Host hook that parks a write in the Pending Saves queue. */
+	stageAgentWrite?(input: StagedWriteMeta & { request: AgentRequest; instanceFolder: string }): StagedWriteResult;
 }
 
 let runtime: Runtime | undefined;
@@ -40,6 +45,13 @@ export function buildContext(request: AgentRequest, instanceFolder: string): Age
 		hasBrowserClient: () => r.hasBrowserClient(),
 		isServerRunning: () => r.isServerRunning(),
 		log: (msg) => r.log(msg),
+		reviewWritesEnabled: () => (r.reviewWritesEnabled ? r.reviewWritesEnabled() : false),
+		stageWrite: (meta) => {
+			if (!r.stageAgentWrite) {
+				throw new Error('Review mode is on but the host did not wire stageAgentWrite().');
+			}
+			return r.stageAgentWrite({ ...meta, request, instanceFolder });
+		},
 		waitForBrowserResponse: <T = any>(correlationId: string, timeoutMs = DEFAULT_BROWSER_TIMEOUT_MS) =>
 			pendingRegistry.register<T>({
 				id: correlationId,

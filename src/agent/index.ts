@@ -9,3 +9,4 @@ export { startAgentFileTransport, logAgentRequestToFile, FileTransportHandle } f
 export * as pendingRegistry from './pendingRegistry';
 export { AgentError, AgentErrorCode, httpStatusForCode, inferCodeFromMessage } from './errors';
 export { listCommands, commandNames } from './commands';
+export type { AgentRequest } from './types';

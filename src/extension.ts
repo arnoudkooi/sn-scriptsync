@@ -25,11 +25,13 @@ import {
 	stopAgentHttpServer,
 	startAgentFileTransport,
 	logAgentRequestToFile,
+	dispatchAgentCommand,
 	pendingRegistry,
 	inferCodeFromMessage,
 	AGENT_API_VERSION,
 	HttpServerState,
 	FileTransportHandle,
+	AgentRequest,
 } from './agent';
 
 
@@ -132,6 +134,272 @@ const recentManualSaves: Map<string, number> = new Map();
 // Global debounce state
 let globalDebounceTimer: NodeJS.Timeout | undefined;
 const pendingFiles = new Set<string>();
+
+// Agent API writes staged for manual review (sn-scriptsync.agentApi.reviewWrites).
+// When the setting is on, update_record / update_record_batch / create_artifact
+// no longer push to the instance. Instead the proposed content is written to the
+// real local mirror file (<instance>/<scope>/<table>/<name>.<field>.<ext>) and
+// added to the existing Pending Saves queue (monitor-only). The user reviews/edits
+// the file(s) and approves everything with Sync Now (or discards via the ✕ /
+// "Clear All Pending"). Nothing is special about the queue item — it's a normal
+// pending file.
+//
+// Updates round-trip cleanly through the file: Sync Now -> processPendingFiles
+// reads the file back and pushes it. Creates can't (a brand-new record's non-code
+// config fields don't live in a code file), so we additionally remember the
+// original create payload and, on Sync Now, replay create_artifact with the
+// latest (possibly edited) file content merged in.
+interface StagedCreate {
+	reviewId: string;
+	label: string;
+	request: AgentRequest;
+	instanceFolder: string;
+	files: Array<{ field: string; filePath: string }>;
+}
+const agentStagedCreates = new Map<string, StagedCreate>();   // reviewId -> staged create
+const agentCreateFilesByPath = new Map<string, string>();      // filePath  -> reviewId
+let agentReviewSeq = 0;
+
+function reviewWritesEnabled(): boolean {
+	return vscode.workspace.getConfiguration('sn-scriptsync').get('agentApi.reviewWrites') === true;
+}
+
+// Field name -> ServiceNow fieldType key (drives the file extension picked by
+// saveFieldAsFile). Best-effort: the agent write payload doesn't carry the
+// dictionary type, so we infer it from the field name.
+function inferFieldType(field: string): string {
+	const f = (field || '').toLowerCase();
+	if (f === 'css') return 'css';
+	if (f === 'template' || f.endsWith('_template')) return 'template';
+	if (f.includes('html')) return 'html';
+	if (f === 'option_schema' || f === 'demo_data' || f.endsWith('schema') || f.endsWith('_data') || f.endsWith('_json')) return 'json';
+	if (f.includes('script') || f === 'link' || f === 'processor' || f.includes('expression') || f.includes('condition')) return 'script';
+	return 'string';
+}
+function isCodeField(field: string): boolean {
+	return ['script', 'template', 'html', 'css', 'json'].includes(inferFieldType(field));
+}
+function extForFieldType(fieldType: string): string {
+	return (Constants.FIELDTYPES as any)[fieldType]?.extension || '.txt';
+}
+
+// Force a freshly-materialised file into the Pending Saves queue in monitor-only
+// mode, regardless of the syncDelay/auto-sync setting (review must always hold,
+// even when auto-sync is otherwise on).
+function enqueueForReview(filePath: string) {
+	pendingFiles.add(filePath);
+	if (queueProvider) queueProvider.updateQueue(pendingFiles, 0);
+}
+
+function openForReview(filePath: string, attempt = 0) {
+	// The materialised write is async, so the file may not be on disk the instant
+	// we try to open it. Retry a few times, then give up (the queue item is still
+	// clickable to open it).
+	vscode.workspace.openTextDocument(filePath).then(
+		doc => { vscode.window.showTextDocument(doc, { preview: false }); },
+		() => { if (attempt < 5) setTimeout(() => openForReview(filePath, attempt + 1), 150); }
+	);
+}
+
+// Write the agent's proposed value for one field to its canonical local file and
+// return the path. Reuses saveFieldAsFile for all the scope/name/extension/folder
+// logic; `name`/`scopeName` come from a get_record lookup so the file lands where
+// a normal pull would. stagingOnly stops it from notifying the helper tab.
+function materializeUpdateField(instance: any, table: string, sysId: string, scopeName: string, name: string, field: string, content: any): string | undefined {
+	const posted: any = {
+		instance,
+		table,
+		sys_id: sysId,
+		field,
+		name: name || '',
+		content: typeof content === 'string' ? content : JSON.stringify(content, null, 2),
+		fieldType: inferFieldType(field),
+		resolvedScopeName: scopeName || 'global',
+		scopeResolveAttempted: true,
+		stagingOnly: true,
+	};
+	return saveFieldAsFile(posted);
+}
+
+// Materialise an update (single or batch): look up the record's display name +
+// scope once, write each field to its local file, and queue them for review.
+async function stageUpdateToFiles(reviewId: string, request: AgentRequest, instanceFolder: string, label: string) {
+	const params = request.params || {};
+	const table = params.table;
+	const sysId = params.sys_id;
+	const instance = eu.getInstanceSettings(path.basename(instanceFolder));
+	if (!instance) {
+		vscode.window.showErrorMessage(`sn-scriptsync: cannot stage "${label}" — instance settings not found.`);
+		return;
+	}
+	const fields: Record<string, any> = request.command === 'update_record_batch'
+		? (params.fields || {})
+		: { [params.field]: params.content };
+
+	// Resolve display name + scope folder in one read so the file lands at the
+	// same path a normal pull produces (and overwrites the existing file).
+	let name = '';
+	let scopeName = 'global';
+	try {
+		const resp = await dispatchAgentCommand({
+			id: `${reviewId}_meta`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+			command: 'get_record',
+			instance: path.basename(instanceFolder),
+			params: { table, sys_id: sysId, fields: 'sys_name,sys_scope.scope' },
+			timestamp: Date.now(),
+		});
+		if (resp.status === 'success') {
+			const rec = resp.result?.record || {};
+			name = rec['sys_name'] || '';
+			scopeName = rec['sys_scope.scope'] || 'global';
+		}
+	} catch (e) {
+		debugLog(`stageUpdateToFiles meta lookup failed: ${e}`);
+	}
+
+	let firstPath: string | undefined;
+	for (const [field, content] of Object.entries(fields)) {
+		const p = materializeUpdateField(instance, table, sysId, scopeName, name, field, content);
+		if (p) {
+			enqueueForReview(p);
+			if (!firstPath) firstPath = p;
+		}
+	}
+	if (firstPath) openForReview(firstPath);
+}
+
+// Materialise a create: write each code field to a local file under the target
+// scope/table, queue them, and remember the payload so Sync Now can replay the
+// full create_artifact (config fields included).
+function stageCreateToFiles(reviewId: string, request: AgentRequest, instanceFolder: string, label: string) {
+	const params = request.params || {};
+	const table = params.table;
+	const scopeName = params.scope || 'global';
+	const fields: Record<string, any> = params.fields || {};
+	const recName = String(fields.name || reviewId);
+	const cleanName = recName.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || reviewId;
+	const isFolder = Constants.FOLDERRECORDTABLES.includes(table);
+	const base = getWorkspaceRoot() + path.sep + path.basename(instanceFolder) + path.sep + scopeName + path.sep + table + path.sep;
+	const staged: StagedCreate = { reviewId, label, request, instanceFolder, files: [] };
+	let firstPath: string | undefined;
+
+	for (const [field, content] of Object.entries(fields)) {
+		if (!isCodeField(field)) continue;
+		const sep = isFolder ? path.sep : '.';
+		const filePath = base + cleanName + sep + field + extForFieldType(inferFieldType(field));
+		const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+		eu.writeFile(filePath, text, false, function () { });
+		staged.files.push({ field, filePath });
+		agentCreateFilesByPath.set(filePath, reviewId);
+		enqueueForReview(filePath);
+		if (!firstPath) firstPath = filePath;
+	}
+
+	agentStagedCreates.set(reviewId, staged);
+	if (firstPath) openForReview(firstPath);
+}
+
+// Entry point wired into the agent runtime. Kicks off materialisation and
+// immediately tells the agent the write is staged (await is ignored).
+function stageAgentWrite(input: {
+	label: string;
+	description?: string;
+	preview?: string;
+	previewLanguage?: string;
+	fileName?: string;
+	request: AgentRequest;
+	instanceFolder: string;
+}) {
+	const reviewId = `rev_${Date.now().toString(36)}_${(agentReviewSeq++).toString(36)}`;
+	auditLog('agent_write_staged', { reviewId, command: input.request.command, label: input.label });
+
+	if (input.request.command === 'create_artifact') {
+		stageCreateToFiles(reviewId, input.request, input.instanceFolder, input.label);
+	} else {
+		// update_record / update_record_batch (async meta lookup, fire-and-forget)
+		stageUpdateToFiles(reviewId, input.request, input.instanceFolder, input.label);
+	}
+
+	return {
+		staged: true as const,
+		reviewId,
+		message: `Held for review in VS Code. The proposed change has been written to its local file in the workspace and added to the "Pending Saves" panel — it has NOT reached the instance. The user reviews/edits the file and approves it with "Sync Now" (or discards it). 'await' is ignored while review mode is on.`,
+	};
+}
+
+// On Sync Now: replay any staged creates (merging the latest edited file content
+// into the original payload so config fields survive), removing their review
+// files from the queue. Remaining queued files are ordinary updates handled by
+// processPendingFiles.
+//
+// Two phases: phase 1 is synchronous — it reads the (possibly edited) files and
+// removes them from the queue *before* this function's first await, so a
+// processPendingFiles() call right after this returns won't treat create files
+// as lossy file-creates. Phase 2 awaits the actual create replays.
+function flushStagedCreates() {
+	if (agentStagedCreates.size === 0) return;
+	const creates = Array.from(agentStagedCreates.values());
+	clearStagedCreates();
+
+	// Phase 1 (sync): capture content + pull files out of the queue.
+	const replays = creates.map((c) => {
+		const params: any = { ...(c.request.params || {}) };
+		const mergedFields: Record<string, any> = { ...(params.fields || {}) };
+		for (const f of c.files) {
+			try { mergedFields[f.field] = fs.readFileSync(f.filePath, 'utf8'); } catch { /* keep original payload value */ }
+			pendingFiles.delete(f.filePath);
+			queueProvider?.removeFromQueue(f.filePath);
+		}
+		params.fields = mergedFields;
+		params.__review_bypass = true;
+		return { reviewId: c.reviewId, label: c.label, instanceFolder: c.instanceFolder, params };
+	});
+
+	// Phase 2 (async): replay the creates with their full payloads.
+	void (async () => {
+		for (const r of replays) {
+			try {
+				const resp = await dispatchAgentCommand({
+					id: r.reviewId.replace(/[^a-zA-Z0-9_-]/g, '_'),
+					command: 'create_artifact',
+					instance: path.basename(r.instanceFolder),
+					params: r.params,
+					timestamp: Date.now(),
+				});
+				if (resp.status === 'error') {
+					vscode.window.showErrorMessage(`sn-scriptsync: create failed for "${r.label}": ${resp.error}`);
+				} else {
+					debugLog(`Agent staged create synced: ${r.label}`);
+				}
+			} catch (e: any) {
+				vscode.window.showErrorMessage(`sn-scriptsync: create error for "${r.label}": ${e?.message || e}`);
+			}
+		}
+	})();
+}
+
+// Drop a staged create's bookkeeping when its review file is removed/discarded
+// (Clear All Pending or the per-file ✕), so it isn't replayed on the next sync.
+function forgetStagedCreateByFile(filePath: string) {
+	const reviewId = agentCreateFilesByPath.get(filePath);
+	if (!reviewId) return;
+	const c = agentStagedCreates.get(reviewId);
+	if (c) {
+		for (const f of c.files) {
+			agentCreateFilesByPath.delete(f.filePath);
+			if (f.filePath !== filePath) {
+				pendingFiles.delete(f.filePath);
+				queueProvider?.removeFromQueue(f.filePath);
+			}
+		}
+		agentStagedCreates.delete(reviewId);
+	}
+}
+
+function clearStagedCreates() {
+	agentStagedCreates.clear();
+	agentCreateFilesByPath.clear();
+}
 
 // Pending artifact creations (waiting for name check)
 const pendingCreations: Map<string, any> = new Map();
@@ -640,6 +908,15 @@ vscode.workspace.onDidSaveTextDocument(document => {
 	// Treat as manual save if: explicitly flagged as manual, OR onWillSaveTextDocument
 	// never fired (which means "Save without formatting" was used). #119
 	if (wasManual || !wasSeenByWillSave) {
+		// A staged agent CREATE review file: a brand-new record's config fields
+		// (collection, when, …) live in the payload, not the file, so a file-based
+		// create would drop them. Keep it queued and let Sync Now replay the full
+		// create instead of pushing on save.
+		if (agentCreateFilesByPath.has(document.fileName)) {
+			recentManualSaves.set(document.fileName, Date.now());
+			return;
+		}
+
 		pendingFiles.delete(document.fileName);
 		queueProvider?.removeFromQueue(document.fileName);
 
@@ -665,6 +942,8 @@ export function activate(context: vscode.ExtensionContext) {
 		hasBrowserClient: () => !!wss && wss.clients.size > 0,
 		isServerRunning: () => serverRunning,
 		log: (msg) => debugLog(msg),
+		reviewWritesEnabled: () => reviewWritesEnabled(),
+		stageAgentWrite: (input) => stageAgentWrite(input),
 	});
 	setSyncStateProvider(() => ({
 		pendingFiles: Array.from(pendingFiles),
@@ -944,6 +1223,12 @@ const WELCOME_SETTINGS: { key: string; label: string; description: string; defau
 		label: 'Keep my agent instruction files updated',
 		description: 'Add and refresh the managed sn-scriptsync reference block inside your own CLAUDE.md / AGENTS.md / .cursorrules / etc. Turn this off to leave those files untouched — agentinstructions.md and the skills folder are kept current either way.',
 		default: true,
+	},
+	{
+		key: 'agentApi.reviewWrites',
+		label: 'Agent API: review writes before sync',
+		description: 'Hold Agent API writes (update_record, update_record_batch, create_artifact) in the Pending Saves queue so you can review and approve each one with Sync Now, instead of pushing them to the instance immediately. Off by default.',
+		default: false,
 	},
 	{
 		key: 'createArtifacts.enabled',
@@ -1635,14 +1920,18 @@ async function startServers() {
 	});
 	queueProvider.setView(queueView);
 	
-	// Set up Sync Now callback
+	// Set up Sync Now callback. flushStagedCreates() synchronously pulls staged
+	// create files out of the queue (and captures their edited content) before
+	// processPendingFiles() runs, so creates are replayed via their full payload
+	// rather than processed as lossy file-creates.
 	queueProvider.setSyncNowCallback(() => {
+		flushStagedCreates();
 		processPendingFiles();
 	});
 
 	// Register Sync Now command
 	vscode.commands.registerCommand('extension.syncNow', () => {
-		if (pendingFiles.size > 0) {
+		if (pendingFiles.size > 0 || agentStagedCreates.size > 0) {
 			queueProvider.syncNow();
 		} else {
 			vscode.window.showInformationMessage('No pending files to sync.');
@@ -1705,6 +1994,9 @@ async function startServers() {
 	// Register Remove from Queue command
 	vscode.commands.registerCommand('extension.removeFromQueue', (item: any) => {
 		if (item && item.filePath) {
+			// If this file belongs to a staged agent create, drop the create's
+			// bookkeeping too so Sync Now won't replay it.
+			forgetStagedCreateByFile(item.filePath);
 			pendingFiles.delete(item.filePath);
 			queueProvider.removeFromQueue(item.filePath);
 			
@@ -1735,13 +2027,14 @@ async function startServers() {
 
 	// Clear all pending files from the queue (with confirmation)
 	vscode.commands.registerCommand('extension.clearQueue', async () => {
-		if (pendingFiles.size === 0) {
+		const total = pendingFiles.size;
+		if (total === 0) {
 			vscode.window.showInformationMessage('No pending files to clear.');
 			return;
 		}
 
 		const confirm = await vscode.window.showWarningMessage(
-			`Clear all ${pendingFiles.size} pending file sync${pendingFiles.size !== 1 ? 's' : ''}?`,
+			`Clear all ${total} pending sync${total !== 1 ? 's' : ''}?`,
 			{ modal: true },
 			'Clear all'
 		);
@@ -1751,6 +2044,7 @@ async function startServers() {
 		}
 
 		pendingFiles.clear();
+		clearStagedCreates();
 		queueProvider.clearQueue();
 
 		// Reset paused context + timers
@@ -1818,6 +2112,10 @@ function stopServers() {
 		try { agentFileHandle.dispose(); } catch { /* ignore */ }
 		agentFileHandle = undefined;
 	}
+	// Staged agent creates can't be replayed once the bridge is down — drop their
+	// bookkeeping. The materialised files stay on disk (and in the queue) as plain
+	// local edits the user can keep or discard.
+	clearStagedCreates();
 	scriptSyncStatusBarItem.tooltip = undefined;
 	updateScriptSyncStatusBarItem('Stopped');
 	setServerRunningContext(false);
@@ -2703,14 +3001,19 @@ function saveFieldAsFile(postedJson, retry = 0) {
 
 	let fileName = fullPath + cleanName + separtorCharacter + req.fieldName + fileExtension;
 
-	eu.writeFile(fileName, postedJson.content, true, function (err) {
+	eu.writeFile(fileName, postedJson.content, !postedJson.stagingOnly, function (err) {
 		if (err) {
+			// Staging writes surface their own errors; don't ping the helper tab.
+			if (postedJson.stagingOnly) return;
 			err.response = {};
 			err.response.result = {};
 			err.send = false;
 			broadcastToHelperTab(err);
 		}
 		else {
+			// stagingOnly: file is materialised locally for review only — do NOT
+			// notify the helper tab (nothing should touch the instance yet).
+			if (postedJson.stagingOnly) return;
 			postedJson.result = '';
 			postedJson.contentLength = postedJson.content.length;
 			postedJson.send = false;
@@ -2721,6 +3024,8 @@ function saveFieldAsFile(postedJson, retry = 0) {
 
 
 	eu.writeOrReadNameToSysIdMapping(scopeMappingFile, nameToSysId);
+
+	return fileName;
 
 }
 
