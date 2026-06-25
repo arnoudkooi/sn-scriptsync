@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.6.7",
+	"version": "4.7.0",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -93,6 +93,11 @@
 				"command": "extension.resumeQueue",
 				"title": "Resume Queue",
 				"icon": "$(play)"
+			},
+			{
+				"command": "extension.syncQueuedFile",
+				"title": "Sync This File",
+				"icon": "$(check)"
 			},
 			{
 				"command": "extension.removeFromQueue",
@@ -230,9 +235,14 @@
 			],
 			"view/item/context": [
 				{
+					"command": "extension.syncQueuedFile",
+					"when": "view == queueTreeView && viewItem == queueItem",
+					"group": "inline@1"
+				},
+				{
 					"command": "extension.removeFromQueue",
 					"when": "view == queueTreeView && viewItem == queueItem",
-					"group": "inline"
+					"group": "inline@2"
 				}
 			],
 			"commandPalette": [
@@ -266,6 +276,10 @@
 				},
 				{
 					"command": "extension.openQueuedFile",
+					"when": "false"
+				},
+				{
+					"command": "extension.syncQueuedFile",
 					"when": "false"
 				}
 			]

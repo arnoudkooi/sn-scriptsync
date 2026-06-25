@@ -158,6 +158,11 @@ interface StagedCreate {
 }
 const agentStagedCreates = new Map<string, StagedCreate>();   // reviewId -> staged create
 const agentCreateFilesByPath = new Map<string, string>();      // filePath  -> reviewId
+// Pre-stage snapshot of each materialised review file, so rejecting it can undo
+// our write rather than leaving an orphan create file on disk or an update file
+// silently diverged from the instance. { existed:false } => we created it for
+// review (delete on reject); { existed:true } => we overwrote it (restore on reject).
+const reviewBaselines = new Map<string, { existed: boolean; content: string }>();
 let agentReviewSeq = 0;
 
 function reviewWritesEnabled(): boolean {
@@ -288,6 +293,7 @@ function stageCreateToFiles(reviewId: string, request: AgentRequest, instanceFol
 		const sep = isFolder ? path.sep : '.';
 		const filePath = base + cleanName + sep + field + extForFieldType(inferFieldType(field));
 		const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+		captureReviewBaseline(filePath);
 		eu.writeFile(filePath, text, false, function () { });
 		staged.files.push({ field, filePath });
 		agentCreateFilesByPath.set(filePath, reviewId);
@@ -349,6 +355,7 @@ function flushStagedCreates() {
 			try { mergedFields[f.field] = fs.readFileSync(f.filePath, 'utf8'); } catch { /* keep original payload value */ }
 			pendingFiles.delete(f.filePath);
 			queueProvider?.removeFromQueue(f.filePath);
+			acceptReviewBaseline(f.filePath);
 		}
 		params.fields = mergedFields;
 		params.__review_bypass = true;
@@ -378,27 +385,133 @@ function flushStagedCreates() {
 	})();
 }
 
-// Drop a staged create's bookkeeping when its review file is removed/discarded
-// (Clear All Pending or the per-file ✕), so it isn't replayed on the next sync.
-function forgetStagedCreateByFile(filePath: string) {
-	const reviewId = agentCreateFilesByPath.get(filePath);
-	if (!reviewId) return;
-	const c = agentStagedCreates.get(reviewId);
-	if (c) {
-		for (const f of c.files) {
-			agentCreateFilesByPath.delete(f.filePath);
-			if (f.filePath !== filePath) {
-				pendingFiles.delete(f.filePath);
-				queueProvider?.removeFromQueue(f.filePath);
-			}
+// Snapshot a file's current on-disk state just before staging overwrites/creates
+// it, so a later reject can undo exactly what we did. First snapshot wins (a field
+// re-staged before it's accepted/rejected keeps its true pre-stage baseline).
+function captureReviewBaseline(filePath: string) {
+	if (reviewBaselines.has(filePath)) return;
+	try {
+		if (fs.existsSync(filePath)) {
+			reviewBaselines.set(filePath, { existed: true, content: fs.readFileSync(filePath, 'utf8') });
+		} else {
+			reviewBaselines.set(filePath, { existed: false, content: '' });
 		}
-		agentStagedCreates.delete(reviewId);
+	} catch {
+		reviewBaselines.set(filePath, { existed: false, content: '' });
 	}
+}
+
+// File was approved/pushed — keep it as-is, just forget the snapshot.
+function acceptReviewBaseline(filePath: string) {
+	reviewBaselines.delete(filePath);
+}
+
+// File was rejected — undo what staging wrote: restore the prior content if we
+// overwrote an existing file (update), or delete the file if we created it for
+// review (create), tidying a now-empty folder-record directory. No-op for files
+// we never staged (ordinary user-queued files are only de-queued, never deleted).
+function undoReviewFile(filePath: string) {
+	const base = reviewBaselines.get(filePath);
+	reviewBaselines.delete(filePath);
+	if (!base) return;
+	try {
+		if (base.existed) {
+			ExtensionUtils.ignoreNextSync.add(filePath);
+			fs.writeFileSync(filePath, base.content);
+		} else {
+			if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+			try {
+				const dir = nodePath.dirname(filePath);
+				if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+			} catch { /* leave non-empty dirs alone */ }
+		}
+	} catch (e) {
+		debugLog(`undoReviewFile failed for ${filePath}: ${e}`);
+	}
+}
+
+// Reject one queued file: drop it from the queue + any staged-create bookkeeping,
+// and undo the materialised file(s) on disk. A staged create discards all of its
+// sibling code files together. Ordinary (non-agent) queued files are only
+// de-queued — their on-disk content is left untouched.
+function discardReviewFile(filePath: string) {
+	const reviewId = agentCreateFilesByPath.get(filePath);
+	if (reviewId) {
+		const c = agentStagedCreates.get(reviewId);
+		agentStagedCreates.delete(reviewId);
+		const files = c ? c.files.map(f => f.filePath) : [filePath];
+		for (const fp of files) {
+			agentCreateFilesByPath.delete(fp);
+			pendingFiles.delete(fp);
+			queueProvider?.removeFromQueue(fp);
+			undoReviewFile(fp);
+		}
+		return;
+	}
+	pendingFiles.delete(filePath);
+	queueProvider?.removeFromQueue(filePath);
+	undoReviewFile(filePath);
 }
 
 function clearStagedCreates() {
 	agentStagedCreates.clear();
 	agentCreateFilesByPath.clear();
+}
+
+// Approve + push a single staged create (per-file ✓ on a create review file):
+// replay its full create_artifact payload with the latest edited file content.
+function replayStagedCreate(reviewId: string) {
+	const c = agentStagedCreates.get(reviewId);
+	if (!c) return;
+	agentStagedCreates.delete(reviewId);
+	const params: any = { ...(c.request.params || {}) };
+	const mergedFields: Record<string, any> = { ...(params.fields || {}) };
+	for (const f of c.files) {
+		try { mergedFields[f.field] = fs.readFileSync(f.filePath, 'utf8'); } catch { /* keep original payload value */ }
+		pendingFiles.delete(f.filePath);
+		queueProvider?.removeFromQueue(f.filePath);
+		agentCreateFilesByPath.delete(f.filePath);
+		acceptReviewBaseline(f.filePath);
+	}
+	params.fields = mergedFields;
+	params.__review_bypass = true;
+	void (async () => {
+		try {
+			const resp = await dispatchAgentCommand({
+				id: c.reviewId.replace(/[^a-zA-Z0-9_-]/g, '_'),
+				command: 'create_artifact',
+				instance: path.basename(c.instanceFolder),
+				params,
+				timestamp: Date.now(),
+			});
+			if (resp.status === 'error') {
+				vscode.window.showErrorMessage(`sn-scriptsync: create failed for "${c.label}": ${resp.error}`);
+			} else {
+				debugLog(`Agent staged create synced: ${c.label}`);
+			}
+		} catch (e: any) {
+			vscode.window.showErrorMessage(`sn-scriptsync: create error for "${c.label}": ${e?.message || e}`);
+		}
+	})();
+}
+
+// Approve + push one queued file (the per-file ✓ button). For an ordinary update
+// file this pushes it via the normal save path; for a staged-create review file
+// it replays the full create_artifact payload instead.
+function syncQueuedFile(filePath: string) {
+	const reviewId = agentCreateFilesByPath.get(filePath);
+	if (reviewId) {
+		replayStagedCreate(reviewId);
+		return;
+	}
+	pendingFiles.delete(filePath);
+	queueProvider?.removeFromQueue(filePath);
+	acceptReviewBaseline(filePath);
+	if (pendingFiles.size === 0 && globalDebounceTimer) {
+		clearTimeout(globalDebounceTimer);
+		globalDebounceTimer = undefined;
+	}
+	saveFieldsToServiceNow(filePath, true);
 }
 
 // Pending artifact creations (waiting for name check)
@@ -466,6 +579,9 @@ function processPendingFiles() {
 		}
 	});
 	
+	// These files were just pushed (approved) — forget their staging snapshots so
+	// a later Clear All / re-stage never tries to "undo" an already-synced file.
+	pendingFiles.forEach(file => acceptReviewBaseline(file));
 	pendingFiles.clear();
 	queueProvider?.clearQueue();
 	vscode.commands.executeCommand('setContext', 'sn-scriptsync.queuePaused', false);
@@ -1994,17 +2110,23 @@ async function startServers() {
 	// Register Remove from Queue command
 	vscode.commands.registerCommand('extension.removeFromQueue', (item: any) => {
 		if (item && item.filePath) {
-			// If this file belongs to a staged agent create, drop the create's
-			// bookkeeping too so Sync Now won't replay it.
-			forgetStagedCreateByFile(item.filePath);
-			pendingFiles.delete(item.filePath);
-			queueProvider.removeFromQueue(item.filePath);
+			// Reject: drop from the queue + staged-create bookkeeping AND undo the
+			// materialised file (delete a create we wrote; restore an update we
+			// overwrote). Ordinary user-queued files are only de-queued.
+			discardReviewFile(item.filePath);
 			
 			// If queue is now empty, clear the timer
 			if (pendingFiles.size === 0 && globalDebounceTimer) {
 				clearTimeout(globalDebounceTimer);
 				globalDebounceTimer = undefined;
 			}
+		}
+	});
+
+	// Sync (approve) a single pending file
+	vscode.commands.registerCommand('extension.syncQueuedFile', (item: any) => {
+		if (item && item.filePath) {
+			syncQueuedFile(item.filePath);
 		}
 	});
 
@@ -2043,6 +2165,10 @@ async function startServers() {
 			return;
 		}
 
+		// Reject everything: undo each staged file on disk (delete creates, restore
+		// overwritten updates) before emptying the queue. Non-agent files are left
+		// on disk untouched.
+		for (const fp of Array.from(pendingFiles)) undoReviewFile(fp);
 		pendingFiles.clear();
 		clearStagedCreates();
 		queueProvider.clearQueue();
@@ -3000,6 +3126,10 @@ function saveFieldAsFile(postedJson, retry = 0) {
 		fileExtension = ".ps1";
 
 	let fileName = fullPath + cleanName + separtorCharacter + req.fieldName + fileExtension;
+
+	// Snapshot the existing file before a staging write overwrites it, so a reject
+	// can restore it (or delete it if it didn't exist yet).
+	if (postedJson.stagingOnly) captureReviewBaseline(fileName);
 
 	eu.writeFile(fileName, postedJson.content, !postedJson.stagingOnly, function (err) {
 		if (err) {
