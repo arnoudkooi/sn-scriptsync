@@ -1343,7 +1343,7 @@ export function deactivate() {
 
 // Settings surfaced as inline toggles in the welcome tab. Labels/descriptions
 // mirror package.json so the tab is a one-stop place to review them on first run.
-const WELCOME_SETTINGS: { key: string; label: string; description: string; default: boolean }[] = [
+const WELCOME_SETTINGS: { key: string; label: string; description: string; default: boolean; link?: { url: string; text: string } }[] = [
 	{
 		key: 'agentInstructions.autoUpdate',
 		label: 'Keep my agent instruction files updated',
@@ -1385,6 +1385,7 @@ const WELCOME_SETTINGS: { key: string; label: string; description: string; defau
 		label: 'Agent API: browser debugger (beta)',
 		description: 'Allow the Agent API to drive the connected ServiceNow tab through the Chrome DevTools Protocol (network/console capture, screenshots, dialogs). Needs SN Utils Pro and the Debug edition browser build.',
 		default: false,
+		link: { url: 'https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb', text: 'Get the SN Utils Debug edition →' },
 	},
 	{
 		key: 'agentApi.fileFallback',
@@ -1490,7 +1491,7 @@ function getWelcomeNonce(): string {
 function getWelcomeHtml(
 	version: string,
 	isFirstRun: boolean,
-	settings: { key: string; label: string; description: string; value: boolean }[],
+	settings: { key: string; label: string; description: string; value: boolean; link?: { url: string; text: string } }[],
 	highlightsHtml: string
 ): string {
 	const nonce = getWelcomeNonce();
@@ -1504,7 +1505,7 @@ function getWelcomeHtml(
 			<input type="checkbox" data-key="${esc(s.key)}" ${s.value ? 'checked' : ''} />
 			<span class="setting-text">
 				<span class="setting-label">${esc(s.label)}</span>
-				<span class="setting-desc">${esc(s.description)}</span>
+				<span class="setting-desc">${esc(s.description)}${s.link ? ` <a class="setting-link" href="${esc(s.link.url)}">${esc(s.link.text)}</a>` : ''}</span>
 				<span class="setting-key">sn-scriptsync.${esc(s.key)}</span>
 			</span>
 		</label>`).join('\n');
@@ -1536,6 +1537,7 @@ function getWelcomeHtml(
 	.setting-text { display: flex; flex-direction: column; gap: 2px; }
 	.setting-label { font-weight: 600; }
 	.setting-desc { color: var(--vscode-descriptionForeground); font-size: 0.85rem; }
+	.setting-link { color: var(--vscode-textLink-foreground); white-space: nowrap; }
 	.setting-key { color: var(--vscode-descriptionForeground); font-size: 0.75rem; opacity: 0.7; font-family: var(--vscode-editor-font-family, monospace); }
 	.actions { margin-top: 12px; display: flex; align-items: center; }
 	button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
@@ -2028,8 +2030,19 @@ async function startServers() {
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
 		ws.send(JSON.stringify({
 			action: 'bannerMessage',
-			message: `v4.3.0: new HTTP Agent API on 127.0.0.1 (see .vscode/sn-agent-port.json). Auth via X-Agent-Token header. File-based API still works.`,
+			message: `v4.7: AI Agent API — agents can build & edit artifacts, drive the live form, run code search, and (beta) capture network/console logs & full-page screenshots via the browser debugger. HTTP API on 127.0.0.1 (see .vscode/sn-agent-port.json, X-Agent-Token header).`,
 			class: 'alert alert-primary',
+		}), function () { });
+
+		// Awareness row in the browser sync log: highlight newer capabilities and
+		// point at the Debug edition build that unlocks the browser debugger.
+		// Rendered by setLogMessage() on the SN Utils side (HTML is sanitized,
+		// promo:true applies the feature-highlight styling).
+		ws.send(JSON.stringify({
+			action: 'logMessage',
+			source: 'Team SN Utils',
+			promo: true,
+			message: `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can now build &amp; edit ServiceNow artifacts, drive the live form, and — new — capture network/console logs &amp; full-page screenshots via the <b>browser debugger (beta)</b>. Get the <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">SN Utils Debug edition →</a> to try it.`,
 		}), function () { });
 
 	});
