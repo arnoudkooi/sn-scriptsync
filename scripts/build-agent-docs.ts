@@ -111,7 +111,11 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               rules, why creation needs a background script (REST = E_ACL),
 //               the widget compile-metadata pattern, and the OOTB-widget /
 //               app-shell gotchas.
-const INSTRUCTIONS_VERSION = 16;
+//   v16 -> v17: clarify the browser-debugger prerequisites — the CDP adapter
+//               ships only in the SN Utils Debug edition browser build
+//               (E_CDP_UNAVAILABLE on the regular build) and *using* it needs an
+//               active Pro subscription (E_PRO_REQUIRED); link the Debug edition.
+const INSTRUCTIONS_VERSION = 17;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the

@@ -3,7 +3,7 @@ name: snu-artifacts
 description: How sn-scriptsync maps ServiceNow artifacts to files: the instance/scope/table layout, naming conventions per artifact type, creating new artifacts, and the _map.json / structure.json files. Read this when creating, naming, or organizing ServiceNow files.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=16 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=17 -->
 
 # SN ScriptSync — Artifacts & File Structure
 

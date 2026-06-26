@@ -3,7 +3,7 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=16 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=17 -->
 
 # SN ScriptSync — Agent API
 

@@ -3,7 +3,7 @@ name: snu-reference
 description: Extended reference appendix: detailed file-structure notes, table metadata caching, agent best-practices, and edge cases not covered by the core. Read this when you need depth the other skills do not cover.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=16 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=17 -->
 
 # SN ScriptSync — Deep Reference
 

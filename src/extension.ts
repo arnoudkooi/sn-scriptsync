@@ -2030,7 +2030,7 @@ async function startServers() {
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
 		ws.send(JSON.stringify({
 			action: 'bannerMessage',
-			message: `v4.7: AI Agent API — agents can build & edit artifacts, drive the live form, run code search, and (beta) capture network/console logs & full-page screenshots via the browser debugger. HTTP API on 127.0.0.1 (see .vscode/sn-agent-port.json, X-Agent-Token header).`,
+			message: `v4.7: AI Agent API — agents can build & edit artifacts, drive the live form, run code search, and (Pro, beta) capture network/console logs & full-page screenshots via the browser debugger. HTTP API on 127.0.0.1 (see .vscode/sn-agent-port.json, X-Agent-Token header).`,
 			class: 'alert alert-primary',
 		}), function () { });
 
@@ -2042,7 +2042,7 @@ async function startServers() {
 			action: 'logMessage',
 			source: 'Team SN Utils',
 			promo: true,
-			message: `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can now build &amp; edit ServiceNow artifacts, drive the live form, and — new — capture network/console logs &amp; full-page screenshots via the <b>browser debugger (beta)</b>. Get the <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">SN Utils Debug edition →</a> to try it.`,
+			message: `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can now build &amp; edit ServiceNow artifacts, drive the live form, and — new — capture network/console logs &amp; full-page screenshots via the <b>browser debugger (Pro, beta)</b>. With SN Utils Pro, get the <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">SN Utils Debug edition →</a> to try it.`,
 		}), function () { });
 
 	});

@@ -25,6 +25,12 @@ export function isBrowserDebuggerEnabled(): boolean {
 	return getSetting('browserDebugger.enabled', false);
 }
 
+// The CDP adapter ships only in this build; the regular SN Utils build reports
+// E_CDP_UNAVAILABLE. Surfaced from the VS Code side (here) so the browser
+// extension doesn't need a release just to carry the link.
+const DEBUG_EDITION_URL = 'https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb';
+const CDP_UNAVAILABLE_MESSAGE = `Browser debugger isn't available: the connected SN Utils build has no debugger adapter. Install the SN Utils Debug edition build (${DEBUG_EDITION_URL}); using it also requires an active SN Utils Pro subscription.`;
+
 /**
  * One round-trip of a CDP command through the browser helper. Mirrors
  * browser.ts's pageRoundTrip: surfaces the browser's structured `code` (e.g.
@@ -40,7 +46,20 @@ async function cdpRoundTrip(ctx: AgentContext, action: string, extra: Record<str
 	ctx.log(`Agent API: Sent ${action}`);
 	const response = await pending;
 	if (response?.success === false) {
-		throw new AgentError(response?.code || inferCodeFromMessage(response?.error), response?.error || `${action} failed`);
+		const code = response?.code || inferCodeFromMessage(response?.error);
+		if (code === 'E_CDP_UNAVAILABLE') {
+			// Point the user at the build that ships the adapter — both in the
+			// agent-facing error and as a clickable row in the browser sync log.
+			try {
+				ctx.sendToBrowser({
+					action: 'logMessage',
+					source: 'Team SN Utils',
+					message: `Browser debugger unavailable: install the <a href="${DEBUG_EDITION_URL}" target="_blank">SN Utils Debug edition</a> build (using it also needs an active SN Utils Pro subscription).`,
+				});
+			} catch { /* best-effort UI hint */ }
+			throw new AgentError('E_CDP_UNAVAILABLE', CDP_UNAVAILABLE_MESSAGE);
+		}
+		throw new AgentError(code, response?.error || `${action} failed`);
 	}
 	return response || {};
 }

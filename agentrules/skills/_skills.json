@@ -1,7 +1,7 @@
 {
-  "version": 16,
-  "generatedAt": "2026-06-26T05:43:11.080Z",
-  "marker": "<!-- SN-SCRIPTSYNC:SKILL apiVersion=16 -->",
+  "version": 17,
+  "generatedAt": "2026-06-26T06:35:16.216Z",
+  "marker": "<!-- SN-SCRIPTSYNC:SKILL apiVersion=17 -->",
   "files": [
     "snu-agent-api/SKILL.md",
     "snu-aix-experience/SKILL.md",

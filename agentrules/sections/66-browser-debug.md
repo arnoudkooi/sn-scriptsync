@@ -11,8 +11,13 @@ console errors, a beyond-viewport screenshot, or captured dialog text.
   enables `sn-scriptsync.browserDebugger.enabled`. Don't ask repeatedly — if it's
   disabled, fall back (e.g. `take_screenshot`, the `suppressDialogs` flag) and
   mention the setting once.
-- **Pro only.** Even when enabled, non-Pro (or a build without the debugger
-  adapter) returns `E_PRO_REQUIRED` / `E_CDP_UNAVAILABLE`.
+- **Needs the Debug edition build + Pro.** The debugger adapter ships only in the
+  SN Utils **Debug edition** browser build
+  (https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb) —
+  the regular build returns `E_CDP_UNAVAILABLE`. *Using* it is a Pro capability, so
+  an active SN Utils **Pro** subscription is also required (`E_PRO_REQUIRED` when the
+  adapter is present but the license isn't Pro). Tell the user which of the two is
+  missing rather than just surfacing the code.
 - **Preflight with `get_capabilities`.** Rather than probing with a CDP command
   and parsing the error, call `get_capabilities` once: if `cdp.available` is
   `true` the debugger is usable; if `false`, `cdp.reason` tells you why
