@@ -171,20 +171,46 @@ let agentReviewSeq = 0;
 // pending file's pre-stage baseline (the value still on the instance, captured
 // in reviewBaselines) through a virtual scheme and hand it to VS Code's native
 // QuickDiff, so the editor shows the usual gutter change-bars + inline peek for
-// the proposed-but-unapproved lines. The SCM entry is created lazily (only once
-// something is actually staged) so users not using review mode never see it.
+// the proposed-but-unapproved lines. The SCM source control exists whenever
+// review mode is on (created up front, before any file is opened) so the
+// provider is in place to associate an original — VS Code does not retroactively
+// attach one to editors that were already open when the provider first appears.
 const SNSS_BASELINE_SCHEME = 'snss-baseline';
 const reviewBaselineChanged = new vscode.EventEmitter<vscode.Uri>();
 let reviewSourceControl: vscode.SourceControl | undefined;
+
+// Canonical map key. Baselines are keyed by the OS path; VS Code hands us
+// uri.fsPath, so normalise both ends through Uri.file().fsPath to survive
+// symlinked roots (/private/var vs /var), separators and case differences.
+function reviewKey(filePath: string): string {
+	return vscode.Uri.file(filePath).fsPath;
+}
 
 function baselineUriFor(filePath: string): vscode.Uri {
 	return vscode.Uri.file(filePath).with({ scheme: SNSS_BASELINE_SCHEME });
 }
 
+const reviewQuickDiffProvider: vscode.QuickDiffProvider = {
+	provideOriginalResource: (uri) =>
+		(uri.scheme === 'file' && reviewBaselines.has(reviewKey(uri.fsPath))) ? baselineUriFor(uri.fsPath) : undefined,
+};
+
 // Tell VS Code the baseline for this file changed (staged / approved / rejected)
-// so the QuickDiff gutter recomputes against the new original content.
+// so the QuickDiff gutter recomputes against the new original content, and nudge
+// it to re-associate the original for editors that were already open.
 function notifyBaselineChanged(filePath: string) {
 	reviewBaselineChanged.fire(baselineUriFor(filePath));
+	nudgeReviewQuickDiff();
+}
+
+// Force VS Code to re-run provideOriginalResource for already-open editors. The
+// content-provider onDidChange only refreshes original *content*, not the
+// original *association*, so toggle the provider off/on to trigger a re-query.
+function nudgeReviewQuickDiff() {
+	const sc = reviewSourceControl;
+	if (!sc) return;
+	sc.quickDiffProvider = undefined;
+	setTimeout(() => { if (reviewSourceControl === sc) sc.quickDiffProvider = reviewQuickDiffProvider; }, 0);
 }
 
 // Register the virtual-baseline content provider once at activation (cheap).
@@ -192,21 +218,19 @@ function registerReviewBaselineProvider(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(SNSS_BASELINE_SCHEME, {
 			onDidChange: reviewBaselineChanged.event,
-			provideTextDocumentContent: (uri) => reviewBaselines.get(uri.fsPath)?.content ?? '',
+			provideTextDocumentContent: (uri) => reviewBaselines.get(reviewKey(uri.fsPath))?.content ?? '',
 		}),
 		reviewBaselineChanged,
 	);
 }
 
-// Create the SCM source control that carries the QuickDiff provider — lazily,
-// the first time a file is actually staged for review.
+// Create the SCM source control that carries the QuickDiff provider. Created up
+// front while review mode is enabled (so the provider predates any open editor),
+// but only then — users who never turn on review writes never see the SCM entry.
 function ensureReviewSourceControl() {
 	if (reviewSourceControl || !extensionContext) return;
 	const sc = vscode.scm.createSourceControl('snScriptSyncReview', 'ScriptSync Review');
-	sc.quickDiffProvider = {
-		provideOriginalResource: (uri) =>
-			(uri.scheme === 'file' && reviewBaselines.has(uri.fsPath)) ? baselineUriFor(uri.fsPath) : undefined,
-	};
+	sc.quickDiffProvider = reviewQuickDiffProvider;
 	reviewSourceControl = sc;
 	extensionContext.subscriptions.push(sc);
 }
@@ -435,15 +459,16 @@ function flushStagedCreates() {
 // it, so a later reject can undo exactly what we did. First snapshot wins (a field
 // re-staged before it's accepted/rejected keeps its true pre-stage baseline).
 function captureReviewBaseline(filePath: string) {
-	if (reviewBaselines.has(filePath)) return;
+	const key = reviewKey(filePath);
+	if (reviewBaselines.has(key)) return;
 	try {
 		if (fs.existsSync(filePath)) {
-			reviewBaselines.set(filePath, { existed: true, content: fs.readFileSync(filePath, 'utf8') });
+			reviewBaselines.set(key, { existed: true, content: fs.readFileSync(filePath, 'utf8') });
 		} else {
-			reviewBaselines.set(filePath, { existed: false, content: '' });
+			reviewBaselines.set(key, { existed: false, content: '' });
 		}
 	} catch {
-		reviewBaselines.set(filePath, { existed: false, content: '' });
+		reviewBaselines.set(key, { existed: false, content: '' });
 	}
 	ensureReviewSourceControl();
 	notifyBaselineChanged(filePath);
@@ -451,7 +476,7 @@ function captureReviewBaseline(filePath: string) {
 
 // File was approved/pushed — keep it as-is, just forget the snapshot.
 function acceptReviewBaseline(filePath: string) {
-	if (!reviewBaselines.delete(filePath)) return;
+	if (!reviewBaselines.delete(reviewKey(filePath))) return;
 	notifyBaselineChanged(filePath);
 }
 
@@ -460,8 +485,8 @@ function acceptReviewBaseline(filePath: string) {
 // review (create), tidying a now-empty folder-record directory. No-op for files
 // we never staged (ordinary user-queued files are only de-queued, never deleted).
 function undoReviewFile(filePath: string) {
-	const base = reviewBaselines.get(filePath);
-	reviewBaselines.delete(filePath);
+	const base = reviewBaselines.get(reviewKey(filePath));
+	reviewBaselines.delete(reviewKey(filePath));
 	if (!base) return;
 	try {
 		if (base.existed) {
@@ -800,7 +825,7 @@ function enqueuePendingFile(
 	// (The user's own in-editor saves still go through onDidSaveTextDocument.)
 	const holdForReview = reviewWritesEnabled()
 		|| agentCreateFilesByPath.has(filePath)
-		|| reviewBaselines.has(filePath);
+		|| reviewBaselines.has(reviewKey(filePath));
 
 	// Monitor-only: update queue/badge but don't schedule auto sync.
 	if (debounceSeconds <= 0 || holdForReview) {
@@ -1088,7 +1113,7 @@ vscode.workspace.onDidSaveTextDocument(document => {
 		// reviewing it. Creates are tracked in agentCreateFilesByPath (and must be
 		// replayed from the original payload so non-code config fields survive);
 		// updates are tracked in reviewBaselines.
-		if (agentCreateFilesByPath.has(document.fileName) || reviewBaselines.has(document.fileName)) {
+		if (agentCreateFilesByPath.has(document.fileName) || reviewBaselines.has(reviewKey(document.fileName))) {
 			recentManualSaves.set(document.fileName, Date.now());
 			return;
 		}
@@ -1128,7 +1153,10 @@ export function activate(context: vscode.ExtensionContext) {
 	}));
 
 	// Serve pre-stage baselines for native QuickDiff gutter bars on review files.
+	// Create the SCM provider up front while review mode is on, so it predates any
+	// open editor (VS Code won't retroactively attach an original otherwise).
 	registerReviewBaselineProvider(context);
+	if (reviewWritesEnabled()) ensureReviewSourceControl();
 
 	//initialize statusbaritem and click events
 	const toggleSyncID = 'sample.toggleScriptSync';
@@ -1171,6 +1199,11 @@ export function activate(context: vscode.ExtensionContext) {
 			// The configured sync-dir name feeds the multi-root folder resolver.
 			if (e.affectsConfiguration('sn-scriptsync.path')) {
 				resetWorkspaceRoot();
+			}
+			// Turning on review mode: stand up the QuickDiff SCM provider now so it
+			// exists before any file is staged/opened.
+			if (e.affectsConfiguration('sn-scriptsync.agentApi.reviewWrites') && reviewWritesEnabled()) {
+				ensureReviewSourceControl();
 			}
 		})
 	);
