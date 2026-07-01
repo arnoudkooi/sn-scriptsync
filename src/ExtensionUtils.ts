@@ -471,6 +471,34 @@ export class ExtensionUtils {
             return true;
         }
 
+        // ng-templates synced from a widget are written into a `sp_ng_template`
+        // folder with a `<field>^<sys_name>^<sys_id>.<ext>` filename, e.g.
+        // <instance>/<scope>/sp_widget/<widgetName>/sp_ng_template/template^myTpl^<sys_id>.html
+        // The '.'-split positional parsing below can't handle this (the sys_name may
+        // contain dots, and the folder can be nested at varying depths), so detect it
+        // by the parent folder + '^' filename format and parse the basename directly.
+        if (nodePath.basename(nodePath.dirname(fileName)) === 'sp_ng_template') {
+            let baseName = nodePath.basename(fileName);
+            let parts = baseName.split('^');
+            if (parts.length >= 3) {
+                let lastSegment = parts[parts.length - 1];
+                var scriptObj = <any>{};
+                scriptObj.instance = this.getInstanceSettings(fileNameArr[0]);
+                scriptObj.tableName = 'sp_ng_template';
+                scriptObj.fieldName = parts[0];
+                scriptObj.name = parts.slice(1, parts.length - 1).join('^');
+                scriptObj.sys_id = lastSegment.replace(/\.[^.]+$/, ''); // strip trailing extension, leaving the sys_id
+                scriptObj.scopeName = fileNameArr[1];
+                scriptObj.fileName = fileName;
+                scriptObj.content = content;
+
+                if (!this.isValidParsedScriptObject(scriptObj)) {
+                    return true;
+                }
+                return scriptObj;
+            }
+        }
+
         if (fileNameArr.length == 8){ //this is a variable stored in sys_variable_value use some creativity to support these files...
             var fileNme = fileNameArr[2] + "." + fileNameArr[3] + "." + fileNameArr[4];
             fileNameArr.splice(2, 1);

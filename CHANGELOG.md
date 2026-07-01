@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.7.5 (2026-07-01)
+
+**Fix: saving a widget's ng-template back to ServiceNow now works (#151):** Editing a `sp_ng_template` file synced under a widget silently failed to sync (the file path wasn't recognised as a save target), so template changes never reached the instance. ScriptSync now parses these files correctly and pushes your edits back to SN.
+
 ## 4.7.4 (2026-06-26)
 
 **Review Agent API writes before they hit the instance:** New setting `sn-scriptsync.agentApi.reviewWrites` (default **off**). When you turn it on, `update_record`, `update_record_batch` and `create_artifact` no longer push straight to ServiceNow — the proposed change is written to its real local file (`\instance\scope\table\name.field.ext`) and parked in the "Pending Saves" panel, exactly like a monitored file edit. Open it, see the diff, tweak it if you want, then approve it with the per-file ✓ (or push everything with **Sync Now**). Reject with ✕ (or "Clear All Pending") and ScriptSync undoes the staged write — it deletes a proposed new file and restores an overwritten one to its previous content, so a rejected agent change never lingers on disk or leaves the local file out of step with the instance. While review is on it holds *every* agent route, not just the API writes: a file an agent edits directly on disk is parked for approval too (instead of auto-syncing), and the agent's own `sync_now` is disabled so it can't flush the queue itself — only you approve, in VS Code. This closes the gap where AI agents (e.g. Windsurf/Devin) synced changes immediately with no chance to review. Off by default, so current setups are unchanged.
