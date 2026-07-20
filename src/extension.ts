@@ -1468,7 +1468,7 @@ const WELCOME_SETTINGS: { key: string; label: string; description: string; defau
 	},
 	{
 		key: 'browserDebugger.enabled',
-		label: 'Agent API: browser debugger (beta)',
+		label: 'Agent API: browser debugger',
 		description: 'Allow the Agent API to drive the connected ServiceNow tab through the Chrome DevTools Protocol (network/console capture, screenshots, dialogs). Needs SN Utils Pro and the Debug edition browser build.',
 		default: false,
 		link: { url: 'https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb', text: 'Get the SN Utils Debug edition →' },
@@ -1982,9 +1982,82 @@ async function startServers() {
 			ws.close(0, 'Max connection');
 		}
 
+		let helperBuildInfo: {
+			debuggerAvailable?: boolean;
+			proFeatures?: boolean;
+			tier?: 'free' | 'pro' | 'trial' | 'enterprise';
+			licenseResolved?: boolean;
+		} | undefined;
+		let capabilityMessageSent = false;
+		let debugLicenseTimer: ReturnType<typeof setTimeout> | undefined;
+		const sendCapabilityMessage = () => {
+			if (capabilityMessageSent) return;
+
+			let message: string;
+			const debuggerEnabled = vscode.workspace
+				.getConfiguration('sn-scriptsync')
+				.get<boolean>('browserDebugger.enabled', false);
+			capabilityMessageSent = true;
+			const feedbackInvite = `I&rsquo;d genuinely love to hear how this works in your ServiceNow workflow. <a href="https://snutils.com/contact?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_experience" target="_blank" class="promo-link">Share your experience →</a> Or message me through whatever channel you prefer. Arnoud`;
+			if (helperBuildInfo?.debuggerAvailable && helperBuildInfo?.proFeatures) {
+				const tierLabel = helperBuildInfo.tier === 'enterprise'
+					? 'Enterprise'
+					: helperBuildInfo.tier === 'trial'
+						? 'Trial'
+						: 'Pro';
+				message = debuggerEnabled
+					? `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} connected:</b> You&rsquo;re using the full setup built for deeper agent debugging. Your agent can capture full pages, read console errors, monitor network responses, and handle native dialogs. ${feedbackInvite}`
+					: `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} recognized:</b> You have the complete browser-debugger setup. Enable <code>sn-scriptsync.browserDebugger.enabled</code> when you want your agent to capture full pages, read console errors, monitor network responses, and handle native dialogs. ${feedbackInvite}`;
+			} else if (helperBuildInfo?.debuggerAvailable) {
+				message = helperBuildInfo.licenseResolved
+					? `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug:</b> ScriptSync recognized your debugger-capable build. Activate Pro or start a free trial to give your agent full-page capture, console errors, network responses, and native dialog handling. <a href="https://snutils.com/trial?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_edition_connected" target="_blank" class="promo-link">Start free trial →</a> ${feedbackInvite}`
+					: `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug:</b> ScriptSync recognized your debugger-capable build. Open the extension popup to confirm Pro, Trial, or Enterprise access, then enable the browser debugger in ScriptSync. ${feedbackInvite}`;
+			} else {
+				message = `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can now build &amp; edit ServiceNow artifacts, drive the live form, and capture network/console logs &amp; full-page screenshots via the <b>Pro browser debugger</b>. Get the <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">SN Utils Debug edition →</a> to use it.`;
+			}
+
+			ws.send(JSON.stringify({
+				action: 'logMessage',
+				source: 'Team SN Utils',
+				promo: true,
+				message,
+			}), function () { });
+		};
+		const capabilityMessageTimer = setTimeout(sendCapabilityMessage, 1500);
+		ws.on('close', () => {
+			clearTimeout(capabilityMessageTimer);
+			if (debugLicenseTimer) clearTimeout(debugLicenseTimer);
+		});
+
 		ws.on('message', function incoming(message) {
 			try {
 				let messageJson = JSON.parse(message)
+				if (messageJson?.action === 'helperBuildInfo') {
+					helperBuildInfo = {
+						debuggerAvailable: messageJson.debuggerAvailable === true,
+					};
+					clearTimeout(capabilityMessageTimer);
+					if (helperBuildInfo.debuggerAvailable) {
+						debugLicenseTimer = setTimeout(sendCapabilityMessage, 3000);
+					} else {
+						sendCapabilityMessage();
+					}
+					return;
+				}
+				if (messageJson?.action === 'helperLicenseInfo') {
+					const tier = ['free', 'pro', 'trial', 'enterprise'].includes(messageJson.tier)
+						? messageJson.tier
+						: 'free';
+					helperBuildInfo = {
+						...helperBuildInfo,
+						proFeatures: messageJson.proFeatures === true,
+						tier,
+						licenseResolved: true,
+					};
+					if (debugLicenseTimer) clearTimeout(debugLicenseTimer);
+					sendCapabilityMessage();
+					return;
+				}
 				// Errors that belong to an Agent API round-trip carry an
 				// agentRequestId and are surfaced to the calling command via the
 				// pending registry below. Skip the global popup / queue-pause /
@@ -2116,19 +2189,8 @@ async function startServers() {
 		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
 		ws.send(JSON.stringify({
 			action: 'bannerMessage',
-			message: `v4.7: AI Agent API — agents can build & edit artifacts, drive the live form, run code search, and (Pro, beta) capture network/console logs & full-page screenshots via the browser debugger. HTTP API on 127.0.0.1 (see .vscode/sn-agent-port.json, X-Agent-Token header).`,
+			message: `v4.7: AI Agent API — agents can build & edit artifacts, drive the live form, run code search, and with Pro capture network/console logs & full-page screenshots via the browser debugger. HTTP API on 127.0.0.1 (see .vscode/sn-agent-port.json, X-Agent-Token header).`,
 			class: 'alert alert-primary',
-		}), function () { });
-
-		// Awareness row in the browser sync log: highlight newer capabilities and
-		// point at the Debug edition build that unlocks the browser debugger.
-		// Rendered by setLogMessage() on the SN Utils side (HTML is sanitized,
-		// promo:true applies the feature-highlight styling).
-		ws.send(JSON.stringify({
-			action: 'logMessage',
-			source: 'Team SN Utils',
-			promo: true,
-			message: `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can now build &amp; edit ServiceNow artifacts, drive the live form, and — new — capture network/console logs &amp; full-page screenshots via the <b>browser debugger (Pro, beta)</b>. With SN Utils Pro, get the <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">SN Utils Debug edition →</a> to try it.`,
 		}), function () { });
 
 	});

@@ -21,9 +21,6 @@ Version 4.0 is a major release bringing **native AI coding assistant support** a
 > 💬 **Feedback Welcome**: This is a new feature! Please share your experience and suggestions via [GitHub Issue or Discussion](https://github.com/arnoudkooi/sn-scriptsync/).
 >
 > ⚠️ **Disclaimer**: AI coding assistants are powerful tools but can make mistakes. Since changes are automatically synced to ServiceNow, it's recommended to work in your PDI or development instances and review changes thoroughly. This tool is provided as-is without warranty - use at your own discretion, especially in production environments.
->
-> **Requirements**: The Agent API features require **SN Utils 9.2.0.0 or higher** in your browser. 
-
 ### 🤖 AI Agent & External Change Support
 
 Files modified by AI agents (Cursor, GitHub Copilot, Windsurf, etc.), git operations, or external editors are now **monitored by default** and can be auto-synced when enabled:

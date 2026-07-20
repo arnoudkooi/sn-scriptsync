@@ -267,7 +267,7 @@ const get_capabilities: CommandHandler = {
 				},
 			},
 		},
-		notes: 'Requires a connected helper tab (E_BROWSER_DISCONNECTED otherwise). `cdp.available` is true only when both the CDP adapter is present (Pro build) and the license is Pro/Trial/Enterprise; when false, `cdp.reason` is the code you would have hit (`E_CDP_UNAVAILABLE` for a Community build, `E_PRO_REQUIRED` for a non-Pro license). `gates` mirrors the VS Code settings that produce `E_DISABLED`: `createArtifacts` (create_artifact/create_application/create_table/add_column), `restRequest` (POST/PUT/PATCH via rest_request), `deleteRecords` (deletes + delete UI verbs), `backgroundScripts` (run_background_script + delete_application cascade), `browserDebugger` (CDP beta), and `fileFallback` (legacy file transport).',
+		notes: 'Requires a connected helper tab (E_BROWSER_DISCONNECTED otherwise). `cdp.available` is true only when both the CDP adapter is present (Pro build) and the license is Pro/Trial/Enterprise; when false, `cdp.reason` is the code you would have hit (`E_CDP_UNAVAILABLE` for a Community build, `E_PRO_REQUIRED` for a non-Pro license). `gates` mirrors the VS Code settings that produce `E_DISABLED`: `createArtifacts` (create_artifact/create_application/create_table/add_column), `restRequest` (POST/PUT/PATCH via rest_request), `deleteRecords` (deletes + delete UI verbs), `backgroundScripts` (run_background_script + delete_application cascade), `browserDebugger` (CDP), and `fileFallback` (legacy file transport).',
 	},
 	async handle(ctx) {
 		const correlationId = `agent_${ctx.request.id}_${Date.now()}`;
@@ -280,7 +280,7 @@ const get_capabilities: CommandHandler = {
 		}
 		const cdp = r?.cdp || {};
 		// The browser reports whether the adapter + Pro license make CDP usable,
-		// but the debugger beta is also gated server-side. The VS Code setting
+		// but the debugger is also gated server-side. The VS Code setting
 		// wins: when it's off, report unavailable with E_DISABLED regardless of
 		// what the browser can technically do.
 		const debuggerEnabled = isBrowserDebuggerEnabled();

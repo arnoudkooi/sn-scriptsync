@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+## Unreleased
+
+**Screenshots reuse open ServiceNow tabs instead of creating duplicates:** URL redirects and the automatic permission retry stay on the tab selected by the first capture attempt, opening a new tab only when that instance is not already open.
+
+**The Debug edition gets a personal connection message from Arnoud:** users see the right setup status, a direct next step when needed, and an invitation to share how agent debugging works in their ServiceNow workflow.
+
 ## 4.7.5 (2026-07-01)
 
 **Fix: saving a widget's ng-template back to ServiceNow now works (#151):** Editing a `sp_ng_template` file synced under a widget silently failed to sync (the file path wasn't recognised as a save target), so template changes never reached the instance. ScriptSync now parses these files correctly and pushes your edits back to SN.
@@ -12,9 +18,9 @@
 
 **New agent skill — AI Experience (AIX):** Added an on-demand `snu-aix-experience` skill so AI agents can build and edit ServiceNow AI Experience apps on the `sys_aix_*` tables end-to-end — experiences, pages, containers, custom Lit widgets with server data scripts, left-nav menus, and record click-through. It captures the field-tested recipe and the non-obvious framework behavior: the `/aiux/<suffix>` routing and config-cache rules, why records must be created via a background script (REST returns `E_ACL`), the widget compile-metadata pattern, and the OOTB-widget / app-shell dead ends. Read on demand like the other skills. Agent instructions bumped to v15.
 
-**Find the Debug edition build for the browser debugger (beta):** The Welcome / What's New tab, the `sn-scriptsync.browserDebugger.enabled` setting, the `E_CDP_UNAVAILABLE` error, and the agent docs now link straight to the [SN Utils Debug edition browser build](https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb) and spell out the two prerequisites: the debugger adapter ships only in that build (regular builds report `E_CDP_UNAVAILABLE`), and *using* it also needs an active SN Utils Pro subscription (`E_PRO_REQUIRED`). Agent instructions bumped to v17.
+**Find the Debug edition build for the browser debugger:** The Welcome / What's New tab, the `sn-scriptsync.browserDebugger.enabled` setting, the `E_CDP_UNAVAILABLE` error, and the agent docs now link straight to the [SN Utils Debug edition browser build](https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb) and spell out the two prerequisites: the debugger adapter ships only in that build (regular builds report `E_CDP_UNAVAILABLE`), and *using* it also needs active Pro, Trial, or Enterprise access (`E_PRO_REQUIRED`). Agent instructions bumped to v17.
 
-**Capabilities highlight in the browser sync log:** When the SN Utils helper tab connects, ScriptSync now adds a highlighted row to the sync log summarising the newer Agent API capabilities (build/edit artifacts, live-form control, code search, and the Pro browser-debugger beta) with a link to the Debug edition build, and the connect banner was refreshed from the old v4.3.0 copy to reflect them.
+**Capabilities highlight in the browser sync log:** When the SN Utils helper tab connects, ScriptSync now adds a highlighted row to the sync log summarising the newer Agent API capabilities (build/edit artifacts, live-form control, code search, and the Pro browser debugger) with a link to the Debug edition build, and the connect banner was refreshed from the old v4.3.0 copy to reflect them.
 
 **Don't mistake a regular repo for the ScriptSync folder in multi-root workspaces:** Folder auto-detection now recognises a sync folder by an actual synced instance (a subfolder with `_settings.json`), not by the presence of `autocomplete/server.d.ts` — so a project that merely tracks that file is no longer picked over your real (empty/dedicated) sync folder.
 
@@ -36,7 +42,7 @@
 
 **Fix: stopping the server from the status bar then starting it again now works.** Clicking sn-scriptsync to stop left the helper-tab connection open, which kept port 1978 bound and made the next start silently fail; the connection is now closed on stop (and a port-in-use error is surfaced instead of failing quietly).
 
-**Browser debugger (CDP) is now opt-in (beta):** The Chrome DevTools Protocol commands (network/console capture, full-page screenshots, dialog handling) are off by default behind `sn-scriptsync.browserDebugger.enabled` and return `E_DISABLED` until you turn them on — so existing setups are never disrupted by an unexpected debugger attach.
+**Browser debugger (CDP) is opt-in:** The Chrome DevTools Protocol commands (network/console capture, full-page screenshots, dialog handling) are off by default behind `sn-scriptsync.browserDebugger.enabled` and return `E_DISABLED` until you turn them on — so existing setups are never disrupted by an unexpected debugger attach.
 
 **New Agent API command — `get_capabilities`:** Asks the connected SN Utils helper tab what it can do right now — license tier and whether the browser debugger is usable (`cdp.available`, with a `reason` of `E_DISABLED` / `E_PRO_REQUIRED` / `E_CDP_UNAVAILABLE` when not). Lets an agent preflight the `snu-browser-debug` skill instead of firing a CDP command and parsing the error. Agent API protocol bumped to v6.
 
@@ -186,8 +192,6 @@
 - Minor fixes for missing artefacts in the published package
 
 ## 4.0.0 (2025-12-10)
-
-**Requirements**: Agent API features require **SN Utils 9.2.0.0 or higher**. 
 
 ### AI Agent & External Change Support (Issue #119)
 This release adds comprehensive support for AI coding assistants and external file changes:

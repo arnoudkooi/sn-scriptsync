@@ -51,7 +51,7 @@ Take a screenshot of a ServiceNow page. Requires explicit user action on first u
 }
 ```
 
-The extension auto-retries once (~1.5s) after a permission error before surfacing `E_SCREENSHOT_PERMISSION`, giving you a moment to click the extension icon.
+The extension auto-retries once (~1.5s) after a permission error before surfacing `E_SCREENSHOT_PERMISSION`, giving you a moment to click the extension icon. The retry stays pinned to the tab selected by the first attempt so a ServiceNow redirect cannot open duplicate tabs.
 
 **Use cases:**
 - Capture widget preview for visual verification
@@ -61,7 +61,7 @@ The extension auto-retries once (~1.5s) after a permission error before surfacin
 **Behavior:**
 1. Screenshots are saved to `{workspace}/screenshots/` folder
 2. The browser extension must be connected
-3. Tab reuse: After the first successful screenshot, subsequent requests will try to reuse the same tab (navigating to new URLs if needed) to avoid repeated permission prompts
+3. Tab reuse: Requests prefer an open tab on the same ServiceNow instance; retries stay pinned to the selected tab, and later screenshots reuse the last captured tab when possible
 4. If no matching tab is found, a new tab will be opened
 
 **Handling permission errors:**

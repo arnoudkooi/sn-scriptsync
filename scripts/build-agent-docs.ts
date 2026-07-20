@@ -84,7 +84,7 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               get_capabilities (helper-tab probe for license tier + CDP/browser-
 //               debugger availability) so agents can preflight the snu-browser-debug
 //               skill instead of probing with a CDP command. The browser-debugger
-//               (CDP) commands are now OFF by default behind a beta opt-in
+//               (CDP) commands are now OFF by default behind an opt-in
 //               (`sn-scriptsync.browserDebugger.enabled`) — they return E_DISABLED
 //               until enabled, and get_capabilities reports cdp.available:false
 //               (reason E_DISABLED) when off.

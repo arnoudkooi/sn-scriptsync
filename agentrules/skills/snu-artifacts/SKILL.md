@@ -157,7 +157,7 @@ To show just the rendered widget without a per-tab screenshot grant, combine `ac
 1. `activate_tab` with `openIfNotFound: true` and `waitForLoad: true` (open/activate the widget preview).
 2. `capture_full_page` with `selector: ".my-widget"` (or the widget's root class) for a clean, component-only screenshot — no per-tab grant required.
 
-(`capture_full_page` is part of the browser-debugger beta — preflight with `get_capabilities` → `cdp.available`.)
+(`capture_full_page` uses the browser debugger — preflight with `get_capabilities` → `cdp.available`.)
 
 ### Step-by-Step: Creating Simple Artifacts
 

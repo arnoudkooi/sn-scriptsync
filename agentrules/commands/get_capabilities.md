@@ -28,7 +28,7 @@ Requires a connected helper tab (`E_BROWSER_DISCONNECTED` otherwise — run `che
 }
 ```
 
-**Response (debugger beta not enabled — the default):**
+**Response (browser debugger not enabled — the default):**
 ```json
 {
   "status": "success",
@@ -50,13 +50,13 @@ Requires a connected helper tab (`E_BROWSER_DISCONNECTED` otherwise — run `che
 
 - `tier` — `community` | `pro` | `trial` | `enterprise` (license of the connected helper tab).
 - `proFeatures` — `true` when the tier unlocks Pro features (e.g. `code_search`).
-- `cdp.available` — `true` only when the browser-debugger beta is enabled (`sn-scriptsync.browserDebugger.enabled`) **and** the debugger adapter is present (Pro build) **and** the license is Pro/Trial/Enterprise.
-- `cdp.reason` — when `available` is `false`, the code you would otherwise have hit: `E_DISABLED` (beta off — enable `sn-scriptsync.browserDebugger.enabled`), `E_CDP_UNAVAILABLE` (Community build / no debugger adapter) or `E_PRO_REQUIRED` (adapter present but license isn't Pro).
+- `cdp.available` — `true` only when the browser debugger is enabled (`sn-scriptsync.browserDebugger.enabled`) **and** the debugger adapter is present (Pro build) **and** the license is Pro/Trial/Enterprise.
+- `cdp.reason` — when `available` is `false`, the code you would otherwise have hit: `E_DISABLED` (debugger off — enable `sn-scriptsync.browserDebugger.enabled`), `E_CDP_UNAVAILABLE` (Community build / no debugger adapter) or `E_PRO_REQUIRED` (adapter present but license isn't Pro).
 - `gates` — the VS Code settings that produce `E_DISABLED`, so you can preflight before calling a gated command:
   - `createArtifacts` — `create_artifact`, `create_application`, `create_table`, `add_column` (default **on**).
   - `restRequest` — POST/PUT/PATCH via `rest_request` (default off).
   - `deleteRecords` — `delete_record`, DELETE via `rest_request`, delete UI verbs in `run_ui_action` (default off).
   - `backgroundScripts` — `run_background_script` and the `delete_application` cascade (default off).
-  - `browserDebugger` — the CDP browser-debugger beta (default off); same flag reflected in `cdp.available`.
+  - `browserDebugger` — the CDP browser debugger (default off); same flag reflected in `cdp.available`.
   - `fileFallback` — legacy file-based transport (`agent/requests/*.json`) is active alongside HTTP (default on).
 - When a gate is `false`, tell the user exactly which setting to enable (e.g. `sn-scriptsync.deleteRecords.enabled`) rather than retrying.

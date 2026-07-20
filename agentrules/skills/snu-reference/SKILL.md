@@ -231,7 +231,7 @@ To capture just the widget without a per-tab screenshot grant, pair `activate_ta
 { "id": "act", "command": "activate_tab", "params": { "urlPattern": "sp-preview", "openIfNotFound": true, "waitForLoad": true } }
 { "id": "shot", "command": "capture_full_page", "params": { "selector": ".my-widget" } }
 ```
-The `selector` trick returns a clean, component-only image (no full page, no per-tab grant). `capture_full_page` is part of the browser-debugger beta — preflight with `get_capabilities` (`cdp.available`).
+The `selector` trick returns a clean, component-only image (no full page, no per-tab grant). `capture_full_page` uses the browser debugger — preflight with `get_capabilities` (`cdp.available`).
 
 ### Step-by-Step Workflow
 

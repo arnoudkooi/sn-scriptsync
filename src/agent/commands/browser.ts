@@ -250,7 +250,11 @@ async function requestCapture(ctx: AgentContext, opts: { url?: string; tabId?: a
 	const response = await pending;
 
 	if (response?.code === 'E_SCREENSHOT_PERMISSION') {
-		throw new AgentError('E_SCREENSHOT_PERMISSION', response?.error || 'Browser denied the screenshot (tab not capturable / permission).');
+		throw new AgentError(
+			'E_SCREENSHOT_PERMISSION',
+			response?.error || 'Browser denied the screenshot (tab not capturable / permission).',
+			{ tabId: response?.tabId, tabUrl: response?.tabUrl },
+		);
 	}
 	if (response?.success === false) {
 		throw new AgentError(inferCodeFromMessage(response?.error), response?.error || 'Screenshot failed');
@@ -283,9 +287,10 @@ async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: an
 		response = await requestCapture(ctx, captureOpts);
 	} catch (e) {
 		if (e instanceof AgentError && e.code === 'E_SCREENSHOT_PERMISSION') {
-			ctx.log('Agent API: Screenshot permission denied — retrying once in 1.5s');
+			const retryTabId = e.details?.tabId ?? captureOpts.tabId;
+			ctx.log(`Agent API: Screenshot permission denied — retrying once in 1.5s${retryTabId ? ` on tab ${retryTabId}` : ''}`);
 			await delay(1500);
-			response = await requestCapture(ctx, captureOpts);
+			response = await requestCapture(ctx, { ...captureOpts, tabId: retryTabId });
 		} else {
 			throw e;
 		}

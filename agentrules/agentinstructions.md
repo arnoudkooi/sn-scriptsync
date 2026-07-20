@@ -321,7 +321,7 @@ Several dedicated commands exist specifically to avoid hand-rolling fragile REST
   - `restRequest` (`sn-scriptsync.restRequest.enabled`, default off) → POST/PUT/PATCH via `rest_request`.
   - `deleteRecords` (`sn-scriptsync.deleteRecords.enabled`, default off) → `delete_record`, DELETE via `rest_request`, delete UI verbs in `run_ui_action`.
   - `backgroundScripts` (`sn-scriptsync.backgroundScripts.enabled`, default off) → `run_background_script` and the `delete_application` cascade.
-  - `browserDebugger` (`sn-scriptsync.browserDebugger.enabled`, default off, beta) → all CDP commands.
+  - `browserDebugger` (`sn-scriptsync.browserDebugger.enabled`, default off) → all CDP commands.
 
   When you hit `E_DISABLED`, tell the user exactly which setting to enable rather than retrying.
 - **`rest_request` is the escape hatch.** Use it only for endpoints the typed commands don't cover. The param is `endpoint` (instance-relative, starts with `/`) — not `url`. Write methods are gated the same way as the destructive commands above.

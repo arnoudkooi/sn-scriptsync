@@ -4,15 +4,15 @@ import { CommandHandler, AgentContext } from '../types';
 import { AgentError, inferCodeFromMessage } from '../errors';
 import { getSetting } from './_shared';
 
-// Browser debugger (Chrome DevTools Protocol) commands — Pro, beta.
+// Browser debugger (Chrome DevTools Protocol) commands — Pro.
 //
 // These ride the same browser bridge as the g_form commands, but on the browser
 // side they route through SNUCdpAdapter (chrome.debugger / CDP) instead of
 // content scripts, unlocking what content scripts CANNOT do: network capture,
 // console capture, full-page/element screenshots, and native dialog handling.
 //
-// Gated OFF by default behind `sn-scriptsync.browserDebugger.enabled` (beta, so
-// existing setups aren't disrupted): every command short-circuits to
+// Gated OFF by default behind `sn-scriptsync.browserDebugger.enabled` so
+// existing setups aren't disrupted: every command short-circuits to
 // `E_DISABLED` until the user opts in. On the browser side the adapter is also
 // stripped from the SN Utils Community build (`E_CDP_UNAVAILABLE`) and Pro-gated
 // (`E_PRO_REQUIRED`). Attaching the debugger shows Chrome's unavoidable yellow
@@ -20,7 +20,7 @@ import { getSetting } from './_shared';
 // stopped; one-shot ops (screenshots) detach immediately. Always pair a start_*
 // with a stop_* (and a set_dialog_handler with a clear_dialog_handler).
 
-/** True when the user has opted into the browser-debugger beta. */
+/** True when the user has opted into the browser debugger. */
 export function isBrowserDebuggerEnabled(): boolean {
 	return getSetting('browserDebugger.enabled', false);
 }
@@ -38,7 +38,7 @@ const CDP_UNAVAILABLE_MESSAGE = `Browser debugger isn't available: the connected
  */
 async function cdpRoundTrip(ctx: AgentContext, action: string, extra: Record<string, any>): Promise<any> {
 	if (!isBrowserDebuggerEnabled()) {
-		throw new AgentError('E_DISABLED', 'Browser debugger (CDP) commands are off by default (beta). Enable sn-scriptsync.browserDebugger.enabled to allow network/console capture, full-page screenshots and dialog handling.');
+		throw new AgentError('E_DISABLED', 'Browser debugger (CDP) commands are off by default. Enable sn-scriptsync.browserDebugger.enabled to allow network/console capture, full-page screenshots and dialog handling.');
 	}
 	const correlationId = `agent_${ctx.request.id}_${Date.now()}`;
 	const pending = ctx.waitForBrowserResponse<any>(correlationId);
