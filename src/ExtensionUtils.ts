@@ -17,7 +17,28 @@ let instanceSettings = {};
 
 export class ExtensionUtils {
 
-    public static ignoreNextSync = new Set<string>();
+    // Self-write guard: paths the extension itself wrote recently, with the
+    // write timestamp. A single fs.writeFile can make the OS watcher emit more
+    // than one change event (truncate + content write), so a one-shot flag is
+    // not enough — every watcher event inside the window must be ignored, or a
+    // bulk fetch like Load Scope floods the Pending Saves queue.
+    private static selfWrites = new Map<string, number>();
+    private static readonly SELF_WRITE_WINDOW_MS = 3000;
+
+    public static markSelfWrite(path: string) {
+        if (ExtensionUtils.selfWrites.size > 500) {
+            const cutoff = Date.now() - ExtensionUtils.SELF_WRITE_WINDOW_MS;
+            ExtensionUtils.selfWrites.forEach((time, p) => {
+                if (time < cutoff) ExtensionUtils.selfWrites.delete(p);
+            });
+        }
+        ExtensionUtils.selfWrites.set(path, Date.now());
+    }
+
+    public static wasRecentSelfWrite(path: string): boolean {
+        const time = ExtensionUtils.selfWrites.get(path);
+        return time !== undefined && Date.now() - time < ExtensionUtils.SELF_WRITE_WINDOW_MS;
+    }
 
     renamePath(oldPath: string, newPath: string) : void {
         fs.renameSync(oldPath, newPath);
@@ -345,7 +366,7 @@ export class ExtensionUtils {
 
     writeFile(path: string, contents: string, openFile, cb: Function, myThis = this) {
 
-        ExtensionUtils.ignoreNextSync.add(path);
+        ExtensionUtils.markSelfWrite(path);
 
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
@@ -367,7 +388,7 @@ export class ExtensionUtils {
 
     writeFileIfNotExists(path, contents, openFile, cb) {
 
-        ExtensionUtils.ignoreNextSync.add(path);
+        ExtensionUtils.markSelfWrite(path);
 
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);

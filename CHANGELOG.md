@@ -1,6 +1,8 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.7.6 (2026-07-29)
+
+**Fix: Load Scope no longer floods the Pending Saves queue:** Re-fetching a scope marked every downloaded file (hundreds in a large scope) as an external pending save. Files written by ScriptSync itself are now reliably ignored by the external-changes monitor; only genuinely external edits (AI agents, git, other tools) are queued.
 
 **Screenshots reuse open ServiceNow tabs instead of creating duplicates:** URL redirects and the automatic permission retry stay on the tab selected by the first capture attempt, opening a new tab only when that instance is not already open.
 
