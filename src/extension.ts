@@ -490,7 +490,7 @@ function undoReviewFile(filePath: string) {
 	if (!base) return;
 	try {
 		if (base.existed) {
-			ExtensionUtils.ignoreNextSync.add(filePath);
+			ExtensionUtils.markSelfWrite(filePath);
 			fs.writeFileSync(filePath, base.content);
 		} else {
 			if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -1049,9 +1049,9 @@ function setupWatcher() {
 				return; // Not a synced instance folder
 			}
 
-			// Ignore if this is a result of our own write
-			if (ExtensionUtils.ignoreNextSync.has(uri.fsPath)) {
-				ExtensionUtils.ignoreNextSync.delete(uri.fsPath);
+			// Ignore if this is a result of our own write. Time-window based (not
+			// one-shot): a single write can produce multiple watcher events.
+			if (ExtensionUtils.wasRecentSelfWrite(uri.fsPath)) {
 				auditLog('watcher_event_ignored', { reason: 'self_write_guard', filePath: uri.fsPath }, runId);
 				return;
 			}
