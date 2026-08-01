@@ -6,7 +6,7 @@
 
 **Screenshots reuse open ServiceNow tabs instead of creating duplicates:** URL redirects and the automatic permission retry stay on the tab selected by the first capture attempt, opening a new tab only when that instance is not already open.
 
-**The Debug edition gets a personal connection message from Arnoud:** users see the right setup status, a direct next step when needed, and an invitation to share how agent debugging works in their ServiceNow workflow.
+**The Debug edition gets a personal connection message:** users see the right setup status, a direct next step when needed, and an invitation to share how agent debugging works in their ServiceNow workflow.
 
 ## 4.7.5 (2026-07-01)
 
