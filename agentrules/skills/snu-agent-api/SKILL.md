@@ -1131,7 +1131,7 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
 - `>=` greater or equal
 - `<=` less or equal
 - `IN` in list (comma-separated)
-- `NOTIN` not in list
+- `NOT IN` not in list
 - `ISEMPTY` is empty
 - `ISNOTEMPTY` is not empty
 - `^` AND
