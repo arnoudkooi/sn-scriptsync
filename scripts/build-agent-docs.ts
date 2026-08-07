@@ -115,7 +115,16 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               ships only in the SN Utils Debug edition browser build
 //               (E_CDP_UNAVAILABLE on the regular build) and *using* it needs an
 //               active Pro subscription (E_PRO_REQUIRED); link the Debug edition.
-const INSTRUCTIONS_VERSION = 17;
+//   v17 -> v18: screenshots route themselves — the browser captures via
+//               activeTab when granted, silently via the Chrome debugger when
+//               the build/license/setting allow it (capturedVia: "debugger"),
+//               and only then asks for the icon click (retry window now ~10s);
+//               check_connection reports the connected SN Utils build
+//               (helper.debuggerAvailable, tier, proFeatures +
+//               browserDebuggerEnabled); capture_full_page (and CDP responses
+//               generally) return url/tabTitle so agents can verify they
+//               captured the right tab without rendering the image.
+const INSTRUCTIONS_VERSION = 18;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the

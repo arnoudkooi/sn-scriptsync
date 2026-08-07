@@ -1,5 +1,21 @@
 # CHANGELOG.md
 
+## Unreleased
+
+**Screenshots pick the best capture path themselves:** `take_screenshot` / `navigate_and_screenshot` capture via activeTab as before, but when the tab grant is missing the browser now checks concretely whether it can use the Chrome debugger instead (Debug edition + Pro + `browserDebugger.enabled`) and does so silently — the result says `capturedVia: "debugger"`. Only when neither path works is the user asked to click the SN Utils icon, and the retry window for that grant is now ~10s instead of 1.5s.
+
+**Agents learn the connected SN Utils build at connect time:** `check_connection` now reports whether the browser side is the Debug edition (`helper.debuggerAvailable`, plus tier and the `browserDebugger.enabled` setting), so an agent knows up front whether the debugger features (full-page capture, network/console, dialogs) exist on this session.
+
+**Debugger commands report which tab they acted on:** `capture_full_page` (and the other CDP command responses) now include the tab's `url` and `tabTitle`, so an agent can verify it captured the intended page without rendering the image.
+
+## 4.7.7 (2026-08-05)
+
+**Hardened how ScriptSync handles incoming messages and file writes**
+
+**A save whose application scope can't be resolved no longer disappears:** If the scope's `sys_scope` record is gone (uninstalled app, rebuilt instance) or isn't readable with your roles, ScriptSync asks the record itself for its scope and — when that comes up empty too — files it under `unknown_scope` and warns you, naming the scope sys_id. Previously the file was dropped without a word after a few retries. Applies to widgets as well.
+
+**A message that isn't valid JSON is now reported instead of ignored:** A malformed frame from the browser helper tab used to vanish into the extension host log, making a broken sender look like a no-op.
+
 ## 4.7.6 (2026-07-29)
 
 **Fix: Load Scope no longer floods the Pending Saves queue:** Re-fetching a scope marked every downloaded file (hundreds in a large scope) as an external pending save. Files written by ScriptSync itself are now reliably ignored by the external-changes monitor; only genuinely external edits (AI agents, git, other tools) are queued.

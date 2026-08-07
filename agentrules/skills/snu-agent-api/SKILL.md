@@ -3,7 +3,7 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=17 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=18 -->
 
 # SN ScriptSync — Agent API
 
@@ -302,11 +302,18 @@ Verify WebSocket server is running and browser helper tab is connected. **Always
     "ready": true,
     "serverRunning": true,
     "browserConnected": true,
-    "clientCount": 1,
-    "message": "Connected and ready"
+    "message": "Connected and ready",
+    "helper": { "debuggerAvailable": false, "tier": "pro", "proFeatures": true },
+    "browserDebuggerEnabled": false
   }
 }
 ```
+
+**`helper` tells you which SN Utils build is connected.** `debuggerAvailable` is true only on the SN Utils Debug edition; most users run the regular build. You don't need this to take screenshots (`take_screenshot` auto-routes to the best available path), but it tells you what else this session can do:
+
+- `debuggerAvailable: false` → explicit debugger commands (`capture_full_page`, network/console capture, dialog handling) will return `E_CDP_UNAVAILABLE`, and a screenshot on an ungranted tab will require the user's one-time icon click.
+- `debuggerAvailable: true` + `proFeatures: true` + `browserDebuggerEnabled: true` → full-page/element captures and network/console/dialog debugging are available, and screenshots never need a permission click.
+- `helper: null` → the handshake hasn't arrived yet (or the license lookup failed); retry or fall back to `get_capabilities` for the authoritative, browser-verified view.
 
 **Response (server not running):**
 ```json
@@ -1546,12 +1553,15 @@ Refresh browser tabs showing the artifact preview. Useful after updating a widge
 **Note:** This refreshes ALL browser tabs matching the widget's preview URLs, plus the active tab if it's on the same instance.
 
 ### `take_screenshot` ⚡ (Remote - Async)
-Take a screenshot of a ServiceNow page. Requires explicit user action on first use.
+Take a screenshot of a ServiceNow page. The browser picks the best capture path it actually has — no capability juggling needed on your side:
 
-**⚠️ IMPORTANT: Permission Required**
-- **First screenshot**: User must click the SN Utils extension icon on the target tab to grant permission
-- **Subsequent screenshots**: Will reuse the same tab without re-approval (when possible)
-- If permission is denied, the response will include an error message guiding the user
+1. **activeTab** (tab already granted): captures directly, as always.
+2. **Chrome debugger**: when the grant is missing and the connected build supports it (Debug edition + Pro + `sn-scriptsync.browserDebugger.enabled`), the browser captures via the debugger instead — no user action, just a brief flash of Chrome's debugger banner. The result carries `"capturedVia": "debugger"`.
+3. **Ask the user**: only when neither path works does `E_SCREENSHOT_PERMISSION` surface — the user must click the SN Utils extension icon on the target tab, and a retry is built in (see below).
+
+**Permission notes (regular build — most users):**
+- **First screenshot**: user must click the SN Utils extension icon on the target tab to grant permission
+- **Subsequent screenshots**: reuse the same tab without re-approval (when possible)
 
 **Request:**
 ```json
@@ -1582,10 +1592,13 @@ Take a screenshot of a ServiceNow page. Requires explicit user action on first u
     "filePath": "/workspace/screenshots/screenshot_2024-12-09T14-00-00.png",
     "fileName": "screenshot_2024-12-09T14-00-00.png",
     "url": "https://instance.service-now.com/sp?id=my_widget",
-    "tabTitle": "My Widget - ServiceNow"
+    "tabTitle": "My Widget - ServiceNow",
+    "capturedVia": "activeTab"
   }
 }
 ```
+
+`capturedVia` is `"activeTab"` or `"debugger"` — which path actually produced the image.
 
 **Response (permission needed):**
 ```json
@@ -1598,7 +1611,7 @@ Take a screenshot of a ServiceNow page. Requires explicit user action on first u
 }
 ```
 
-The extension auto-retries once (~1.5s) after a permission error before surfacing `E_SCREENSHOT_PERMISSION`, giving you a moment to click the extension icon. The retry stays pinned to the tab selected by the first attempt so a ServiceNow redirect cannot open duplicate tabs.
+The extension auto-retries once (~10s) after a permission error before surfacing `E_SCREENSHOT_PERMISSION`, giving the user time to click the extension icon — so a "slow" screenshot call usually means the grant flow is in progress, not a hang. The retry stays pinned to the tab selected by the first attempt so a ServiceNow redirect cannot open duplicate tabs.
 
 **Use cases:**
 - Capture widget preview for visual verification
@@ -1612,7 +1625,7 @@ The extension auto-retries once (~1.5s) after a permission error before surfacin
 4. If no matching tab is found, a new tab will be opened
 
 **Handling permission errors:**
-When receiving a permission error, inform the user they need to click the SN Utils extension icon, then retry the screenshot command.
+If `E_SCREENSHOT_PERMISSION` surfaces, the debugger route was already tried or isn't available — inform the user they need to click the SN Utils extension icon, then retry the screenshot command. (If the error's details say `cdpFallbackAvailable: true`, the build could do debugger captures but the user hasn't enabled `sn-scriptsync.browserDebugger.enabled` — you can mention that as an alternative.)
 
 ### `navigate_and_screenshot`
 
@@ -1635,11 +1648,13 @@ Open/activate a URL, wait for it to finish loading, settle briefly, then screens
 
 **Response:**
 ```json
-{ "status": "success", "result": { "saved": true, "filePath": ".../screenshots/screenshot_....png", "tabId": 42, "navigated": true } }
+{ "status": "success", "result": { "saved": true, "filePath": ".../screenshots/screenshot_....png", "tabId": 42, "url": "https://dev.service-now.com/incident.do?sys_id=-1", "tabTitle": "Incident | ServiceNow", "navigated": true } }
 ```
 
+Verify `url`/`tabTitle` match the page you intended — cheaper than rendering the image.
+
 **Errors:**
-- `E_SCREENSHOT_PERMISSION` — the browser could not capture the tab (not capturable / permission).
+- `E_SCREENSHOT_PERMISSION` — the browser could not capture the tab. Navigation has already happened at that point, so the target page is on screen; the same capture routing and recovery as `take_screenshot` applies (debugger path when available, then a ~10s icon-click retry window).
 - `E_INVALID_PARAMS` — missing `url`.
 
 ### `run_slash_command` ⚡ (Remote - Async)

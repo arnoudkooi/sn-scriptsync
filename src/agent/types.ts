@@ -26,6 +26,14 @@ export interface AgentResponse {
  * The runtime a command handler sees. Commands never touch ws, fs, or the VS
  * Code API directly; they ask the context.
  */
+/** What the connected SN Utils build reported about itself on connect. */
+export interface HelperBuildInfo {
+	debuggerAvailable?: boolean;
+	proFeatures?: boolean;
+	tier?: 'free' | 'pro' | 'trial' | 'enterprise';
+	licenseResolved?: boolean;
+}
+
 export interface AgentContext {
 	request: AgentRequest;
 	instanceFolder: string;
@@ -43,6 +51,9 @@ export interface AgentContext {
 	/** True when Agent API writes must be held for manual review
 	 * (sn-scriptsync.agentApi.reviewWrites). */
 	reviewWritesEnabled(): boolean;
+	/** Build/license handshake of the connected helper tab (helperBuildInfo /
+	 * helperLicenseInfo), or null before the handshake / when disconnected. */
+	getHelperBuildInfo(): HelperBuildInfo | null;
 	/** Stage a write for manual review instead of pushing it now. Returns the
 	 * staged response a command should hand straight back to the caller. */
 	stageWrite(meta: StagedWriteMeta): StagedWriteResult;

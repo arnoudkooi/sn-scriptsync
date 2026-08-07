@@ -3,6 +3,7 @@ import * as path from 'path';
 import { CommandHandler, AgentContext } from '../types';
 import { AgentError, inferCodeFromMessage } from '../errors';
 import { getSetting } from './_shared';
+import { assertPathUnderRoot, safeJoinUnderRoot } from '../../workspaceRoot';
 
 // Browser debugger (Chrome DevTools Protocol) commands — Pro.
 //
@@ -161,11 +162,12 @@ const capture_full_page: CommandHandler = {
 		const ext = r.format === 'jpeg' ? 'jpg' : 'png';
 		const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 		const fileName = params?.fileName || `fullpage_${timestamp}.${ext}`;
-		const savePath = path.join(screenshotsFolder, fileName);
+		const savePath = safeJoinUnderRoot(workspacePath, 'screenshots', fileName);
+		assertPathUnderRoot(savePath, workspacePath);
 		fs.writeFileSync(savePath, new Uint8Array(Buffer.from(r.imageData, 'base64')));
 		ctx.log(`Full-page screenshot saved to ${savePath}`);
 
-		return { saved: true, filePath: savePath, fileName, format: r.format || 'png', clip: r.clip || null, tabId: r.tabId };
+		return { saved: true, filePath: savePath, fileName, format: r.format || 'png', clip: r.clip || null, tabId: r.tabId, url: r.tabUrl, tabTitle: r.tabTitle };
 	},
 };
 

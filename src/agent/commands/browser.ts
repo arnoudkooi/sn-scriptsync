@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { getWorkspaceRoot } from '../../workspaceRoot';
+import { assertPathUnderRoot, getWorkspaceRoot, safeJoinUnderRoot } from '../../workspaceRoot';
 import { CommandHandler, AgentContext } from '../types';
 import { AgentError, inferCodeFromMessage } from '../errors';
 import { mustGetInstanceSettings, readBackRecord, restRequest, getSetting } from './_shared';
@@ -245,6 +245,11 @@ async function requestCapture(ctx: AgentContext, opts: { url?: string; tabId?: a
 		exactUrl: opts.exactUrl || false,
 		fileName: opts.fileName,
 		savePath: opts.savePath,
+		// The user's browserDebugger.enabled opt-in. When true, the browser may
+		// route a permission-blocked capture through the Chrome debugger instead
+		// of surfacing E_SCREENSHOT_PERMISSION (it still verifies adapter + Pro
+		// on its side). Old helper builds simply ignore the flag.
+		allowDebugger: getSetting('browserDebugger.enabled', false),
 	});
 	ctx.log(`Agent API: Sent screenshot request for ${opts.url || `tabId:${opts.tabId}`}`);
 	const response = await pending;
@@ -266,9 +271,13 @@ async function requestCapture(ctx: AgentContext, opts: { url?: string; tabId?: a
 }
 
 /**
- * Shared screenshot capture: round-trips takeScreenshot, writes the PNG, and
- * auto-retries ONCE on a permission error (giving the user a moment to click
- * the extension icon to grant activeTab).
+ * Shared screenshot capture: round-trips takeScreenshot and writes the PNG.
+ * The browser picks the best capture path it actually has: activeTab when the
+ * tab is granted, else the Chrome debugger (only when the browserDebugger
+ * opt-in is on and its build/license support it — result carries
+ * capturedVia: "debugger"). Only when neither works does
+ * E_SCREENSHOT_PERMISSION surface; we then retry ONCE after a pause long
+ * enough for the user to actually click the extension icon and grant activeTab.
  */
 async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: any; fileName?: string; exactUrl?: boolean }) {
 	const workspacePath = ctx.workspaceRoot;
@@ -279,7 +288,7 @@ async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: an
 
 	const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 	const fileName = opts.fileName || `screenshot_${timestamp}.png`;
-	const savePath = path.join(screenshotsFolder, fileName);
+	const savePath = safeJoinUnderRoot(workspacePath, 'screenshots', fileName);
 	const captureOpts = { url: opts.url, tabId: opts.tabId, fileName, savePath, exactUrl: opts.exactUrl };
 
 	let response: any;
@@ -288,8 +297,11 @@ async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: an
 	} catch (e) {
 		if (e instanceof AgentError && e.code === 'E_SCREENSHOT_PERMISSION') {
 			const retryTabId = e.details?.tabId ?? captureOpts.tabId;
-			ctx.log(`Agent API: Screenshot permission denied — retrying once in 1.5s${retryTabId ? ` on tab ${retryTabId}` : ''}`);
-			await delay(1500);
+			ctx.log(`Agent API: Screenshot permission denied — retrying once in 10s${retryTabId ? ` on tab ${retryTabId}` : ''}`);
+			await delay(10_000);
+			if (!ctx.hasBrowserClient()) {
+				throw new AgentError('E_BROWSER_DISCONNECTED', 'Browser helper disconnected while waiting for screenshot permission.');
+			}
 			response = await requestCapture(ctx, { ...captureOpts, tabId: retryTabId });
 		} else {
 			throw e;
@@ -297,6 +309,7 @@ async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: an
 	}
 
 	const imageBuffer = Buffer.from(response.imageData, 'base64');
+	assertPathUnderRoot(savePath, workspacePath);
 	fs.writeFileSync(savePath, new Uint8Array(imageBuffer));
 	ctx.log(`Screenshot saved to ${savePath}`);
 
@@ -307,6 +320,7 @@ async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: an
 		url: response?.url || opts.url,
 		tabId: response?.tabId ?? opts.tabId,
 		tabTitle: response?.tabTitle,
+		capturedVia: response?.capturedVia || 'activeTab',
 	};
 }
 

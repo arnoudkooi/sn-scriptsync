@@ -14,6 +14,9 @@ import {
 	getSyncFolderCandidates,
 	needsFolderChoice,
 	isMultiRootWorkspace,
+	assertPathUnderRoot,
+	safeJoinUnderRoot,
+	sanitizePathComponent,
 } from "./workspaceRoot";
 import * as path from "path";
 import nodePath = require('path');
@@ -354,14 +357,16 @@ function stageCreateToFiles(reviewId: string, request: AgentRequest, instanceFol
 	const recName = String(fields.name || reviewId);
 	const cleanName = recName.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || reviewId;
 	const isFolder = Constants.FOLDERRECORDTABLES.includes(table);
-	const base = getWorkspaceRoot() + path.sep + path.basename(instanceFolder) + path.sep + scopeName + path.sep + table + path.sep;
+	const workspaceRoot = getWorkspaceRoot() || '';
 	const staged: StagedCreate = { reviewId, label, request, instanceFolder, files: [] };
 	let firstPath: string | undefined;
 
 	for (const [field, content] of Object.entries(fields)) {
 		if (!isCodeField(field)) continue;
-		const sep = isFolder ? path.sep : '.';
-		const filePath = base + cleanName + sep + field + extForFieldType(inferFieldType(field));
+		const fieldFileName = field + extForFieldType(inferFieldType(field));
+		const filePath = isFolder
+			? safeJoinUnderRoot(workspaceRoot, path.basename(instanceFolder), scopeName, table, cleanName, fieldFileName)
+			: safeJoinUnderRoot(workspaceRoot, path.basename(instanceFolder), scopeName, table, `${cleanName}.${fieldFileName}`);
 		const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
 		captureReviewBaseline(filePath);
 		eu.writeFile(filePath, text, false, function () { });
@@ -489,6 +494,7 @@ function undoReviewFile(filePath: string) {
 	reviewBaselines.delete(reviewKey(filePath));
 	if (!base) return;
 	try {
+		assertPathUnderRoot(filePath); // applies to both restoration and deletion
 		if (base.existed) {
 			ExtensionUtils.markSelfWrite(filePath);
 			fs.writeFileSync(filePath, base.content);
@@ -728,6 +734,23 @@ function auditLog(event: string, data: Record<string, any> = {}, runId?: string)
 	}
 }
 
+// A frame that isn't valid JSON used to be swallowed by the message handler's
+// catch-all, so a broken sender looked exactly like a no-op. Surface it instead
+// — once per session, since a misbehaving sender tends to repeat. The raw frame
+// is deliberately not logged: it carries g_ck and record content.
+let malformedFrameReported = false;
+function reportMalformedFrame(raw: any, err: any) {
+	const bytes = typeof raw?.length === 'number' ? raw.length : String(raw).length;
+	const reason = err instanceof SyntaxError ? 'invalid JSON syntax' : 'message parse failure';
+	console.error(`[sn-scriptsync] discarded malformed WebSocket frame (${bytes} bytes): ${reason}`);
+	debugLog(`Discarded malformed WebSocket frame (${bytes} bytes): ${reason}`);
+	auditLog('malformed_frame', { bytes, reason });
+
+	if (malformedFrameReported) return;
+	malformedFrameReported = true;
+	vscode.window.showErrorMessage('sn-scriptsync ignored a message that is not valid JSON. Enable debug logging for diagnostic metadata.');
+}
+
 function getInstanceRootForPath(filePath: string): string | undefined {
 	const workspaceRoot = getWorkspaceRoot() || '';
 	if (!workspaceRoot || !filePath.startsWith(workspaceRoot)) {
@@ -923,6 +946,7 @@ function handleScreenshotResponse(responseJson: any) {
 		const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 		const fileName = responseJson.fileName || `screenshot_${timestamp}.png`;
 		const filePath = path.join(screenshotsFolder, fileName);
+		assertPathUnderRoot(filePath); // instance-supplied fileName must not escape the sync root
 		const buf = Buffer.from(responseJson.imageData, 'base64');
 		fs.writeFileSync(filePath, new Uint8Array(buf));
 		debugLog(`Screenshot saved to ${filePath}`);
@@ -1129,6 +1153,16 @@ vscode.workspace.onDidSaveTextDocument(document => {
 	}
 });
 
+// Build/license handshake of the currently connected helper tab (from its
+// helperBuildInfo / helperLicenseInfo messages). Module-level so the Agent API
+// can report at connect time which SN Utils build it is talking to.
+let connectedHelperInfo: {
+	debuggerAvailable?: boolean;
+	proFeatures?: boolean;
+	tier?: 'free' | 'pro' | 'trial' | 'enterprise';
+	licenseResolved?: boolean;
+} | null = null;
+
 export function activate(context: vscode.ExtensionContext) {
 
 	extensionContext = context;
@@ -1145,6 +1179,7 @@ export function activate(context: vscode.ExtensionContext) {
 		log: (msg) => debugLog(msg),
 		reviewWritesEnabled: () => reviewWritesEnabled(),
 		stageAgentWrite: (input) => stageAgentWrite(input),
+		getHelperBuildInfo: () => connectedHelperInfo,
 	});
 	setSyncStateProvider(() => ({
 		pendingFiles: Array.from(pendingFiles),
@@ -1974,12 +2009,14 @@ async function startServers() {
 
 		if (!serverRunning) return;
 
-		if (req.headers.origin.startsWith('http')) { // only allow via extension pages like chrome-extension://;
-			ws.close(0, 'Not allowed');
+		if (typeof req.headers.origin === 'string' && req.headers.origin.startsWith('http')) { // only allow via extension pages like chrome-extension://;
+			ws.close(1008, 'Not allowed');
+			return;
 		}
 
 		if (wss.clients.size > 1) {
-			ws.close(0, 'Max connection');
+			ws.close(1008, 'Max connection');
+			return;
 		}
 
 		let helperBuildInfo: {
@@ -2027,15 +2064,24 @@ async function startServers() {
 		ws.on('close', () => {
 			clearTimeout(capabilityMessageTimer);
 			if (debugLicenseTimer) clearTimeout(debugLicenseTimer);
+			connectedHelperInfo = null;
+			pendingRegistry.rejectAll('E_BROWSER_DISCONNECTED', 'Browser helper disconnected. Open the SN Utils helper tab and try again.');
 		});
 
 		ws.on('message', function incoming(message) {
+			let messageJson;
 			try {
-				let messageJson = JSON.parse(message)
+				messageJson = JSON.parse(message);
+			} catch (e) {
+				reportMalformedFrame(message, e);
+				return;
+			}
+			try {
 				if (messageJson?.action === 'helperBuildInfo') {
 					helperBuildInfo = {
 						debuggerAvailable: messageJson.debuggerAvailable === true,
 					};
+					connectedHelperInfo = { ...helperBuildInfo };
 					clearTimeout(capabilityMessageTimer);
 					if (helperBuildInfo.debuggerAvailable) {
 						debugLicenseTimer = setTimeout(sendCapabilityMessage, 3000);
@@ -2054,6 +2100,7 @@ async function startServers() {
 						tier,
 						licenseResolved: true,
 					};
+					connectedHelperInfo = { ...helperBuildInfo };
 					if (debugLicenseTimer) clearTimeout(debugLicenseTimer);
 					sendCapabilityMessage();
 					return;
@@ -2413,9 +2460,37 @@ function stopServers() {
 	// bookkeeping. The materialised files stay on disk (and in the queue) as plain
 	// local edits the user can keep or discard.
 	clearStagedCreates();
+	reportedUnresolvedScopes.clear();
+	connectedHelperInfo = null;
+	pendingRegistry.rejectAll('E_SERVER_NOT_RUNNING', 'ScriptSync server stopped.');
 	scriptSyncStatusBarItem.tooltip = undefined;
 	updateScriptSyncStatusBarItem('Stopped');
 	setServerRunningContext(false);
+}
+
+// Where saves land when their scope sys_id can't be turned into a scope name:
+// the app was uninstalled, the instance was cloned/rebuilt with new sys_ids, or
+// sys_scope isn't readable with the current user's roles. Parking the file here
+// beats the previous behaviour of dropping the save without a word.
+const UNRESOLVED_SCOPE_FOLDER = 'unknown_scope';
+
+// One warning per instance+scope, so a scope that stays unreadable doesn't nag
+// on every keystroke-triggered save.
+const reportedUnresolvedScopes: Set<string> = new Set();
+
+function reportUnresolvedScope(instance: any, scopeId: string, table: string, sysId: string) {
+	const instanceName = instance?.name || 'unknown instance';
+	debugLog(`Scope ${scopeId} unresolved on ${instanceName} for ${table}/${sysId}; saved under ${UNRESOLVED_SCOPE_FOLDER}`);
+	auditLog('scope_unresolved', { instance: instanceName, scope: scopeId, table, sys_id: sysId });
+
+	const key = `${instanceName}:${scopeId}`;
+	if (reportedUnresolvedScopes.has(key)) return;
+	reportedUnresolvedScopes.add(key);
+	vscode.window.showWarningMessage(
+		`sn-scriptsync: could not resolve application scope ${scopeId} on ${instanceName}. ` +
+		`The scope record no longer exists or sys_scope isn't readable with your roles. ` +
+		`Files were saved under "${UNRESOLVED_SCOPE_FOLDER}".`
+	);
 }
 
 function requestInstanceScope(instance, scopeId) {
@@ -2844,10 +2919,15 @@ function saveWidget(postedJson, retry = 0) {
 		scope = scopes[postedJson.widget.sys_scope.value];
 	}
 
-	if (!scope) { //if scope could not be determined, request the scopes via websocket, abort current try and try again in a few seconds.
-		requestInstanceScope(postedJson.instance, postedJson.widget.sys_scope.value);
-		if (++retry <= 2) setTimeout(() =>{ saveWidget(postedJson, retry)}, 2500);
-		return;
+	if (!scope) {
+		//scopes.json doesn't know this sys_id: request the scopes via websocket, abort current try and try again in a few seconds.
+		if (++retry <= 2) {
+			requestInstanceScope(postedJson.instance, postedJson.widget.sys_scope.value);
+			setTimeout(() =>{ saveWidget(postedJson, retry)}, 2500);
+			return;
+		}
+		scope = UNRESOLVED_SCOPE_FOLDER;
+		reportUnresolvedScope(postedJson.instance, postedJson.widget.sys_scope.value, postedJson.tableName, postedJson.sys_id);
 	}
 
 	let scopeMappingFile = basePath + scope + nodePath.sep + postedJson.tableName + nodePath.sep + '_map.json';
@@ -3205,7 +3285,18 @@ function handleResolveScopeForSave(responseJson: any) {
 
 function saveFieldAsFile(postedJson, retry = 0) {
 
-	
+	// Instance-supplied name/table must be safe single path segments before they
+	// build any file path. The write choke-point (ExtensionUtils.writeFile) also
+	// enforces containment, but reject early with a clear message. Return rather
+	// than throw so retries scheduled via setTimeout cannot surface unhandled.
+	try {
+		sanitizePathComponent(postedJson?.instance?.name);
+		if (postedJson?.table) sanitizePathComponent(postedJson.table);
+	} catch (e) {
+		console.warn('[sn-scriptsync] refused save — unsafe path component:', (e as Error).message);
+		return;
+	}
+
 	let basePath = getWorkspaceRoot() + nodePath.sep + postedJson.instance.name + nodePath.sep;
 	
 	let scope:string;
@@ -3230,10 +3321,22 @@ function saveFieldAsFile(postedJson, retry = 0) {
 		scope = scopes[postedJson.scope];
 	}
 
-	if (!scope) { //if scope could not be determined, request the scopes via websocket, abort current try and try again in a few seconds.
-		requestInstanceScope(postedJson.instance, postedJson.scope);
-		if (++retry <= 2) setTimeout(() =>{ saveFieldAsFile(postedJson, retry)}, 2500);
-		return;
+	if (!scope) {
+		//scopes.json doesn't know this sys_id: request the scopes via websocket, abort current try and try again in a few seconds.
+		if (!postedJson.scopeResolveAttempted && ++retry <= 2) {
+			requestInstanceScope(postedJson.instance, postedJson.scope);
+			setTimeout(() =>{ saveFieldAsFile(postedJson, retry)}, 2500);
+			return;
+		}
+		// sys_scope returned nothing for that sys_id. Second chance: ask the
+		// record itself for sys_scope.scope, which still answers when the scope
+		// list is unreadable but the record is.
+		if (!postedJson.scopeResolveAttempted && postedJson.sys_id && wss && wss.clients.size) {
+			resolveScopeThenSave(postedJson);
+			return;
+		}
+		scope = UNRESOLVED_SCOPE_FOLDER;
+		reportUnresolvedScope(postedJson.instance, postedJson.scope, postedJson.table, postedJson.sys_id);
 	}
 
 	//the configured tables will get a distinct folder containing the files.

@@ -3,7 +3,7 @@
 // status of the WS server. Rather than importing the whole extension.ts
 // (circular) the host wires up this shim during activate().
 
-import { AgentContext, AgentRequest, StagedWriteMeta, StagedWriteResult } from './types';
+import { AgentContext, AgentRequest, HelperBuildInfo, StagedWriteMeta, StagedWriteResult } from './types';
 import * as pendingRegistry from './pendingRegistry';
 import { getWorkspaceRoot } from '../workspaceRoot';
 
@@ -17,6 +17,8 @@ export interface Runtime {
 	reviewWritesEnabled?(): boolean;
 	/** Host hook that parks a write in the Pending Saves queue. */
 	stageAgentWrite?(input: StagedWriteMeta & { request: AgentRequest; instanceFolder: string }): StagedWriteResult;
+	/** Build/license handshake of the connected helper tab, if any. */
+	getHelperBuildInfo?(): HelperBuildInfo | null;
 }
 
 let runtime: Runtime | undefined;
@@ -46,6 +48,7 @@ export function buildContext(request: AgentRequest, instanceFolder: string): Age
 		isServerRunning: () => r.isServerRunning(),
 		log: (msg) => r.log(msg),
 		reviewWritesEnabled: () => (r.reviewWritesEnabled ? r.reviewWritesEnabled() : false),
+		getHelperBuildInfo: () => (r.getHelperBuildInfo ? r.getHelperBuildInfo() : null),
 		stageWrite: (meta) => {
 			if (!r.stageAgentWrite) {
 				throw new Error('Review mode is on but the host did not wire stageAgentWrite().');

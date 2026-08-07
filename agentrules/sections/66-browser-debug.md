@@ -47,12 +47,17 @@ drops and you actually read results:
   Chrome debugger (`Page.captureScreenshot`), which needs **no per-tab grant**
   (only the debugger attach + brief yellow banner) and also does whole-page /
   element-selector capture.
-- **When `take_screenshot` returns `E_SCREENSHOT_PERMISSION` and Pro/CDP is
-  available, prefer falling back to `capture_full_page`** (e.g. `fullPage:false`
-  for a viewport-equivalent shot) instead of prompting the user to click the SN
-  Utils icon. Only fall back to the icon-click checkpoint if the debugger is
-  unavailable (`E_PRO_REQUIRED` / `E_CDP_UNAVAILABLE`) or the user has asked you
-  not to attach the debugger.
+- **Screenshots route themselves:** just call `take_screenshot` (or
+  `navigate_and_screenshot`) — the browser uses activeTab when the tab is
+  granted, silently switches to the debugger when the grant is missing and
+  the build + Pro + `browserDebugger.enabled` allow it (result carries
+  `capturedVia: "debugger"`), and only asks the user to click the SN Utils
+  icon as a last resort. Call `capture_full_page` explicitly only for
+  whole-page or element-selector captures. `check_connection`'s
+  `helper.debuggerAvailable` tells you up front whether the debugger features
+  (full-page capture, network/console, dialogs) exist on this session — the
+  Debug edition is the exception, not the rule. Don't use the debugger path at
+  all if the user has asked you not to attach the debugger.
 - **Dialogs:** the per-action `suppressDialogs` flag on `run_ui_action` /
   `click_element` is lighter and needs no debugger — use it for a single action.
   Use `set_dialog_handler` only when you need a persistent handler across

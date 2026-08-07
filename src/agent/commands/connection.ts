@@ -13,9 +13,20 @@ const check_connection: CommandHandler = {
 	name: 'check_connection',
 	noInstance: true,
 	docs: {
-		summary: 'Verify that the WS server is running and a browser tab is connected.',
+		summary: 'Verify that the WS server is running and a browser tab is connected, and learn which SN Utils build you are talking to.',
 		request: { command: 'check_connection', id: 'chk_1' },
-		response: { status: 'success', result: { ready: true, serverRunning: true, browserConnected: true, clientCount: 1 } },
+		response: {
+			status: 'success',
+			result: {
+				ready: true,
+				serverRunning: true,
+				browserConnected: true,
+				message: 'Connected and ready',
+				helper: { debuggerAvailable: false, tier: 'pro', proFeatures: true },
+				browserDebuggerEnabled: false,
+			},
+		},
+		notes: '`helper` is the connected SN Utils build\'s self-report: `debuggerAvailable` is true only on the Debug edition (most users run the regular build). Screenshots need no planning — take_screenshot auto-routes to the best available path — but explicit debugger commands (capture_full_page, network/console capture, dialogs) return E_CDP_UNAVAILABLE without the Debug edition. `helper` is null when the handshake has not arrived; `tier`/`proFeatures` may lag the build info by a moment. `browserDebuggerEnabled` mirrors the sn-scriptsync.browserDebugger.enabled setting. get_capabilities remains the authoritative, browser-verified view.',
 	},
 	async handle(ctx) {
 		const serverRunning = ctx.isServerRunning();
@@ -37,11 +48,22 @@ const check_connection: CommandHandler = {
 				message: 'No browser connected - open helper tab with /token',
 			};
 		}
+		const helper = ctx.getHelperBuildInfo();
 		return {
 			ready: true,
 			serverRunning: true,
 			browserConnected: true,
 			message: 'Connected and ready',
+			// Which SN Utils build is on the other end — lets an agent pick the
+			// right capture strategy up front instead of discovering it via errors.
+			helper: helper
+				? {
+					debuggerAvailable: !!helper.debuggerAvailable,
+					tier: helper.tier ?? null,
+					proFeatures: !!helper.proFeatures,
+				}
+				: null,
+			browserDebuggerEnabled: isBrowserDebuggerEnabled(),
 		};
 	},
 };

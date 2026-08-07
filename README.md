@@ -3,6 +3,14 @@ Easy integration from ServiceNow to VS Code, enabling you to script in a full-fl
 
 ![Use Extension](img/sn-scriptsync.gif)
 
+## Source visibility and trust
+
+sn-scriptsync runs locally, writes files to your development workspace, and can create or update records in connected ServiceNow instances.
+
+The extension's source code is published in this repository intentionally. This allows users and security teams to inspect how local files, credentials, network connections, and ServiceNow data are handled.
+
+Source visibility does not mean that sn-scriptsync is open source. Viewing and reviewing the code is permitted, but use, modification, redistribution, republication, and commercial integration remain subject to the [SN Utils / sn-scriptsync License](LICENSE.md).
+
 ## What's New in 4.0 - AI Agent Support 🤖
 
 Version 4.0 is a major release bringing **native AI coding assistant support** and powerful automation capabilities to sn-scriptsync.
@@ -326,11 +334,9 @@ Please report an issue on GitHub if you experience problems, or have a feature r
 
 ## License & Warranty
 
-This tool comes as is with no warranty. Not allowed to copy or republish this extension or its code.
+sn-scriptsync is source-available and provided as is, without warranty. See the [SN Utils / sn-scriptsync License](LICENSE.md) for permitted use, restrictions, third-party software, warranty, and liability terms.
 
 > **📋 Licensing Update Coming Soon**  
 > sn-scriptsync will receive an updated license with the upcoming SN Utils Store App release, covering enterprise usage, redistribution, and commercial integration.  
 > Questions? Contact: arnoud@snutils.com
-
-
 

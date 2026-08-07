@@ -4,7 +4,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { open } from 'fs';
 import { Constants } from "./constants";
-import { getWorkspaceRoot } from "./workspaceRoot";
+import { getWorkspaceRoot, assertPathUnderRoot } from "./workspaceRoot";
 
 let idx = 0;
 
@@ -366,10 +366,13 @@ export class ExtensionUtils {
 
     writeFile(path: string, contents: string, openFile, cb: Function, myThis = this) {
 
+        try { assertPathUnderRoot(path); } catch (e) { return cb(e); }
+
         ExtensionUtils.markSelfWrite(path);
 
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
+            try { assertPathUnderRoot(path); } catch (e) { return cb(e); }
             fs.writeFile(path, contents, (error) => { /* handle error */ });
             vscode.workspace.openTextDocument(path).then(doc => {
                 if (openFile){
@@ -388,10 +391,13 @@ export class ExtensionUtils {
 
     writeFileIfNotExists(path, contents, openFile, cb) {
 
+        try { assertPathUnderRoot(path); } catch (e) { return cb(e); }
+
         ExtensionUtils.markSelfWrite(path);
 
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
+            try { assertPathUnderRoot(path); } catch (e) { return cb(e); }
             fs.writeFile(path, contents, { "flag": "wx" }, (error) => { /* handle error */ });
             vscode.workspace.openTextDocument(path).then(doc => {
                 if (openFile){
@@ -408,7 +414,10 @@ export class ExtensionUtils {
 
     writeInstanceSettings(instance) {
         var path = getWorkspaceRoot() + nodePath.sep + instance.name + nodePath.sep + "_settings.json";
+        try { assertPathUnderRoot(path); } catch (e) { console.warn('[sn-scriptsync] refused instance settings write:', (e as Error).message); return; }
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
+			if (err) return;
+			try { assertPathUnderRoot(path); } catch (e) { console.warn('[sn-scriptsync] refused instance settings write:', (e as Error).message); return; }
             fs.writeFile(path, JSON.stringify(instance, null, 4), (error) => { /* handle error */ });
         });
         instanceSettings[instance.name] = instance;

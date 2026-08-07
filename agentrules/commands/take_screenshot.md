@@ -1,10 +1,13 @@
 ### `take_screenshot` ⚡ (Remote - Async)
-Take a screenshot of a ServiceNow page. Requires explicit user action on first use.
+Take a screenshot of a ServiceNow page. The browser picks the best capture path it actually has — no capability juggling needed on your side:
 
-**⚠️ IMPORTANT: Permission Required**
-- **First screenshot**: User must click the SN Utils extension icon on the target tab to grant permission
-- **Subsequent screenshots**: Will reuse the same tab without re-approval (when possible)
-- If permission is denied, the response will include an error message guiding the user
+1. **activeTab** (tab already granted): captures directly, as always.
+2. **Chrome debugger**: when the grant is missing and the connected build supports it (Debug edition + Pro + `sn-scriptsync.browserDebugger.enabled`), the browser captures via the debugger instead — no user action, just a brief flash of Chrome's debugger banner. The result carries `"capturedVia": "debugger"`.
+3. **Ask the user**: only when neither path works does `E_SCREENSHOT_PERMISSION` surface — the user must click the SN Utils extension icon on the target tab, and a retry is built in (see below).
+
+**Permission notes (regular build — most users):**
+- **First screenshot**: user must click the SN Utils extension icon on the target tab to grant permission
+- **Subsequent screenshots**: reuse the same tab without re-approval (when possible)
 
 **Request:**
 ```json
@@ -35,10 +38,13 @@ Take a screenshot of a ServiceNow page. Requires explicit user action on first u
     "filePath": "/workspace/screenshots/screenshot_2024-12-09T14-00-00.png",
     "fileName": "screenshot_2024-12-09T14-00-00.png",
     "url": "https://instance.service-now.com/sp?id=my_widget",
-    "tabTitle": "My Widget - ServiceNow"
+    "tabTitle": "My Widget - ServiceNow",
+    "capturedVia": "activeTab"
   }
 }
 ```
+
+`capturedVia` is `"activeTab"` or `"debugger"` — which path actually produced the image.
 
 **Response (permission needed):**
 ```json
@@ -51,7 +57,7 @@ Take a screenshot of a ServiceNow page. Requires explicit user action on first u
 }
 ```
 
-The extension auto-retries once (~1.5s) after a permission error before surfacing `E_SCREENSHOT_PERMISSION`, giving you a moment to click the extension icon. The retry stays pinned to the tab selected by the first attempt so a ServiceNow redirect cannot open duplicate tabs.
+The extension auto-retries once (~10s) after a permission error before surfacing `E_SCREENSHOT_PERMISSION`, giving the user time to click the extension icon — so a "slow" screenshot call usually means the grant flow is in progress, not a hang. The retry stays pinned to the tab selected by the first attempt so a ServiceNow redirect cannot open duplicate tabs.
 
 **Use cases:**
 - Capture widget preview for visual verification
@@ -65,5 +71,5 @@ The extension auto-retries once (~1.5s) after a permission error before surfacin
 4. If no matching tab is found, a new tab will be opened
 
 **Handling permission errors:**
-When receiving a permission error, inform the user they need to click the SN Utils extension icon, then retry the screenshot command.
+If `E_SCREENSHOT_PERMISSION` surfaces, the debugger route was already tried or isn't available — inform the user they need to click the SN Utils extension icon, then retry the screenshot command. (If the error's details say `cdpFallbackAvailable: true`, the build could do debugger captures but the user hasn't enabled `sn-scriptsync.browserDebugger.enabled` — you can mention that as an alternative.)
 

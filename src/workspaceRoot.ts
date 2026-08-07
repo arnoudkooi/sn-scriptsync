@@ -175,3 +175,19 @@ export function needsFolderChoice(): boolean {
 	if (rememberedRoot && paths.includes(rememberedRoot)) return false;
 	return getSyncFolderCandidates().length !== 1;
 }
+
+// --- Path-traversal containment ------------------------------------------------
+//
+// Pure logic lives in ./pathSafety (vscode-free, unit-tested). Here we only add
+// the workspace-root default so call sites can write `assertPathUnderRoot(path)`.
+export { sanitizePathComponent, safeJoinUnderRoot } from './pathSafety';
+import { assertPathWithinRoot } from './pathSafety';
+
+/**
+ * Throw unless `targetPath` resolves inside `root` (default: the sync workspace
+ * root). Applied immediately before any write so a traversal in an
+ * instance-supplied path component cannot land a file outside the sync folder.
+ */
+export function assertPathUnderRoot(targetPath: string, root: string = getWorkspaceRoot() || ''): string {
+	return assertPathWithinRoot(targetPath, root);
+}

@@ -27,10 +27,14 @@ Capture a **full-page** (entire scrollable page, beyond the viewport) or **singl
     "fileName": "fullpage_2026-06-16T19-30-00.png",
     "format": "png",
     "clip": { "x": 0, "y": 0, "width": 1280, "height": 4200, "scale": 1 },
-    "tabId": 42
+    "tabId": 42,
+    "url": "https://dev.service-now.com/incident.do?sys_id=abc123",
+    "tabTitle": "Incident | ServiceNow"
   }
 }
 ```
+
+Verify `url`/`tabTitle` match the page you intended — without an explicit `tabId` the capture targets the first matching ServiceNow tab, which may not be the one you navigated.
 
 **Error codes:** `E_PRO_REQUIRED`, `E_CDP_UNAVAILABLE`, `E_DEBUGGER_BUSY`, `E_NO_ELEMENT` (selector matched nothing / not visible), `E_NO_TAB`, `E_BROWSER_DISCONNECTED`, `E_TIMEOUT`.
 
