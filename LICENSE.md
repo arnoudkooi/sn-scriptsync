@@ -1,11 +1,3 @@
-## Licensing Change Notice
-With the release of the upcoming SN Utils Store App, this license will be updated.  
-The revised license will further clarify usage rights, redistribution boundaries, and commercial integration rules.  
-The availability of the source code may also change as part of the updated licensing model.  
-No guarantees are made that sn-scriptsync or related components will remain source-visible in the future.
-
-Until that update is published, this document defines the current terms.
-
 # SN Utils / sn-scriptsync License (Source-Available, Not Open Source)
 
 Copyright © 2020–2026 SN Utils B.V. All rights reserved.
@@ -29,17 +21,6 @@ Publication of the source code does not make the software open source or place i
 - Integrate or bundle sn-scriptsync functionality into other tools, extensions, services, or commercial offerings without written permission.
 - Redistribute modified or unmodified versions of the project outside this repository.
 - Use parts of the codebase to create competing or derivative commercial tools.
-
-## Store App Licensing Update
-A revised license will be introduced together with the SN Utils **Store App** release.  
-That update will further clarify:
-
-- enterprise usage  
-- redistribution boundaries  
-- integration rules  
-- contribution incorporation into the Store App ecosystem  
-
-Until that update is published, all usage remains governed by this document.
 
 ## Third-Party Software
 Third-party software included in or referenced by sn-scriptsync remains subject to its own license terms. Nothing in this license limits or replaces rights granted under an applicable third-party license.

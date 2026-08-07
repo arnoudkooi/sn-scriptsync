@@ -335,8 +335,3 @@ Please report an issue on GitHub if you experience problems, or have a feature r
 ## License & Warranty
 
 sn-scriptsync is source-available and provided as is, without warranty. See the [SN Utils / sn-scriptsync License](LICENSE.md) for permitted use, restrictions, third-party software, warranty, and liability terms.
-
-> **📋 Licensing Update Coming Soon**  
-> sn-scriptsync will receive an updated license with the upcoming SN Utils Store App release, covering enterprise usage, redistribution, and commercial integration.  
-> Questions? Contact: arnoud@snutils.com
-
