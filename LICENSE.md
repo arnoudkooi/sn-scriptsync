@@ -14,7 +14,6 @@ Publication of the source code does not make the software open source or place i
 ## Allowed
 - Use sn-scriptsync for personal or internal organizational productivity.
 - Review the source code for transparency or learning.
-- Submit contributions through pull requests after prior discussion and in accordance with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Not Allowed
 - Re-publish sn-scriptsync or SN Utils on any browser store, extension marketplace, or distribution platform.
