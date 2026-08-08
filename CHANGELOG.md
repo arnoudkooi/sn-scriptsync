@@ -1,5 +1,13 @@
 # CHANGELOG.md
 
+## 4.7.9 (2026-08-08)
+
+**Connecting any AI agent is now a two-line instruction (Pro):** the Agent API prefers the fixed port **1977** (falling back to an ephemeral port only if it's taken) and, with a Pro/Trial/Enterprise license connected, publishes its port + token to a well-known per-user file, `~/.sn-scriptsync/agent-port.json` (written user-only, outside cloud-synced folders), alongside the existing workspace file. Terminal agents (Claude Code, Codex) then no longer need to run from the sync workspace to find ScriptSync. In-editor and workspace agent workflows stay free via the `.vscode/` port file.
+
+**The server documents itself:** `GET /api/instructions` serves the connect guide and core agent instructions straight from the running install (with `GET /api/skills` and `/api/skills/<name>` for the on-demand skills), so what an agent reads always matches the version that's running.
+
+**Copy the connect instructions with one click (Pro):** new command `sn-scriptsync: Copy agent connect instructions` puts a paste-anywhere snippet on the clipboard for any AI agent's config (global CLAUDE.md, AGENTS.md, a system prompt). The same block appears as a styled card in the SN Utils helper tab's sync log at connect time, and on demand via its "Connect an agent" link. Requires SN Utils Pro, Trial, or Enterprise; the shorter connect-time capability messages now fit on a glance.
+
 ## 4.7.8 (2026-08-08)
 
 **The Info panel's "Welcome / What's New" is now just "Settings", and holds every setting:** the page already doubled as the settings screen, but only 8 of the 13 `sn-scriptsync` settings were on it. All 13 are there now, grouped into Workspace and syncing, Agent capabilities, and Troubleshooting, including the sync folder name, external-change monitoring, the auto-sync delay, the editor context menu and debug logging. Text and number settings save when you leave the field or press Enter. What's new still appears underneath.
@@ -9,6 +17,8 @@
 **Agents learn the connected SN Utils build at connect time:** `check_connection` now reports whether the browser side is the Debug edition (`helper.debuggerAvailable`, plus tier and the `browserDebugger.enabled` setting), so an agent knows up front whether the debugger features (full-page capture, network/console, dialogs) exist on this session.
 
 **Debugger commands report which tab they acted on:** `capture_full_page` (and the other CDP command responses) now include the tab's `url` and `tabTitle`, so an agent can verify it captured the intended page without rendering the image.
+
+**New `E_PAUSED` error code:** when the user pauses agent access in the SN Utils helper tab, agent commands return a clear structured refusal (HTTP 423) telling the agent to stop and ask the user to resume.
 
 ## 4.7.7 (2026-08-05)
 

@@ -123,7 +123,12 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               (helper.debuggerAvailable, tier, proFeatures +
 //               browserDebuggerEnabled); capture_full_page (and CDP responses
 //               generally) return url/tabTitle so agents can verify they
-//               captured the right tab without rendering the image.
+//               captured the right tab without rendering the image; new
+//               E_PAUSED error — the helper tab's pause switch blocks agent
+//               commands until the user resumes; Agent API v7 — fixed port
+//               1977 (ephemeral fallback), global port file
+//               ~/.sn-scriptsync/agent-port.json, and self-describing docs
+//               endpoints (GET /api/instructions, /api/skills[/<name>]).
 const INSTRUCTIONS_VERSION = 18;
 
 // Marker that identifies a file as an extension-managed skill. The extension

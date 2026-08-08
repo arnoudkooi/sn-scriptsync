@@ -17,14 +17,14 @@ The Agent API lets AI assistants drive the extension: sync files, create/update 
 
 ## Transport 1: HTTP (recommended, event-driven)
 
-When the extension is running it spins up a local HTTP server bound to `127.0.0.1`. Port and auth token are published to `.vscode/sn-agent-port.json`:
+When the extension is running it spins up a local HTTP server bound to `127.0.0.1`, preferring the **fixed port 1977** (ephemeral fallback if taken). The actual port and auth token are published to two port files — `~/.sn-scriptsync/agent-port.json` (well-known, discoverable from any directory; written only while the connected browser has an active SN Utils Pro/Trial/Enterprise license) and `<workspace>/.vscode/sn-agent-port.json` (always written — workspace agent workflows are free):
 
 ```json
 {
-  "port": 53123,
+  "port": 1977,
   "token": "4f9a...hex...",
   "pid": 68861,
-  "apiVersion": 4,
+  "apiVersion": 6,
   "startedAt": 1734000000000
 }
 ```
@@ -32,25 +32,26 @@ When the extension is running it spins up a local HTTP server bound to `127.0.0.
 ### Discovering the endpoint
 
 ```bash
-# Unix / macOS
-PORT=$(jq -r .port .vscode/sn-agent-port.json)
-TOKEN=$(jq -r .token .vscode/sn-agent-port.json)
+# Unix / macOS — global file works from any cwd; older versions only write the workspace file
+PORT=$(jq -r .port ~/.sn-scriptsync/agent-port.json 2>/dev/null || jq -r .port .vscode/sn-agent-port.json)
+TOKEN=$(jq -r .token ~/.sn-scriptsync/agent-port.json 2>/dev/null || jq -r .token .vscode/sn-agent-port.json)
 ```
 
 ```powershell
 # Windows PowerShell
-$cfg = Get-Content .vscode/sn-agent-port.json | ConvertFrom-Json
+$cfg = Get-Content "$HOME/.sn-scriptsync/agent-port.json" | ConvertFrom-Json
 $PORT  = $cfg.port
 $TOKEN = $cfg.token
 ```
 
 ### Required discovery algorithm (do this every session)
 
-The port file lives inside the workspace, which may be synced by iCloud/OneDrive/git.
-A file from another machine or a previous VS Code session can be **stale**, so never
-trust it blindly and never cache the port/token. Each session:
+Port files can be **stale** (leftover from a crash; the workspace copy may even be synced
+by iCloud/OneDrive/git from another machine), so never trust one blindly and never cache
+the port/token. Each session:
 
-1. Read `.vscode/sn-agent-port.json` for `port`, `token`, and `pid`.
+1. Read `port`, `token`, and `pid` from `~/.sn-scriptsync/agent-port.json`, falling back to
+   `<workspace>/.vscode/sn-agent-port.json` (older versions write only the workspace file).
 2. Call `GET http://127.0.0.1:<port>/api/health`.
 3. Trust the endpoint **only if** all hold:
    - the health request succeeds (HTTP 200), and
@@ -65,12 +66,19 @@ trust it blindly and never cache the port/token. Each session:
 
 ```bash
 curl -s http://127.0.0.1:$PORT/api/health
-# → { "status": "success", "apiVersion": 4, "commands": [...], "pid": 68861 }
+# → { "status": "success", "apiVersion": 6, "commands": [...], "pid": 68861 }
 ```
 
-The extension deletes `.vscode/sn-agent-port.json` when the server stops, but a crash or
-a sync conflict can leave a stale file behind — which is exactly why the `pid` cross-check
+The extension deletes both port files when the server stops, but a crash or a sync
+conflict can leave a stale file behind — which is exactly why the `pid` cross-check
 in step 3 is mandatory before sending real commands.
+
+### Self-describing docs (no auth)
+
+The running server serves its own documentation, so instructions can never drift from
+the installed version: `GET /api/instructions` (connect guide + core instructions),
+`GET /api/skills` (skill index), `GET /api/skills/<name>` (full skill markdown). If you
+were handed only the endpoint — no workspace, no files — start there.
 
 ### Sending a command
 
@@ -114,6 +122,7 @@ HTTP status codes map to codes:
 | `E_REFERENCE_INTEGRITY` | 409 | Write/delete blocked by a reference or data-integrity constraint |
 | `E_INSTANCE_REQUIRED` / `E_INSTANCE_NOT_FOUND` | 422 | Instance not resolvable |
 | `E_DISABLED` | 423 | Feature disabled via settings (e.g. deletes, background scripts) |
+| `E_PAUSED` | 423 | The user paused agent access in the ScriptSync helper tab. Stop and tell the user — do not retry until they press Resume agents there |
 | `E_PARTIAL_FAILURE` | 207 | Batch partially succeeded — inspect per-item results |
 | `E_INTERNAL` | 500 | Unexpected error |
 | `E_ACL` / `E_TOKEN_EXPIRED` / `E_SCREENSHOT_PERMISSION` | 502 | ServiceNow rejected the request, or a tab needs a one-time capture grant (click the SN Utils icon on it, then retry) |

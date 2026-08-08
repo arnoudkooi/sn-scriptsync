@@ -15,6 +15,7 @@ export type AgentErrorCode =
 	| 'E_UNAUTHORIZED'
 	| 'E_SECURITY'
 	| 'E_DISABLED'
+	| 'E_PAUSED'
 	| 'E_NOT_FOUND'
 	| 'E_CONFIRM_REQUIRED'
 	| 'E_REFERENCE_INTEGRITY'
@@ -66,6 +67,7 @@ export function httpStatusForCode(code?: string): number {
 		case 'E_INSTANCE_NOT_FOUND':
 			return 422;
 		case 'E_DISABLED':
+		case 'E_PAUSED':
 			return 423;
 		case 'E_PARTIAL_FAILURE':
 			return 207;

@@ -25,6 +25,8 @@ import {
 	setRuntime as setAgentRuntime,
 	setSyncStateProvider,
 	startAgentHttpServer,
+	setGlobalPortFileEnabled,
+	AGENT_CONNECT_SNIPPET,
 	stopAgentHttpServer,
 	startAgentFileTransport,
 	logAgentRequestToFile,
@@ -1265,6 +1267,27 @@ export function activate(context: vscode.ExtensionContext) {
 		startServers();
 	});
 
+	vscode.commands.registerCommand('extension.copyAgentConnectInstructions', async () => {
+		// Agent connectivity is a Pro feature. Only hard-block when the
+		// connected helper positively reports a non-Pro license; with no helper
+		// connected we can't know, and the API commands gate themselves anyway.
+		if (connectedHelperInfo?.licenseResolved && !connectedHelperInfo?.proFeatures) {
+			const pick = await vscode.window.showInformationMessage(
+				'Connecting terminal AI agents (Claude Code, Codex) from any directory is a SN Utils Pro feature. Agents inside your editor workspace keep working free.',
+				'Start free trial'
+			);
+			if (pick === 'Start free trial') {
+				vscode.env.openExternal(vscode.Uri.parse('https://snutils.com/trial?utm_source=scriptsync&utm_medium=referral&utm_campaign=agent_connect'));
+			}
+			return;
+		}
+		// Static on purpose: fixed port + global port file mean the snippet is
+		// valid regardless of where the user pastes it (global CLAUDE.md,
+		// AGENTS.md, a Devin playbook, any system prompt).
+		await vscode.env.clipboard.writeText(AGENT_CONNECT_SNIPPET);
+		vscode.window.showInformationMessage('ScriptSync agent connect instructions copied. Paste them into any AI agent\'s instructions or config.');
+	});
+
 	vscode.commands.registerCommand('extension.snScriptSyncSelectFolder', async () => {
 		if (!isMultiRootWorkspace()) {
 			vscode.window.showInformationMessage('ScriptSync: folder selection only applies to multi-root workspaces.');
@@ -2098,12 +2121,12 @@ async function startServers() {
 
 	// Start the HTTP Agent API (preferred, event-driven) and optionally the
 	// legacy file-based transport. Both sit on top of the same dispatcher.
-	startAgentHttpServer({ onLog: (m) => debugLog(m) })
+	startAgentHttpServer({ onLog: (m) => debugLog(m), docsDir: agentRulesSourceDir })
 		.then((state) => {
 			agentHttpState = state;
 			debugLog(`Agent HTTP API listening on 127.0.0.1:${state.port}`);
 			// Surface the live endpoint so users can confirm the HTTP Agent API is up.
-			scriptSyncStatusBarItem.tooltip = `sn-scriptsync running\nAgent HTTP API: 127.0.0.1:${state.port}\nSee .vscode/sn-agent-port.json (port + token)`;
+			scriptSyncStatusBarItem.tooltip = `sn-scriptsync running\nAgent HTTP API: 127.0.0.1:${state.port}\nToken: ~/.sn-scriptsync/agent-port.json\nDocs: http://127.0.0.1:${state.port}/api/instructions`;
 		})
 		.catch((err) => {
 			debugLog(`Agent HTTP API failed to start: ${err?.message || err}`);
@@ -2170,7 +2193,7 @@ async function startServers() {
 				.getConfiguration('sn-scriptsync')
 				.get<boolean>('browserDebugger.enabled', false);
 			capabilityMessageSent = true;
-			const feedbackInvite = `I&rsquo;d genuinely love to hear how this works in your ServiceNow workflow. <a href="https://snutils.com/contact?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_experience" target="_blank" class="promo-link">Share your experience →</a> Or message me through whatever channel you prefer. Arnoud`;
+			const feedbackInvite = `<a href="https://snutils.com/contact?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_experience" target="_blank" class="promo-link">Share your experience →</a>`;
 			if (helperBuildInfo?.debuggerAvailable && helperBuildInfo?.proFeatures) {
 				const tierLabel = helperBuildInfo.tier === 'enterprise'
 					? 'Enterprise'
@@ -2178,14 +2201,14 @@ async function startServers() {
 						? 'Trial'
 						: 'Pro';
 				message = debuggerEnabled
-					? `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} connected:</b> You&rsquo;re using the full setup built for deeper agent debugging. Your agent can capture full pages, read console errors, monitor network responses, and handle native dialogs. ${feedbackInvite}`
-					: `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} recognized:</b> You have the complete browser-debugger setup. Enable <code>sn-scriptsync.browserDebugger.enabled</code> when you want your agent to capture full pages, read console errors, monitor network responses, and handle native dialogs. ${feedbackInvite}`;
+					? `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} connected.</b> Full agent debugging is active: full-page capture, console errors, network responses, native dialogs. ${feedbackInvite}`
+					: `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} recognized.</b> Enable <code>sn-scriptsync.browserDebugger.enabled</code> to activate full-page capture, console, network and dialog handling. ${feedbackInvite}`;
 			} else if (helperBuildInfo?.debuggerAvailable) {
 				message = helperBuildInfo.licenseResolved
-					? `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug:</b> ScriptSync recognized your debugger-capable build. Activate Pro or start a free trial to give your agent full-page capture, console errors, network responses, and native dialog handling. <a href="https://snutils.com/trial?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_edition_connected" target="_blank" class="promo-link">Start free trial →</a> ${feedbackInvite}`
-					: `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug:</b> ScriptSync recognized your debugger-capable build. Open the extension popup to confirm Pro, Trial, or Enterprise access, then enable the browser debugger in ScriptSync. ${feedbackInvite}`;
+					? `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug.</b> Debugger build recognized. Activate Pro or start a free trial to unlock full-page capture, console, network and dialogs. <a href="https://snutils.com/trial?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_edition_connected" target="_blank" class="promo-link">Start free trial →</a>`
+					: `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug.</b> Debugger build recognized. Confirm Pro, Trial or Enterprise in the extension popup, then enable the browser debugger in ScriptSync.`;
 			} else {
-				message = `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can now build &amp; edit ServiceNow artifacts, drive the live form, and capture network/console logs &amp; full-page screenshots via the <b>Pro browser debugger</b>. Get the <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">SN Utils Debug edition →</a> to use it.`;
+				message = `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can build &amp; edit artifacts, drive live forms, and capture network, console and full-page screenshots via the <b>Pro browser debugger</b>. <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">Get the SN Utils Debug edition →</a>`;
 			}
 
 			ws.send(JSON.stringify({
@@ -2194,6 +2217,27 @@ async function startServers() {
 				promo: true,
 				message,
 			}), function () { });
+
+			// Follow with the agent connect instructions so they're right in the
+			// log at connect time. Agent connectivity is a Pro feature: show the
+			// snippet for Pro/Trial/Enterprise, a trial invite otherwise. Escape
+			// the literal <port>/<token> placeholders or the sanitizer swallows
+			// them as tags.
+			if (helperBuildInfo?.proFeatures) {
+				const snippetHtml = AGENT_CONNECT_SNIPPET
+					.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+				ws.send(JSON.stringify({
+					action: 'logMessage',
+					source: 'ScriptSync',
+					message: `<b>Connect an AI agent</b> (Claude Code, Codex, Windsurf): paste this into its instructions or config.<pre class="snippet" title="Click to copy">${snippetHtml}</pre>`,
+				}), function () { });
+			} else if (helperBuildInfo?.licenseResolved) {
+				ws.send(JSON.stringify({
+					action: 'logMessage',
+					source: 'ScriptSync',
+					message: `<b>Connect terminal AI agents</b> (Claude Code, Codex) from any directory is a SN Utils Pro feature. Agents inside your editor workspace keep working free. <a href="https://snutils.com/trial?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=agent_connect" target="_blank" class="promo-link">Start free trial →</a>`,
+				}), function () { });
+			}
 		};
 		const capabilityMessageTimer = setTimeout(sendCapabilityMessage, 1500);
 		ws.on('close', () => {
@@ -2236,6 +2280,11 @@ async function startServers() {
 						licenseResolved: true,
 					};
 					connectedHelperInfo = { ...helperBuildInfo };
+					// External-agent connectivity (the well-known global port
+					// file that lets Claude Code/Codex/terminal tools connect
+					// from any directory) is Pro. Workspace agent workflows
+					// stay free via the .vscode/ port file.
+					setGlobalPortFileEnabled(helperBuildInfo.proFeatures === true);
 					if (debugLicenseTimer) clearTimeout(debugLicenseTimer);
 					sendCapabilityMessage();
 					return;

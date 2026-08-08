@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.7.8",
+	"version": "4.7.9",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -40,6 +40,10 @@
 			{
 				"command": "extension.snScriptSyncDisable",
 				"title": "sn-scriptsync: Disable"
+			},
+			{
+				"command": "extension.copyAgentConnectInstructions",
+				"title": "sn-scriptsync: Copy agent connect instructions"
 			},
 			{
 				"command": "extension.bgScriptGlobal",
