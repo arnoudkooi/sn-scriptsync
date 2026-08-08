@@ -1,6 +1,8 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.7.8 (2026-08-08)
+
+**The Info panel's "Welcome / What's New" is now just "Settings", and holds every setting:** the page already doubled as the settings screen, but only 8 of the 13 `sn-scriptsync` settings were on it. All 13 are there now, grouped into Workspace and syncing, Agent capabilities, and Troubleshooting, including the sync folder name, external-change monitoring, the auto-sync delay, the editor context menu and debug logging. Text and number settings save when you leave the field or press Enter. What's new still appears underneath.
 
 **Screenshots pick the best capture path themselves:** `take_screenshot` / `navigate_and_screenshot` capture via activeTab as before, but when the tab grant is missing the browser now checks concretely whether it can use the Chrome debugger instead (Debug edition + Pro + `browserDebugger.enabled`) and does so silently — the result says `capturedVia: "debugger"`. Only when neither path works is the user asked to click the SN Utils icon, and the retry window for that grant is now ~10s instead of 1.5s.
 

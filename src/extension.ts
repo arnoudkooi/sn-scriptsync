@@ -1464,45 +1464,108 @@ export function deactivate() {
 
 // Settings surfaced as inline toggles in the welcome tab. Labels/descriptions
 // mirror package.json so the tab is a one-stop place to review them on first run.
-const WELCOME_SETTINGS: { key: string; label: string; description: string; default: boolean; link?: { url: string; text: string } }[] = [
+// Every `sn-scriptsync.*` setting is surfaced here, so this page is the single
+// place to review them without going through VS Code Settings. Keep it in sync
+// with contributes.configuration in package.json when adding a setting.
+type WelcomeSetting = {
+	key: string;
+	label: string;
+	description: string;
+	group: string;
+	type: 'boolean' | 'string' | 'number';
+	default: boolean | string | number;
+	link?: { url: string; text: string };
+};
+
+const GROUP_WORKSPACE = 'Workspace and syncing';
+const GROUP_AGENT = 'Agent capabilities';
+const GROUP_TROUBLESHOOTING = 'Troubleshooting';
+
+const WELCOME_SETTINGS: WelcomeSetting[] = [
+	{
+		key: 'path',
+		label: 'Sync folder name',
+		description: 'Folder name sn-scriptsync looks for when deciding which workspace folder to sync into. A folder that already contains a synced instance always wins, so changing this does not move files that are already synced.',
+		group: GROUP_WORKSPACE,
+		type: 'string',
+		default: 'scriptsync',
+	},
+	{
+		key: 'externalChanges.monitorFileChanges',
+		label: 'Monitor external file changes',
+		description: 'Watch for edits made by AI agents, git or other tools and list them in the Pending Saves queue. Turn off to disable monitoring entirely.',
+		group: GROUP_WORKSPACE,
+		type: 'boolean',
+		default: true,
+	},
+	{
+		key: 'externalChanges.syncDelay',
+		label: 'Auto-sync delay (seconds)',
+		description: 'Seconds to wait before auto-syncing monitored external changes. 0 means monitor only: push with Sync Now or a manual save. Any value above 0 enables auto-sync.',
+		group: GROUP_WORKSPACE,
+		type: 'number',
+		default: 0,
+	},
+	{
+		key: 'showContextMenu',
+		label: 'Show commands in the editor context menu',
+		description: 'Show sn-scriptsync commands when you right-click in the editor. Can be narrowed per language in VS Code Settings.',
+		group: GROUP_WORKSPACE,
+		type: 'boolean',
+		default: true,
+	},
 	{
 		key: 'agentInstructions.autoUpdate',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Keep my agent instruction files updated',
 		description: 'Add and refresh the managed sn-scriptsync reference block inside your own CLAUDE.md / AGENTS.md / .cursorrules / etc. Turn this off to leave those files untouched — agentinstructions.md and the skills folder are kept current either way.',
 		default: true,
 	},
 	{
 		key: 'agentApi.reviewWrites',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Agent API: review writes before sync',
 		description: 'Hold Agent API writes (update_record, update_record_batch, create_artifact) in the Pending Saves queue so you can review and approve each one with Sync Now, instead of pushing them to the instance immediately. Off by default.',
 		default: false,
 	},
 	{
 		key: 'createArtifacts.enabled',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Agent API: create records',
 		description: 'Allow creating new records in ServiceNow from files and the Agent API.',
 		default: true,
 	},
 	{
 		key: 'restRequest.enabled',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Agent API: write via rest_request',
 		description: 'Allow the generic rest_request passthrough to perform write methods (POST/PUT/PATCH). GET is always allowed; DELETE additionally requires Delete records.',
 		default: false,
 	},
 	{
 		key: 'deleteRecords.enabled',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Agent API: delete records',
 		description: 'Allow the Agent API to delete records (delete_record, and DELETE via rest_request).',
 		default: false,
 	},
 	{
 		key: 'backgroundScripts.enabled',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Agent API: run background scripts',
 		description: 'Allow the Agent API to run server-side background scripts as the connected user. This executes arbitrary code on the instance.',
 		default: false,
 	},
 	{
 		key: 'browserDebugger.enabled',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Agent API: browser debugger',
 		description: 'Allow the Agent API to drive the connected ServiceNow tab through the Chrome DevTools Protocol (network/console capture, screenshots, dialogs). Needs SN Utils Pro and the Debug edition browser build.',
 		default: false,
@@ -1510,9 +1573,19 @@ const WELCOME_SETTINGS: { key: string; label: string; description: string; defau
 	},
 	{
 		key: 'agentApi.fileFallback',
+		group: GROUP_AGENT,
+		type: 'boolean',
 		label: 'Legacy file-based Agent API',
 		description: 'Keep the legacy file-based Agent API (agent/requests/*.json) active alongside the HTTP Agent API. Disable once all your agents use the HTTP endpoint.',
 		default: true,
+	},
+	{
+		key: 'debugLogging',
+		group: GROUP_TROUBLESHOOTING,
+		type: 'boolean',
+		label: 'Verbose debug logging',
+		description: 'Write detailed diagnostics to debug.log in the workspace root. Useful when reporting an issue, but it can produce a lot of output when the auto-sync delay is above 0.',
+		default: false,
 	},
 ];
 
@@ -1532,24 +1605,38 @@ function maybeShowWelcomePanel(context: vscode.ExtensionContext) {
 function showWelcomePanel(context: vscode.ExtensionContext, version: string, isFirstRun: boolean) {
 	const panel = vscode.window.createWebviewPanel(
 		'snScriptSyncWelcome',
-		'Welcome to sn-scriptsync',
+		'sn-scriptsync Settings',
 		vscode.ViewColumn.One,
 		{ enableScripts: true, retainContextWhenHidden: true }
 	);
 
 	const config = vscode.workspace.getConfiguration('sn-scriptsync');
-	const settings = WELCOME_SETTINGS.map(s => ({ ...s, value: config.get<boolean>(s.key, s.default) }));
+	const settings = WELCOME_SETTINGS.map(s => ({ ...s, value: config.get(s.key, s.default as any) }));
 	const highlights = getChangelogHighlightsHtml(context);
 
 	panel.webview.html = getWelcomeHtml(version, isFirstRun, settings, highlights);
 
 	panel.webview.onDidReceiveMessage((msg: any) => {
 		if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
+			// Coerce to the declared type. A blank/invalid number falls back to the
+			// declared default rather than writing NaN into the config.
+			const declared = WELCOME_SETTINGS.find(s => s.key === msg.key);
+			if (!declared) return;
+			let value: boolean | string | number;
+			if (declared.type === 'boolean') {
+				value = !!msg.value;
+			} else if (declared.type === 'number') {
+				const n = Number(msg.value);
+				value = Number.isFinite(n) && n >= 0 ? Math.floor(n) : (declared.default as number);
+			} else {
+				const s = String(msg.value ?? '').trim();
+				value = s || (declared.default as string);
+			}
 			vscode.workspace.getConfiguration('sn-scriptsync')
-				.update(msg.key, !!msg.value, vscode.ConfigurationTarget.Global)
+				.update(msg.key, value, vscode.ConfigurationTarget.Global)
 				.then(
-					() => debugLog(`welcome: set sn-scriptsync.${msg.key} = ${!!msg.value}`),
-					(err: any) => debugLog(`welcome: failed to set ${msg.key}: ${err?.message || err}`)
+					() => debugLog(`settings page: set sn-scriptsync.${msg.key} = ${value}`),
+					(err: any) => debugLog(`settings page: failed to set ${msg.key}: ${err?.message || err}`)
 				);
 		} else if (msg?.type === 'openSettings') {
 			vscode.commands.executeCommand('workbench.action.openSettings', 'sn-scriptsync');
@@ -1612,24 +1699,46 @@ function getWelcomeNonce(): string {
 function getWelcomeHtml(
 	version: string,
 	isFirstRun: boolean,
-	settings: { key: string; label: string; description: string; value: boolean; link?: { url: string; text: string } }[],
+	settings: (WelcomeSetting & { value: boolean | string | number })[],
 	highlightsHtml: string
 ): string {
 	const nonce = getWelcomeNonce();
 	const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 	const intro = isFirstRun
-		? 'Thanks for installing sn-scriptsync. Here are the key settings — you can change any of these later in Settings.'
-		: `Updated to v${esc(version)}. Here's what's new, plus the settings you may want to review.`;
+		? 'Thanks for installing sn-scriptsync. Every setting lives on this page, so you can review them all here rather than hunting through VS Code Settings.'
+		: `Updated to v${esc(version)}. Every sn-scriptsync setting is on this page, along with what changed in this release.`;
 
-	const toggles = settings.map(s => `
+	const renderSetting = (s: WelcomeSetting & { value: boolean | string | number }) => {
+		const meta = `
+			<span class="setting-label">${esc(s.label)}</span>
+			<span class="setting-desc">${esc(s.description)}${s.link ? ` <a class="setting-link" href="${esc(s.link.url)}">${esc(s.link.text)}</a>` : ''}</span>
+			<span class="setting-key">sn-scriptsync.${esc(s.key)}</span>`;
+
+		if (s.type === 'boolean') {
+			return `
 		<label class="setting">
-			<input type="checkbox" data-key="${esc(s.key)}" ${s.value ? 'checked' : ''} />
-			<span class="setting-text">
-				<span class="setting-label">${esc(s.label)}</span>
-				<span class="setting-desc">${esc(s.description)}${s.link ? ` <a class="setting-link" href="${esc(s.link.url)}">${esc(s.link.text)}</a>` : ''}</span>
-				<span class="setting-key">sn-scriptsync.${esc(s.key)}</span>
-			</span>
-		</label>`).join('\n');
+			<input type="checkbox" data-key="${esc(s.key)}" data-type="boolean" ${s.value ? 'checked' : ''} />
+			<span class="setting-text">${meta}</span>
+		</label>`;
+		}
+
+		// Text/number settings commit on blur or Enter, not on every keystroke.
+		const inputAttrs = s.type === 'number'
+			? `type="number" min="0" step="1" class="setting-input setting-input-num"`
+			: `type="text" class="setting-input"`;
+		return `
+		<div class="setting setting-value">
+			<span class="setting-text">${meta}</span>
+			<input ${inputAttrs} data-key="${esc(s.key)}" data-type="${esc(s.type)}" value="${esc(String(s.value))}" />
+		</div>`;
+	};
+
+	// Preserve the declaration order of the groups as they first appear.
+	const groups: string[] = [];
+	for (const s of settings) if (!groups.includes(s.group)) groups.push(s.group);
+	const toggles = groups.map(g => `
+		<h3 class="group">${esc(g)}</h3>
+		${settings.filter(s => s.group === g).map(renderSetting).join('\n')}`).join('\n');
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -1637,7 +1746,7 @@ function getWelcomeHtml(
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Welcome to sn-scriptsync</title>
+<title>sn-scriptsync Settings</title>
 <style>
 	body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 24px 28px; line-height: 1.5; }
 	.wrap { max-width: 760px; margin: 0 auto; }
@@ -1654,6 +1763,14 @@ function getWelcomeHtml(
 	.changelog a { color: var(--vscode-textLink-foreground); }
 	.setting { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.18)); align-items: flex-start; }
 	.setting:first-of-type { border-top: none; }
+	.group { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--vscode-descriptionForeground); margin: 20px 0 2px; }
+	.group:first-of-type { margin-top: 4px; }
+	.group + .setting { border-top: none; }
+	.setting-value { align-items: center; justify-content: space-between; }
+	.setting-value .setting-text { flex: 1; min-width: 0; }
+	.setting-input { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, rgba(127,127,127,0.35)); border-radius: 4px; padding: 4px 8px; font-family: var(--vscode-font-family); font-size: 0.85rem; flex: 0 0 auto; width: 190px; }
+	.setting-input:focus { outline: 1px solid var(--vscode-focusBorder); }
+	.setting-input-num { width: 90px; }
 	.setting input { margin-top: 3px; }
 	.setting-text { display: flex; flex-direction: column; gap: 2px; }
 	.setting-label { font-weight: 600; }
@@ -1668,17 +1785,17 @@ function getWelcomeHtml(
 </head>
 <body>
 <div class="wrap">
-	<h1>Welcome to sn-scriptsync</h1>
+	<h1>sn-scriptsync Settings</h1>
 	<div class="version">v${esc(version)}</div>
 	<p class="intro">${intro}</p>
 
-	<div class="note">You're seeing this because sn-scriptsync added or changed what AI agents can do. Review the agent capabilities below so you stay in control of what an agent is allowed to do on your instance.</div>
+	<div class="note">Review the agent capabilities below so you stay in control of what an AI agent is allowed to do on your instance. Changes save as soon as you make them.</div>
 
 	<div class="card">
-		<h2>Settings</h2>
+		<h2>All settings</h2>
 		${toggles}
 		<div class="actions">
-			<button id="openSettings" type="button">Open all settings</button>
+			<button id="openSettings" type="button">Open in VS Code Settings</button>
 			<span class="saved" id="saved"></span>
 		</div>
 	</div>
@@ -1687,12 +1804,30 @@ function getWelcomeHtml(
 </div>
 <script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
+	function flashSaved() {
+		const saved = document.getElementById('saved');
+		saved.textContent = 'Saved';
+		setTimeout(function () { saved.textContent = ''; }, 1500);
+	}
+	function send(el, value) {
+		vscode.postMessage({ type: 'updateSetting', key: el.getAttribute('data-key'), value: value });
+		flashSaved();
+	}
 	document.querySelectorAll('input[type=checkbox][data-key]').forEach(function (el) {
-		el.addEventListener('change', function () {
-			vscode.postMessage({ type: 'updateSetting', key: el.getAttribute('data-key'), value: el.checked });
-			const saved = document.getElementById('saved');
-			saved.textContent = 'Saved';
-			setTimeout(function () { saved.textContent = ''; }, 1500);
+		el.addEventListener('change', function () { send(el, el.checked); });
+	});
+	// Text and number fields commit on blur or Enter, so we don't write a config
+	// value on every keystroke.
+	document.querySelectorAll('input.setting-input[data-key]').forEach(function (el) {
+		let last = el.value;
+		function commit() {
+			if (el.value === last) return;
+			last = el.value;
+			send(el, el.value);
+		}
+		el.addEventListener('blur', commit);
+		el.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
 		});
 	});
 	document.getElementById('openSettings').addEventListener('click', function () {

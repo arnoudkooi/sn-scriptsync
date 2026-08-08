@@ -62,6 +62,7 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
 - `=` equals
 - `!=` not equals
 - `LIKE` contains
+- `NOT LIKE` does not contain (the space is required)
 - `STARTSWITH` starts with
 - `ENDSWITH` ends with
 - `>` greater than
@@ -69,7 +70,7 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
 - `>=` greater or equal
 - `<=` less or equal
 - `IN` in list (comma-separated)
-- `NOTIN` not in list
+- `NOT IN` not in list (comma-separated; the space is required)
 - `ISEMPTY` is empty
 - `ISNOTEMPTY` is not empty
 - `^` AND
