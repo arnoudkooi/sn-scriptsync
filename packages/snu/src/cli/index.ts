@@ -1,4 +1,6 @@
 import { parseArgs } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TOOLS, getToolByCliCommand } from '../registry.js';
 import { ScriptSyncClient, ScriptSyncClientError } from '../client.js';
 import { resolveContentInput } from './stdin.js';
@@ -6,7 +8,11 @@ import { formatHumanOutput, outputJson, outputError } from './format.js';
 import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
 
-export const VERSION = '0.1.0';
+const packageMetadata = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
+) as { version: string };
+
+export const VERSION = packageMetadata.version;
 
 export function printHelp(): void {
   console.log(`

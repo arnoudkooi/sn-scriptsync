@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TOOLS } from '../registry.js';
+import { VERSION } from '../cli/index.js';
 
 // The canonical list of 25 Agent API commands supported by the ScriptSync bridge (v7)
 const BRIDGE_COMMANDS = new Set([
@@ -58,4 +61,12 @@ test('Drift: every registry tool targets a valid bridge command', () => {
       `Tool '${tool.name}' targets unknown bridge command '${tool.agentCommand}'`
     );
   }
+});
+
+test('Drift: CLI version matches package metadata', () => {
+  const packageMetadata = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
+  ) as { version: string };
+
+  assert.strictEqual(VERSION, packageMetadata.version);
 });
