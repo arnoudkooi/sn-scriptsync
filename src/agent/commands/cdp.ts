@@ -12,19 +12,16 @@ import { assertPathUnderRoot, safeJoinUnderRoot } from '../../workspaceRoot';
 // content scripts, unlocking what content scripts CANNOT do: network capture,
 // console capture, full-page/element screenshots, and native dialog handling.
 //
-// Gated OFF by default behind `sn-scriptsync.browserDebugger.enabled` so
-// existing setups aren't disrupted: every command short-circuits to
-// `E_DISABLED` until the user opts in. On the browser side the adapter is also
+// Debugger use is opt-in via the `browserDebugger` gate in policy.ts, enforced
+// centrally by the dispatcher: a v8 helper grants it per instance in the
+// helper tab, older builds fall back to the sn-scriptsync.browserDebugger.enabled
+// VS Code setting (default off). Commands that start or expand a session are
+// gated; stop/clear/detach stay free. On the browser side the adapter is also
 // stripped from the SN Utils Community build (`E_CDP_UNAVAILABLE`) and Pro-gated
 // (`E_PRO_REQUIRED`). Attaching the debugger shows Chrome's unavoidable yellow
 // "started debugging this browser" banner — streaming captures keep it up until
 // stopped; one-shot ops (screenshots) detach immediately. Always pair a start_*
 // with a stop_* (and a set_dialog_handler with a clear_dialog_handler).
-
-/** True when the user has opted into the browser debugger. */
-export function isBrowserDebuggerEnabled(): boolean {
-	return getSetting('browserDebugger.enabled', false);
-}
 
 // The CDP adapter ships only in this build; the regular SN Utils build reports
 // E_CDP_UNAVAILABLE. Surfaced from the VS Code side (here) so the browser
@@ -38,9 +35,6 @@ const CDP_UNAVAILABLE_MESSAGE = `Browser debugger isn't available: the connected
  * E_PRO_REQUIRED, E_CDP_UNAVAILABLE, E_DEBUGGER_BUSY) as an AgentError.
  */
 async function cdpRoundTrip(ctx: AgentContext, action: string, extra: Record<string, any>): Promise<any> {
-	if (!isBrowserDebuggerEnabled()) {
-		throw new AgentError('E_DISABLED', 'Browser debugger (CDP) commands are off by default. Enable sn-scriptsync.browserDebugger.enabled to allow network/console capture, full-page screenshots and dialog handling.');
-	}
 	const correlationId = `agent_${ctx.request.id}_${Date.now()}`;
 	const pending = ctx.waitForBrowserResponse<any>(correlationId);
 	ctx.sendToBrowser({ action, agentRequestId: correlationId, appName: 'VS Code', ...extra });

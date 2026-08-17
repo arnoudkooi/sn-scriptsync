@@ -26,15 +26,6 @@ const rest_request: CommandHandler = {
 			throw new AgentError('E_INVALID_PARAMS', `Invalid method. Must be one of: ${VALID_METHODS.join(', ')}`);
 		}
 
-		// Gating: reads are free; writes require the generic-write toggle; deletes
-		// additionally require the dedicated delete toggle.
-		if (method === 'DELETE' && !getSetting('deleteRecords.enabled', false)) {
-			throw new AgentError('E_DISABLED', 'DELETE via rest_request is disabled. Enable sn-scriptsync.deleteRecords.enabled to allow it.');
-		}
-		if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && !getSetting('restRequest.enabled', false)) {
-			throw new AgentError('E_DISABLED', `${method} via rest_request is disabled. Enable sn-scriptsync.restRequest.enabled to allow write passthrough.`);
-		}
-
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
 		const { status, data } = await restRequest(ctx, instanceSettings, {
 			endpoint,

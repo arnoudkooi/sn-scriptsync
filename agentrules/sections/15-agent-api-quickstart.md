@@ -42,4 +42,7 @@ curl -s -X POST http://127.0.0.1:$PORT/api \
 Errors return `{ "status": "error", "code": "E_...", "error": "..." }`. The most common ones:
 `E_BROWSER_DISCONNECTED` (open a helper tab), `E_DISABLED` (feature gated in settings),
 `E_CONFIRM_REQUIRED` (destructive command needs `confirm:true`), `E_SCREENSHOT_PERMISSION`
-(click the SN Utils icon on the tab once, then retry). Full table is in the `snu-agent-api` skill.
+(click the SN Utils icon on the tab once, then retry), `E_REVIEW_PENDING` (command is waiting for
+human approval — **tell the user to approve it in the SN Utils ScriptSync helper tab in their
+browser** (the tab plays a sound and shows a Review Queue badge), then collect the outcome with
+`get_review_result` and the returned `reviewId`). Full table is in the `snu-agent-api` skill.

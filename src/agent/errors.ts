@@ -21,6 +21,16 @@ export type AgentErrorCode =
 	| 'E_REFERENCE_INTEGRITY'
 	| 'E_PARTIAL_FAILURE'
 	| 'E_SCREENSHOT_PERMISSION'
+	| 'E_USER_REJECTED'
+	| 'E_REVIEW_PENDING'
+	| 'E_REVIEW_UNAVAILABLE'
+	| 'E_REPLAY_DETECTED'
+	| 'E_MULTIPLE_MATCHES'
+	| 'E_STALE_REVIEW'
+	| 'E_UNSUPPORTED_HOST'
+	| 'E_RECORD_NOT_SAVED'
+	| 'E_FILE_OUTSIDE_WORKSPACE'
+	| 'E_COMMAND_FAILED'
 	// Browser debugger (CDP) family — see commands/cdp.ts.
 	| 'E_PRO_REQUIRED'
 	| 'E_CDP_UNAVAILABLE'
@@ -47,12 +57,15 @@ export function httpStatusForCode(code?: string): number {
 		case 'E_INVALID_PARAMS':
 		case 'E_INVALID_REQUEST':
 		case 'E_CONFIRM_REQUIRED':
+		case 'E_MULTIPLE_MATCHES':
 			return 400;
 		case 'E_UNAUTHORIZED':
 		case 'E_SECURITY':
 			return 401;
 		case 'E_PRO_REQUIRED':
 			return 402;
+		case 'E_USER_REJECTED':
+			return 403;
 		case 'E_UNKNOWN_COMMAND':
 		case 'E_NOT_FOUND':
 		case 'E_NO_TAB':
@@ -60,6 +73,7 @@ export function httpStatusForCode(code?: string): number {
 			return 404;
 		case 'E_REFERENCE_INTEGRITY':
 		case 'E_DEBUGGER_BUSY':
+		case 'E_REPLAY_DETECTED':
 			return 409;
 		case 'E_CDP_UNAVAILABLE':
 			return 501;
@@ -69,6 +83,10 @@ export function httpStatusForCode(code?: string): number {
 		case 'E_DISABLED':
 		case 'E_PAUSED':
 			return 423;
+		case 'E_REVIEW_UNAVAILABLE':
+			return 424;
+		case 'E_REVIEW_PENDING':
+			return 202;
 		case 'E_PARTIAL_FAILURE':
 			return 207;
 		case 'E_SCREENSHOT_PERMISSION':

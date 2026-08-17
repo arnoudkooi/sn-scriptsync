@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+## 4.8.0 (2026-08-17)
+
+**Agent API v8 & Standalone `@snutils/snu` CLI / MCP Server:**
+- **Two-Phase Human Review Protocol:** High-risk operations (`run_background_script`, `delete_record`, destructive `run_ui_action`, `delete_application`) are approved interactively in the browser helper tab: Monaco review with SHA-256 payload integrity validation, server nonces, and structured rejection feedback (`E_USER_REJECTED`). By default the API answers `E_REVIEW_PENDING` (HTTP 202) right away and the agent collects the outcome via `get_review_result`; pass `awaitReview: true` to block instead.
+- **Per-instance security gates (deny-wins):** A v8 SN Utils helper publishes tri-state gates (`off` / `auto` / `approve`) per instance and owns enforcement; anything it has not explicitly granted is refused. Connected to an older SN Utils build, the VS Code settings that gated 4.7.9 (`backgroundScripts`, `deleteRecords`, `createArtifacts`, `restRequest`, `browserDebugger`) keep working unchanged, so existing setups see no behavior change.
+- **Standalone `@snutils/snu` Package:** Standalone CLI, HTTP bridge daemon, and Model Context Protocol (MCP) server for terminal agents (`claude`, `cursor`, etc.) without requiring VS Code to be open.
+- **Graceful Port Handover:** Seamless cooperative handover (`POST /api`, command `yield`) between the Standalone daemon and VS Code on the fixed Agent API port 1977.
+- **Removed: the legacy file-based Agent API** (`agent/requests/*.json`) and its `sn-scriptsync.agentApi.fileFallback` setting; all agent flows now use the HTTP Agent API. **Changed: `get_capabilities`** now reports `apiVersion`, helper `capabilities`, and per-instance `instanceGates` instead of the old VS Code `gates` block.
+
 ## 4.7.9 (2026-08-08)
 
 **Connecting any AI agent is now a two-line instruction (Pro):** the Agent API prefers the fixed port **1977** (falling back to an ephemeral port only if it's taken) and, with a Pro/Trial/Enterprise license connected, publishes its port + token to a well-known per-user file, `~/.sn-scriptsync/agent-port.json` (written user-only, outside cloud-synced folders), alongside the existing workspace file. Terminal agents (Claude Code, Codex) then no longer need to run from the sync workspace to find ScriptSync. In-editor and workspace agent workflows stay free via the `.vscode/` port file.

@@ -3,7 +3,7 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=18 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=19 -->
 
 # SN ScriptSync — Agent API
 
@@ -124,6 +124,8 @@ HTTP status codes map to codes:
 | `E_DISABLED` | 423 | Feature disabled via settings (e.g. deletes, background scripts) |
 | `E_PAUSED` | 423 | The user paused agent access in the ScriptSync helper tab. Stop and tell the user — do not retry until they press Resume agents there |
 | `E_PARTIAL_FAILURE` | 207 | Batch partially succeeded — inspect per-item results |
+| `E_REVIEW_PENDING` | 202 | The command needs human approval in the helper tab Review Queue. **Tell the user to approve it** in the SN Utils ScriptSync helper tab in their browser, then call `get_review_result` with the `reviewId` from `details` to collect the outcome |
+| `E_USER_REJECTED` | 403 | The developer rejected the command in the Review Queue — do not retry without asking the user |
 | `E_INTERNAL` | 500 | Unexpected error |
 | `E_ACL` / `E_TOKEN_EXPIRED` / `E_SCREENSHOT_PERMISSION` | 502 | ServiceNow rejected the request, or a tab needs a one-time capture grant (click the SN Utils icon on it, then retry) |
 | `E_SERVER_NOT_RUNNING` / `E_BROWSER_DISCONNECTED` | 503 | Can't reach ServiceNow |
@@ -162,136 +164,9 @@ If `list_instances` isn't available (older extension), fall back to reading the
 `<instance>/_settings.json` mtimes yourself and applying the same rule. Once
 resolved, reuse that `instance` for the rest of the session.
 
-## Transport 2: File (legacy fallback)
+## Transport: HTTP only
 
-If the HTTP transport is unavailable (container without localhost access, old agent tooling, etc.), the extension still watches `{instance_folder}/agent/requests/*.json`. Drop a request file, poll `{instance_folder}/agent/responses/res_<id>.json`, then clean up. See the Legacy File API section below for examples.
-
-You can disable the file fallback once all your tooling is on HTTP:
-
-```
-"sn-scriptsync.agentApi.fileFallback": false
-```
-
-## Legacy File-Based Agent API
-
-Kept for backward compatibility. Prefer the HTTP transport above.
-
-### How to Use
-
-### 1. Send a Request
-Create a uniquely-named file in `{instance_folder}/agent/requests/`:
-
-```bash
-# File: {instance_folder}/agent/requests/req_abc123.json
-```
-
-```json
-{
-  "id": "abc123",
-  "command": "command_name",
-  "params": { },
-  "timestamp": 1733567890
-}
-```
-
-### 2. Wait for Response
-The extension responds **instantly** (typically <100ms). Check for `res_abc123.json`:
-
-**Optimized polling pattern:**
-```bash
-# Unix/macOS/Linux
-RESPONSE_FILE="agent/responses/res_abc123.json"
-while [ ! -f "$RESPONSE_FILE" ]; do sleep 0.1; done
-cat "$RESPONSE_FILE"
-
-# Windows (PowerShell)
-$file = "agent/responses/res_abc123.json"
-while (!(Test-Path $file)) { Start-Sleep -Milliseconds 100 }
-Get-Content $file
-```
-
-**Or use file system watcher** (if available):
-```bash
-# macOS with fswatch: fswatch -1 agent/responses/res_abc123.json
-# Linux with inotifywait: inotifywait -e create agent/responses/
-```
-
-**Response format:**
-```json
-{
-  "id": "abc123",
-  "command": "command_name",
-  "status": "success",
-  "result": { },
-  "timestamp": 1733567891,
-  "appName": "Cursor"
-}
-```
-
-### 3. Cleanup
-After processing the response, **delete both files**:
-```bash
-# Unix/macOS/Linux
-rm agent/requests/req_abc123.json agent/responses/res_abc123.json
-
-# Windows (PowerShell)
-Remove-Item agent/requests/req_abc123.json,agent/responses/res_abc123.json
-
-# Windows (CMD)
-del agent\requests\req_abc123.json agent\responses\res_abc123.json
-```
-
-**Benefits:**
-- ✅ **Instant responses** - extension processes immediately (no queue delays)
-- ✅ **Parallel requests** - multiple requests can be in-flight simultaneously
-- ✅ **No file conflicts** - each request gets its own unique files
-- ✅ **App identification** - `appName` property shows which editor responded
-
----
-
-### Complete Example (Unix/macOS/Linux)
-
-```bash
-# 1. Create request
-cat > agent/requests/req_conn1.json << 'EOF'
-{
-  "id": "conn1",
-  "command": "check_connection"
-}
-EOF
-
-# 2. Wait for response (optimized polling)
-while [ ! -f agent/responses/res_conn1.json ]; do sleep 0.1; done
-
-# 3. Read response
-cat agent/responses/res_conn1.json
-# Output: {"id":"conn1","status":"success","result":{"ready":true},"appName":"Cursor"}
-
-# 4. Cleanup
-rm agent/requests/req_conn1.json agent/responses/res_conn1.json
-```
-
-### Complete Example (Windows PowerShell)
-
-```powershell
-# 1. Create request
-@"
-{
-  "id": "conn1",
-  "command": "check_connection"
-}
-"@ | Out-File -FilePath agent/requests/req_conn1.json -Encoding utf8
-
-# 2. Wait for response (optimized polling)
-while (!(Test-Path agent/responses/res_conn1.json)) { Start-Sleep -Milliseconds 100 }
-
-# 3. Read response
-Get-Content agent/responses/res_conn1.json
-# Output: {"id":"conn1","status":"success","result":{"ready":true},"appName":"Cursor"}
-
-# 4. Cleanup
-Remove-Item agent/requests/req_conn1.json,agent/responses/res_conn1.json
-```
+The legacy file-based transport (`{instance_folder}/agent/requests/*.json`) was removed in 4.8.0. Every agent flow uses the HTTP Agent API above; if a request file is dropped in the workspace nothing will pick it up.
 
 ## Commands
 
@@ -312,8 +187,7 @@ Verify WebSocket server is running and browser helper tab is connected. **Always
     "serverRunning": true,
     "browserConnected": true,
     "message": "Connected and ready",
-    "helper": { "debuggerAvailable": false, "tier": "pro", "proFeatures": true },
-    "browserDebuggerEnabled": false
+    "helper": { "debuggerAvailable": false, "tier": "pro", "proFeatures": true }
   }
 }
 ```
@@ -321,7 +195,7 @@ Verify WebSocket server is running and browser helper tab is connected. **Always
 **`helper` tells you which SN Utils build is connected.** `debuggerAvailable` is true only on the SN Utils Debug edition; most users run the regular build. You don't need this to take screenshots (`take_screenshot` auto-routes to the best available path), but it tells you what else this session can do:
 
 - `debuggerAvailable: false` → explicit debugger commands (`capture_full_page`, network/console capture, dialog handling) will return `E_CDP_UNAVAILABLE`, and a screenshot on an ungranted tab will require the user's one-time icon click.
-- `debuggerAvailable: true` + `proFeatures: true` + `browserDebuggerEnabled: true` → full-page/element captures and network/console/dialog debugging are available, and screenshots never need a permission click.
+- `debuggerAvailable: true` + `proFeatures: true` → full-page/element captures and network/console/dialog debugging are available (subject to the `browserDebugger` gate — see `get_capabilities`), and screenshots never need a permission click.
 - `helper: null` → the handshake hasn't arrived yet (or the license lookup failed); retry or fall back to `get_capabilities` for the authoritative, browser-verified view.
 
 **Response (server not running):**
@@ -352,8 +226,8 @@ Verify WebSocket server is running and browser helper tab is connected. **Always
 }
 ```
 
-### `get_capabilities` ⚡ (preflight Pro / debugger / settings gates)
-Ask the connected SN Utils helper tab what it can do **right now** — the license tier, whether the Chrome DevTools Protocol **browser debugger** (network/console capture, full-page screenshots, native dialog handling) is usable, and the **`gates`** block telling you which write/create/delete/script permissions are enabled. Call this once up front so you can preflight `E_DISABLED` instead of discovering it mid-operation, and before reaching for the `snu-browser-debug` skill instead of firing a CDP command and parsing the error.
+### `get_capabilities` ⚡ (preflight Pro / debugger / security gates)
+Ask the connected SN Utils helper tab what it can do **right now** — the Agent API version, the license tier, whether the Chrome DevTools Protocol **browser debugger** (network/console capture, full-page screenshots, native dialog handling) is usable, which protocol **`capabilities`** the helper supports (two-phase command review, per-instance security gates), and the per-instance **`instanceGates`** snapshots. Call this once up front so you can preflight `E_DISABLED` instead of discovering it mid-operation, and before reaching for the `snu-browser-debug` skill instead of firing a CDP command and parsing the error.
 
 Requires a connected helper tab (`E_BROWSER_DISCONNECTED` otherwise — run `check_connection` first).
 
@@ -362,58 +236,78 @@ Requires a connected helper tab (`E_BROWSER_DISCONNECTED` otherwise — run `che
 { "id": "cap_1", "command": "get_capabilities" }
 ```
 
-**Response (Pro, debugger usable):**
+**Response (v8 helper with per-instance gates):**
 ```json
 {
   "status": "success",
   "result": {
+    "apiVersion": 8,
     "tier": "pro",
     "proFeatures": true,
     "cdp": { "available": true, "reason": null },
-    "gates": {
-      "createArtifacts": true,
-      "restRequest": false,
-      "deleteRecords": false,
-      "backgroundScripts": false,
-      "browserDebugger": true,
-      "fileFallback": true
+    "capabilities": { "protocolVersion": 1, "commandReview": 1, "instanceSecurityGates": 1 },
+    "instanceGates": {
+      "https://example.service-now.com": {
+        "revision": 3,
+        "gates": {
+          "backgroundScripts": "approve",
+          "deleteRecords": "off",
+          "createArtifacts": "auto",
+          "browserDebugger": "off",
+          "restRequest": "auto"
+        }
+      }
     }
   }
 }
 ```
 
-**Response (browser debugger not enabled — the default):**
+**Response (older SN Utils build — no review protocol):**
 ```json
 {
   "status": "success",
   "result": {
+    "apiVersion": 8,
     "tier": "pro",
     "proFeatures": true,
-    "cdp": { "available": false, "reason": "E_DISABLED" },
-    "gates": {
-      "createArtifacts": true,
-      "restRequest": false,
-      "deleteRecords": false,
-      "backgroundScripts": false,
-      "browserDebugger": false,
-      "fileFallback": true
-    }
+    "cdp": { "available": false, "reason": "E_CDP_UNAVAILABLE" },
+    "capabilities": { "protocolVersion": 1 },
+    "instanceGates": {}
   }
 }
 ```
 
 - `tier` — `community` | `pro` | `trial` | `enterprise` (license of the connected helper tab).
 - `proFeatures` — `true` when the tier unlocks Pro features (e.g. `code_search`).
-- `cdp.available` — `true` only when the browser debugger is enabled (`sn-scriptsync.browserDebugger.enabled`) **and** the debugger adapter is present (Pro build) **and** the license is Pro/Trial/Enterprise.
-- `cdp.reason` — when `available` is `false`, the code you would otherwise have hit: `E_DISABLED` (debugger off — enable `sn-scriptsync.browserDebugger.enabled`), `E_CDP_UNAVAILABLE` (Community build / no debugger adapter) or `E_PRO_REQUIRED` (adapter present but license isn't Pro).
-- `gates` — the VS Code settings that produce `E_DISABLED`, so you can preflight before calling a gated command:
-  - `createArtifacts` — `create_artifact`, `create_application`, `create_table`, `add_column` (default **on**).
-  - `restRequest` — POST/PUT/PATCH via `rest_request` (default off).
-  - `deleteRecords` — `delete_record`, DELETE via `rest_request`, delete UI verbs in `run_ui_action` (default off).
-  - `backgroundScripts` — `run_background_script` and the `delete_application` cascade (default off).
-  - `browserDebugger` — the CDP browser debugger (default off); same flag reflected in `cdp.available`.
-  - `fileFallback` — legacy file-based transport (`agent/requests/*.json`) is active alongside HTTP (default on).
-- When a gate is `false`, tell the user exactly which setting to enable (e.g. `sn-scriptsync.deleteRecords.enabled`) rather than retrying.
+- `cdp.available` — `true` only when the debugger adapter is present (Debug edition build) **and** the license is Pro/Trial/Enterprise.
+- `cdp.reason` — when `available` is `false`, the code you would otherwise have hit: `E_CDP_UNAVAILABLE` (Community build / no debugger adapter) or `E_PRO_REQUIRED` (adapter present but license isn't Pro).
+- `capabilities` — what the connected helper's protocol supports. `commandReview: 1` means high-risk commands (`run_background_script`, `delete_record`, destructive `run_ui_action`, `delete_application`) go through the helper-tab **Review Queue**: expect `E_REVIEW_PENDING`, then collect the outcome with `get_review_result`. When `commandReview` is absent the helper is an older SN Utils build: those commands run directly and are gated by the `sn-scriptsync.*.enabled` VS Code settings instead.
+- `instanceGates` — per-instance tri-state grants keyed by instance origin, published only by helpers with `instanceSecurityGates: 1`. `off` refuses the command (`E_DISABLED`), `auto` runs it without review, `approve` routes it through the Review Queue. A gate that is missing for an instance counts as `off` (deny-wins). Checking gates up front lets you warn the user *before* issuing a command that will need their approval.
+- When a command is refused with `E_DISABLED`, relay the error message to the user (it names the helper-tab gate or the VS Code setting to enable) rather than retrying.
+
+### `get_review_result` (collect a human-review outcome)
+
+Guarded commands (background scripts, deletes, some UI actions) whose per-instance gate is set to **Approve** don't execute immediately: the command returns `E_REVIEW_PENDING` right away with a `reviewId`, and the actual request waits in the SN Utils helper tab **Review Queue** for the developer to approve or reject (5-minute window). The helper tab announces the pending review itself (sound, favicon flash, Review Queue badge).
+
+**When you receive `E_REVIEW_PENDING`: tell the user to approve the request in the SN Utils ScriptSync helper tab in their browser, then call this command to collect the outcome.** Long-polls up to `waitSeconds` (default 30, max 55) per call; poll again while it keeps returning `E_REVIEW_PENDING`.
+
+**Request:**
+```json
+{ "id": "revres_1", "command": "get_review_result", "params": { "reviewId": "rev_1786...._ab12cd", "waitSeconds": 30 } }
+```
+
+**Response (approved & executed):** the original command's result, e.g. for `run_background_script`:
+```json
+{ "status": "success", "result": { "reviewId": "rev_....", "command": "run_background_script", "output": "*** Script: ..." } }
+```
+
+**Errors:**
+- `E_REVIEW_PENDING` — still undecided; remind the user and poll again.
+- `E_USER_REJECTED` — the developer rejected it; don't retry without asking.
+- `E_TIMEOUT` — the 5-minute review window expired unanswered; re-issue the original command to start a new review.
+- `E_NOT_FOUND` — unknown/expired `reviewId` (settled results are kept ~10 minutes).
+
+> Prefer this two-phase flow. If you genuinely need the old blocking behavior (the original call holding open until the decision), pass `"awaitReview": true` in the original command's `params` — but note most HTTP clients time out long before the 5-minute window.
 
 ### `list_instances`
 List every instance in the workspace with its URL and per-instance activity
@@ -1342,7 +1236,10 @@ Execute a server-side background script (`/sys.scripts.do`) on the instance and 
 ```
 
 **Errors:**
-- `E_DISABLED` — `sn-scriptsync.backgroundScripts.enabled` is off.
+- `E_DISABLED` — `sn-scriptsync.backgroundScripts.enabled` is off, or the instance gate is set to Off in the helper tab.
+- `E_REVIEW_PENDING` — the instance gate is set to Approve: the script is waiting in the helper tab Review Queue. Tell the user to approve it in the SN Utils ScriptSync helper tab in their browser, then collect the output with `get_review_result`.
+- `E_USER_REJECTED` — the developer rejected the script in the Review Queue; don't retry without asking.
+- `E_UNAUTHORIZED` — the instance answered "not authorized" (session lost, or the user can't run background scripts); the helper refreshes the session token and retries once before raising this.
 - `E_INVALID_PARAMS` — missing `script`.
 
 > The pragmatic escape hatch for bulk data fixes that the typed commands don't cover. Output is whatever `/sys.scripts.do` returns (the `gs.print` lines plus the server's evaluation log).

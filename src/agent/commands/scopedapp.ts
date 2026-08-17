@@ -4,10 +4,6 @@ import { CommandHandler } from '../types';
 import { AgentError } from '../errors';
 import { mustGetInstanceSettings, getSetting, restRequest } from './_shared';
 
-function isCreateArtifactsEnabled(): boolean {
-	return getSetting('createArtifacts.enabled', true);
-}
-
 function slugify(name: string): string {
 	return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
 }
@@ -54,9 +50,6 @@ const create_application: CommandHandler = {
 		},
 	},
 	async handle(ctx, params) {
-		if (!isCreateArtifactsEnabled()) {
-			throw new AgentError('E_DISABLED', 'Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
-		}
 		const name = params?.name;
 		if (!name) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: name');
 
@@ -107,9 +100,6 @@ const add_column: CommandHandler = {
 		},
 	},
 	async handle(ctx, params) {
-		if (!isCreateArtifactsEnabled()) {
-			throw new AgentError('E_DISABLED', 'Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
-		}
 		const table = params?.table;
 		const element = params?.element || params?.column;
 		if (!table || !element) throw new AgentError('E_INVALID_PARAMS', 'Missing required params: table, element');
@@ -201,9 +191,6 @@ const create_table: CommandHandler = {
 		},
 	},
 	async handle(ctx, params) {
-		if (!isCreateArtifactsEnabled()) {
-			throw new AgentError('E_DISABLED', 'Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
-		}
 		const rawName = params?.name;
 		if (!rawName) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: name');
 

@@ -15,8 +15,7 @@ Verify WebSocket server is running and browser helper tab is connected. **Always
     "serverRunning": true,
     "browserConnected": true,
     "message": "Connected and ready",
-    "helper": { "debuggerAvailable": false, "tier": "pro", "proFeatures": true },
-    "browserDebuggerEnabled": false
+    "helper": { "debuggerAvailable": false, "tier": "pro", "proFeatures": true }
   }
 }
 ```
@@ -24,7 +23,7 @@ Verify WebSocket server is running and browser helper tab is connected. **Always
 **`helper` tells you which SN Utils build is connected.** `debuggerAvailable` is true only on the SN Utils Debug edition; most users run the regular build. You don't need this to take screenshots (`take_screenshot` auto-routes to the best available path), but it tells you what else this session can do:
 
 - `debuggerAvailable: false` → explicit debugger commands (`capture_full_page`, network/console capture, dialog handling) will return `E_CDP_UNAVAILABLE`, and a screenshot on an ungranted tab will require the user's one-time icon click.
-- `debuggerAvailable: true` + `proFeatures: true` + `browserDebuggerEnabled: true` → full-page/element captures and network/console/dialog debugging are available, and screenshots never need a permission click.
+- `debuggerAvailable: true` + `proFeatures: true` → full-page/element captures and network/console/dialog debugging are available (subject to the `browserDebugger` gate — see `get_capabilities`), and screenshots never need a permission click.
 - `helper: null` → the handshake hasn't arrived yet (or the license lookup failed); retry or fall back to `get_capabilities` for the authoritative, browser-verified view.
 
 **Response (server not running):**

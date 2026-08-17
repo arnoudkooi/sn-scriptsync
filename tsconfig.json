@@ -1,14 +1,14 @@
-{	
+{
 	"compilerOptions": {
 		"module": "node16",
 		"moduleResolution": "node16",
 		"target": "ES2020",
-		"outDir": "out",	
-		"lib": ["ES2020"],	
-		"sourceMap": true,	
-		"rootDir": "src",	
-		"incremental": true,	
-		"tsBuildInfoFile": "out/.tsbuildinfo"	
-	},	
-	"exclude": ["node_modules", ".vscode-test", "autocomplete", "scripts"]	
+		"outDir": "out",
+		"lib": ["ES2020"],
+		"sourceMap": true,
+		"rootDir": "src",
+		"incremental": true,
+		"tsBuildInfoFile": "out/.tsbuildinfo"
+	},
+	"exclude": ["node_modules", ".vscode-test", "autocomplete", "scripts", "packages"]
 }

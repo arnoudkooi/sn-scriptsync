@@ -5,7 +5,8 @@ import { AgentError } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
 import { listInstanceFolders } from '../instanceResolver';
 import { getSetting } from './_shared';
-import { isBrowserDebuggerEnabled } from './cdp';
+import { AGENT_API_VERSION } from '../portFile';
+import { hasReview, waitForReview, getReviewCommand } from '../reviewRegistry';
 
 const eu = new ExtensionUtils();
 
@@ -23,10 +24,9 @@ const check_connection: CommandHandler = {
 				browserConnected: true,
 				message: 'Connected and ready',
 				helper: { debuggerAvailable: false, tier: 'pro', proFeatures: true },
-				browserDebuggerEnabled: false,
 			},
 		},
-		notes: '`helper` is the connected SN Utils build\'s self-report: `debuggerAvailable` is true only on the Debug edition (most users run the regular build). Screenshots need no planning — take_screenshot auto-routes to the best available path — but explicit debugger commands (capture_full_page, network/console capture, dialogs) return E_CDP_UNAVAILABLE without the Debug edition. `helper` is null when the handshake has not arrived; `tier`/`proFeatures` may lag the build info by a moment. `browserDebuggerEnabled` mirrors the sn-scriptsync.browserDebugger.enabled setting. get_capabilities remains the authoritative, browser-verified view.',
+		notes: '`helper` is the connected SN Utils build\'s self-report: `debuggerAvailable` is true only on the Debug edition (most users run the regular build). Screenshots need no planning — take_screenshot auto-routes to the best available path — but explicit debugger commands (capture_full_page, network/console capture, dialogs) return E_CDP_UNAVAILABLE without the Debug edition. `helper` is null when the handshake has not arrived; `tier`/`proFeatures` may lag the build info by a moment. get_capabilities remains the authoritative, browser-verified view.',
 	},
 	async handle(ctx) {
 		const serverRunning = ctx.isServerRunning();
@@ -63,7 +63,6 @@ const check_connection: CommandHandler = {
 					proFeatures: !!helper.proFeatures,
 				}
 				: null,
-			browserDebuggerEnabled: isBrowserDebuggerEnabled(),
 		};
 	},
 };
@@ -271,25 +270,25 @@ const get_capabilities: CommandHandler = {
 	noInstance: true,
 	requiresBrowser: true,
 	docs: {
-		summary: 'Ask the connected SN Utils helper tab what it can do RIGHT NOW: the license tier, whether the Chrome DevTools Protocol browser debugger (network/console capture, full-page screenshots, native dialog handling) is usable, and the `gates` settings block (which write/create/delete/script permissions are enabled). Call this once up front to preflight E_DISABLED instead of discovering it mid-operation.',
+		summary: 'Ask the connected SN Utils helper tab what it can do RIGHT NOW: the Agent API version, license tier, whether the Chrome DevTools Protocol browser debugger (network/console capture, full-page screenshots, native dialog handling) is usable, the protocol `capabilities` the helper supports (two-phase command review, per-instance security gates), and the per-instance gate snapshots. Call this once up front to preflight E_DISABLED instead of discovering it mid-operation.',
 		request: { command: 'get_capabilities', id: 'cap_1' },
 		response: {
 			status: 'success',
 			result: {
+				apiVersion: 8,
 				tier: 'pro',
 				proFeatures: true,
 				cdp: { available: true, reason: null },
-				gates: {
-					createArtifacts: true,
-					restRequest: false,
-					deleteRecords: false,
-					backgroundScripts: false,
-					browserDebugger: false,
-					fileFallback: true,
+				capabilities: { protocolVersion: 1, commandReview: 1, instanceSecurityGates: 1 },
+				instanceGates: {
+					'https://example.service-now.com': {
+						revision: 3,
+						gates: { backgroundScripts: 'approve', deleteRecords: 'off', createArtifacts: 'auto', browserDebugger: 'off', restRequest: 'auto' },
+					},
 				},
 			},
 		},
-		notes: 'Requires a connected helper tab (E_BROWSER_DISCONNECTED otherwise). `cdp.available` is true only when both the CDP adapter is present (Pro build) and the license is Pro/Trial/Enterprise; when false, `cdp.reason` is the code you would have hit (`E_CDP_UNAVAILABLE` for a Community build, `E_PRO_REQUIRED` for a non-Pro license). `gates` mirrors the VS Code settings that produce `E_DISABLED`: `createArtifacts` (create_artifact/create_application/create_table/add_column), `restRequest` (POST/PUT/PATCH via rest_request), `deleteRecords` (deletes + delete UI verbs), `backgroundScripts` (run_background_script + delete_application cascade), `browserDebugger` (CDP), and `fileFallback` (legacy file transport).',
+		notes: 'Requires a connected helper tab (E_BROWSER_DISCONNECTED otherwise). `cdp.available` is true only when both the CDP adapter is present (Pro build) and the license is Pro/Trial/Enterprise; when false, `cdp.reason` is the code you would have hit (`E_CDP_UNAVAILABLE` for a Community build, `E_PRO_REQUIRED` for a non-Pro license). `capabilities.commandReview: 1` means high-risk commands go through the helper-tab Review Queue (expect E_REVIEW_PENDING, then get_review_result); absent means an older SN Utils build, where high-risk commands run directly and are gated by the sn-scriptsync VS Code settings. `instanceGates` holds the per-instance tri-state grants (`off` refuses, `auto` runs without review, `approve` requires review) keyed by instance origin; a gate that is missing for an instance is treated as `off`.',
 	},
 	async handle(ctx) {
 		const correlationId = `agent_${ctx.request.id}_${Date.now()}`;
@@ -301,32 +300,48 @@ const get_capabilities: CommandHandler = {
 			throw new AgentError(r?.code || 'E_INTERNAL', r?.error || 'get_capabilities failed');
 		}
 		const cdp = r?.cdp || {};
-		// The browser reports whether the adapter + Pro license make CDP usable,
-		// but the debugger is also gated server-side. The VS Code setting
-		// wins: when it's off, report unavailable with E_DISABLED regardless of
-		// what the browser can technically do.
-		const debuggerEnabled = isBrowserDebuggerEnabled();
-		const cdpAvailable = debuggerEnabled && !!cdp.available;
-		const cdpReason = !debuggerEnabled ? 'E_DISABLED' : (cdp.reason || null);
 		return {
+			apiVersion: AGENT_API_VERSION,
 			tier: typeof r?.tier === 'string' ? r.tier : null,
 			proFeatures: !!r?.proFeatures,
 			cdp: {
-				available: cdpAvailable,
-				reason: cdpReason,
+				available: !!cdp.available,
+				reason: cdp.reason || null,
 			},
-			// Settings gates so an agent can preflight E_DISABLED instead of
-			// discovering it mid-operation. Read straight from VS Code settings;
-			// no browser round-trip needed.
-			gates: {
-				createArtifacts: getSetting('createArtifacts.enabled', true),
-				restRequest: getSetting('restRequest.enabled', false),
-				deleteRecords: getSetting('deleteRecords.enabled', false),
-				backgroundScripts: getSetting('backgroundScripts.enabled', false),
-				browserDebugger: debuggerEnabled,
-				fileFallback: getSetting('agentApi.fileFallback', true),
-			},
+			capabilities: r?.capabilities || { protocolVersion: 1 },
+			instanceGates: r?.instanceGates || {},
 		};
+	},
+};
+
+const get_review_result: CommandHandler = {
+	name: 'get_review_result',
+	noInstance: true,
+	docs: {
+		summary: 'Collect the outcome of a pending human review (E_REVIEW_PENDING). Long-polls up to waitSeconds (default 30, max 55); returns the original command\'s result once approved, or its error if rejected/expired.',
+		request: { command: 'get_review_result', id: 'revres_1', params: { reviewId: 'rev_...', waitSeconds: 30 } },
+	},
+	async handle(_ctx, params) {
+		const reviewId = params?.reviewId;
+		if (!reviewId || typeof reviewId !== 'string') {
+			throw new AgentError('E_INVALID_PARAMS', 'Missing required param: reviewId (from the E_REVIEW_PENDING response)');
+		}
+		if (!hasReview(reviewId)) {
+			throw new AgentError('E_NOT_FOUND', 'Unknown or expired reviewId. Settled results are kept ~10 minutes; re-issue the original command to start a new review.');
+		}
+		const waitSeconds = Math.min(Math.max(Number(params?.waitSeconds) || 30, 0), 55);
+		const resp = await waitForReview(reviewId, waitSeconds * 1000);
+		if (!resp) {
+			throw new AgentError(
+				'E_REVIEW_PENDING',
+				'Still awaiting developer approval in the SN Utils helper tab Review Queue. Remind the user to approve, then call get_review_result again.',
+				{ reviewId },
+			);
+		}
+		if (resp.status === 'error') {
+			throw new AgentError((resp.code as any) || 'E_INTERNAL', resp.error || 'Reviewed command failed', resp.details);
+		}
+		return { reviewId, command: getReviewCommand(reviewId) || resp.command, ...(typeof resp.result === 'object' && resp.result !== null ? resp.result : { result: resp.result }) };
 	},
 };
 
@@ -339,6 +354,7 @@ export const connectionCommands: CommandHandler[] = [
 	get_instance_info,
 	list_instances,
 	get_capabilities,
+	get_review_result,
 ];
 
 // ---------------------------------------------------------------------------

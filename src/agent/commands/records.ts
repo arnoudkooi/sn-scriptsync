@@ -7,14 +7,6 @@ import { mustGetInstanceSettings, getSetting, restRequest, readBackRecord } from
 
 const eu = new ExtensionUtils();
 
-function isCreateArtifactsEnabled(): boolean {
-	return getSetting('createArtifacts.enabled', true);
-}
-
-function isDeleteRecordsEnabled(): boolean {
-	return getSetting('deleteRecords.enabled', false);
-}
-
 /** Normalise a Table API field value to a plain string for comparison. */
 function normaliseValue(v: any): string {
 	if (v === null || v === undefined) return '';
@@ -226,10 +218,6 @@ const create_artifact: CommandHandler = {
 		},
 	},
 	async handle(ctx, params) {
-		if (!isCreateArtifactsEnabled()) {
-			throw new AgentError('E_DISABLED', 'Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
-		}
-
 		const { table, fields } = params || {};
 		const scope = params?.scope || 'global';
 		if (!table) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: table');
@@ -332,14 +320,10 @@ const delete_record: CommandHandler = {
 	name: 'delete_record',
 	requiresBrowser: true,
 	docs: {
-		summary: 'Delete a record (table + sys_id), or bulk-delete by query with confirm + limit. Guarded by sn-scriptsync.deleteRecords.enabled.',
+		summary: 'Delete a record (table + sys_id), or bulk-delete by query with confirm + limit. Controlled per-instance in the SN Utils helper tab.',
 		request: { command: 'delete_record', id: 'del_1', params: { table: 'incident', sys_id: '...' } },
 	},
 	async handle(ctx, params) {
-		if (!isDeleteRecordsEnabled()) {
-			throw new AgentError('E_DISABLED', 'Record deletion is disabled. Enable sn-scriptsync.deleteRecords.enabled to allow it.');
-		}
-
 		const table = params?.table;
 		const sysId = params?.sys_id;
 		const query = params?.query;

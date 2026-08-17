@@ -113,6 +113,8 @@ HTTP status codes map to codes:
 | `E_DISABLED` | 423 | Feature disabled via settings (e.g. deletes, background scripts) |
 | `E_PAUSED` | 423 | The user paused agent access in the ScriptSync helper tab. Stop and tell the user — do not retry until they press Resume agents there |
 | `E_PARTIAL_FAILURE` | 207 | Batch partially succeeded — inspect per-item results |
+| `E_REVIEW_PENDING` | 202 | The command needs human approval in the helper tab Review Queue. **Tell the user to approve it** in the SN Utils ScriptSync helper tab in their browser, then call `get_review_result` with the `reviewId` from `details` to collect the outcome |
+| `E_USER_REJECTED` | 403 | The developer rejected the command in the Review Queue — do not retry without asking the user |
 | `E_INTERNAL` | 500 | Unexpected error |
 | `E_ACL` / `E_TOKEN_EXPIRED` / `E_SCREENSHOT_PERMISSION` | 502 | ServiceNow rejected the request, or a tab needs a one-time capture grant (click the SN Utils icon on it, then retry) |
 | `E_SERVER_NOT_RUNNING` / `E_BROWSER_DISCONNECTED` | 503 | Can't reach ServiceNow |
@@ -151,12 +153,6 @@ If `list_instances` isn't available (older extension), fall back to reading the
 `<instance>/_settings.json` mtimes yourself and applying the same rule. Once
 resolved, reuse that `instance` for the rest of the session.
 
-## Transport 2: File (legacy fallback)
+## Transport: HTTP only
 
-If the HTTP transport is unavailable (container without localhost access, old agent tooling, etc.), the extension still watches `{instance_folder}/agent/requests/*.json`. Drop a request file, poll `{instance_folder}/agent/responses/res_<id>.json`, then clean up. See the Legacy File API section below for examples.
-
-You can disable the file fallback once all your tooling is on HTTP:
-
-```
-"sn-scriptsync.agentApi.fileFallback": false
-```
+The legacy file-based transport (`{instance_folder}/agent/requests/*.json`) was removed in 4.8.0. Every agent flow uses the HTTP Agent API above; if a request file is dropped in the workspace nothing will pick it up.

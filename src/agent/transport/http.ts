@@ -7,7 +7,8 @@ import { dispatchAgentCommand } from '../dispatcher';
 import { httpStatusForCode } from '../errors';
 import { AgentRequest, AgentResponse } from '../types';
 import { commandNames } from '../commands';
-import { writePortFile, deletePortFile, AGENT_API_VERSION, AGENT_API_FIXED_PORT } from '../portFile';
+import * as pendingRegistry from '../pendingRegistry';
+import { writePortFile, deletePortFile, getPortFilePath, globalPortFilePath, AGENT_API_VERSION, AGENT_API_FIXED_PORT } from '../portFile';
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB – attachments push this up
 
@@ -87,6 +88,46 @@ function safeSkillName(name: string): boolean {
 	return /^[a-z0-9-]+$/i.test(name);
 }
 
+async function probeAndYieldStandalone(fixedPort: number): Promise<void> {
+	try {
+		const controller = new AbortController();
+		const t = setTimeout(() => controller.abort(), 800);
+		const res = await fetch(`http://127.0.0.1:${fixedPort}/api/health`, { signal: controller.signal });
+		clearTimeout(t);
+		if (res.ok) {
+			const health: any = await res.json();
+			if (health?.hostKind === 'standalone') {
+				let token = '';
+				try {
+					const wsPortFile = getPortFilePath();
+					if (wsPortFile && fs.existsSync(wsPortFile)) {
+						token = JSON.parse(fs.readFileSync(wsPortFile, 'utf8')).token;
+					} else {
+						const gPortFile = globalPortFilePath();
+						if (fs.existsSync(gPortFile)) {
+							token = JSON.parse(fs.readFileSync(gPortFile, 'utf8')).token;
+						}
+					}
+				} catch {}
+				if (token) {
+					const yieldCtrl = new AbortController();
+					const yt = setTimeout(() => yieldCtrl.abort(), 1000);
+					await fetch(`http://127.0.0.1:${fixedPort}/api`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json', 'X-Agent-Token': token },
+						body: JSON.stringify({ id: 'vscode_yield', command: 'yield' }),
+						signal: yieldCtrl.signal,
+					});
+					clearTimeout(yt);
+					await new Promise((r) => setTimeout(r, 150));
+				}
+			}
+		}
+	} catch {
+		// Ignore if nothing responds
+	}
+}
+
 export async function startAgentHttpServer(opts: {
 	extensionVersion?: string;
 	onLog?: (msg: string) => void;
@@ -156,6 +197,14 @@ export async function startAgentHttpServer(opts: {
 
 			if (req.method === 'POST' && url.pathname === '/api') {
 				let body: any;
+				let parsedRequestId: string | undefined;
+
+				req.on('close', () => {
+					if (!res.writableEnded && parsedRequestId) {
+						pendingRegistry.cancel(parsedRequestId, 'HTTP_REQUEST_CLOSED');
+					}
+				});
+
 				try {
 					body = await readJsonBody(req);
 				} catch (e: any) {
@@ -172,6 +221,7 @@ export async function startAgentHttpServer(opts: {
 
 				// Generate an id if the agent omitted one – makes curl quickstart trivial.
 				if (!body.id) body.id = `http_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+				parsedRequestId = body.id;
 
 				const response: AgentResponse = await dispatchAgentCommand(body as AgentRequest);
 				const status = response.status === 'success' ? 200 : httpStatusForCode(response.code);
@@ -184,6 +234,9 @@ export async function startAgentHttpServer(opts: {
 			try { sendJson(res, 500, { status: 'error', code: 'E_INTERNAL', error: 'Internal error' }); } catch { /* ignore */ }
 		}
 	});
+
+	// If a standalone bridge daemon (snu serve / in-process MCP) is running, request a graceful yield
+	await probeAndYieldStandalone(AGENT_API_FIXED_PORT);
 
 	// Prefer the fixed port so the connect instruction is a static sentence;
 	// fall back to an ephemeral port when it's taken (second window, another

@@ -71,7 +71,8 @@ export async function restRequest(ctx: AgentContext, instance: any, opts: RestOp
 	const response = await pending;
 	if (!response || response.success === false) {
 		const msg: string = response?.error || 'REST request failed';
-		throw new AgentError(codeForRest(response?.status, msg), msg, { status: response?.status, detail: response?.detail });
+		const code: AgentErrorCode = response?.code || codeForRest(response?.status, msg);
+		throw new AgentError(code, msg, response?.details || { status: response?.status, detail: response?.detail });
 	}
 	return { status: response.status, data: response.data };
 }
@@ -94,8 +95,66 @@ function codeForRest(status: number | undefined, msg: string): AgentErrorCode {
  * captured output. Round-trips through the `agentRunBackgroundScript` action
  * (which carries the agentRequestId, unlike the fire-and-forget
  * executeBackgroundScript path).
+ *
+ * `sys.scripts.do` answers a bare "not authorized" when the posted `g_ck` no
+ * longer matches the session (reads keep working, so the stored token can go
+ * stale unnoticed). That is indistinguishable from a real permissions problem,
+ * so on that exact output we refresh the token via the `/token` slash command
+ * and retry once before giving up with E_ACL.
  */
 export async function runBackgroundScript(ctx: AgentContext, instance: any, script: string): Promise<string> {
+	let output = '';
+	try {
+		output = await postBackgroundScript(ctx, instance, script);
+	} catch (e: any) {
+		if (e instanceof AgentError && (e.code === 'E_UNAUTHORIZED' || e.code === 'E_ACL' || e.message.toLowerCase().includes('not authorized'))) {
+			ctx.log('Agent API: sys.scripts.do reported unauthorized session — attempting token refresh');
+			const refreshed = await refreshSessionToken(ctx, instance);
+			if (refreshed) {
+				ctx.log('Agent API: refreshed session token, retrying background script');
+				try {
+					return await postBackgroundScript(ctx, refreshed, script);
+				} catch (retryErr: any) {
+					throw new AgentError(
+						'E_UNAUTHORIZED',
+						`ServiceNow rejected the background script ("not authorized") even after refreshing the session token. ` +
+						`Ensure you are logged into ${instance?.url || 'the instance'} in your browser as an administrator (with elevated 'security_admin' role if required), then run /token from the helper tab.`,
+						retryErr?.details,
+					);
+				}
+			}
+			throw new AgentError(
+				'E_UNAUTHORIZED',
+				`ServiceNow rejected the background script ("not authorized"). ` +
+				`Please open ${instance?.url || 'the instance'} in your browser, elevate roles to admin/security_admin, and run /token from the helper tab or SN Utils popup.`,
+				e?.details,
+			);
+		}
+		throw e;
+	}
+
+	if (isNotAuthorized(output)) {
+		const refreshed = await refreshSessionToken(ctx, instance);
+		if (refreshed) {
+			ctx.log('Agent API: sys.scripts.do said "not authorized" — refreshed g_ck, retrying once');
+			output = await postBackgroundScript(ctx, refreshed, script);
+		}
+		if (isNotAuthorized(output)) {
+			throw new AgentError(
+				'E_UNAUTHORIZED',
+				`Instance rejected the background script ("not authorized")${refreshed ? ' even after a session-token refresh' : ' and the session token could not be refreshed'}. ` +
+				`Ensure you are logged in to ${instance?.url || 'the instance'} as admin (and elevated security_admin if required), then run /token.`,
+			);
+		}
+	}
+	return output;
+}
+
+function isNotAuthorized(output: string): boolean {
+	return output.trim().toLowerCase() === 'not authorized';
+}
+
+async function postBackgroundScript(ctx: AgentContext, instance: any, script: string): Promise<string> {
 	const correlationId = nextCorrelationId(ctx);
 	const pending = ctx.waitForBrowserResponse<any>(correlationId);
 	ctx.sendToBrowser({
@@ -108,9 +167,40 @@ export async function runBackgroundScript(ctx: AgentContext, instance: any, scri
 	const response = await pending;
 	if (!response || response.success === false) {
 		const msg: string = response?.error || 'Background script failed';
-		throw new AgentError(inferCodeFromMessage(msg), msg);
+		const code: AgentErrorCode = response?.code || inferCodeFromMessage(msg);
+		throw new AgentError(code, msg, response?.details);
 	}
 	return String(response.output ?? '');
+}
+
+/**
+ * Ask the helper tab to run `/token` for this instance, then wait for the
+ * rewritten `_settings.json` to land a different `g_ck`. Returns the fresh
+ * instance settings, or null when no new token shows up in time.
+ */
+async function refreshSessionToken(ctx: AgentContext, instance: any): Promise<any | null> {
+	const oldCk = instance?.g_ck;
+	const correlationId = nextCorrelationId(ctx);
+	const pending = ctx.waitForBrowserResponse<any>(correlationId);
+	ctx.sendToBrowser({
+		action: 'runSlashCommand',
+		agentRequestId: correlationId,
+		command: '/token',
+		url: (instance?.url || 'https://*.service-now.com') + '/*',
+		autoRun: true,
+	});
+	try {
+		await pending;
+	} catch {
+		return null;
+	}
+	const instanceName = path.basename(ctx.instanceFolder);
+	for (let i = 0; i < 32; i++) {
+		await new Promise((r) => setTimeout(r, 250));
+		const fresh = eu.getInstanceSettings(instanceName);
+		if (fresh?.g_ck && fresh.g_ck !== oldCk) return fresh;
+	}
+	return null;
 }
 
 /**

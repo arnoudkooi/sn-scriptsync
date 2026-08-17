@@ -58,6 +58,14 @@ const query_records: CommandHandler = {
 		ctx.log(`Agent API: Sent query request to ${table}: ${encodedQuery}`);
 
 		const response = await pending;
+		if (!response || response.success === false) {
+			const msg = response?.error || 'Failed to query records';
+			const isAuth = msg.toLowerCase().includes('not authenticated') || msg.toLowerCase().includes('not authorized') || msg.toLowerCase().includes('401');
+			const code = response?.code || (isAuth ? 'E_UNAUTHORIZED' : 'E_REST_ERROR');
+			const hint = isAuth ? ' Session is not authenticated. Open the instance in your browser, log in, and run /token.' : '';
+			throw new AgentError(code, `${msg}.${hint}`, response?.details);
+		}
+
 		return {
 			table: response?.tableName ?? table,
 			count: response?.count ?? (response?.records?.length || 0),

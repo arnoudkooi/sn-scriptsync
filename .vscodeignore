@@ -2,6 +2,8 @@
 .vscode/**
 .vscode-test/**
 src/**
+packages/**
+bin/**
 tsconfig.json
 tslint.json
 .gitignore

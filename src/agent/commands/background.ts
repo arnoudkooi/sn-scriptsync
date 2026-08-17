@@ -1,26 +1,15 @@
 import { CommandHandler } from '../types';
 import { AgentError } from '../errors';
-import { mustGetInstanceSettings, getSetting, runBackgroundScript } from './_shared';
-
-function isBackgroundScriptsEnabled(): boolean {
-	return getSetting('backgroundScripts.enabled', false);
-}
-
-function isDeleteRecordsEnabled(): boolean {
-	return getSetting('deleteRecords.enabled', false);
-}
+import { mustGetInstanceSettings, runBackgroundScript } from './_shared';
 
 const run_background_script: CommandHandler = {
 	name: 'run_background_script',
 	requiresBrowser: true,
 	docs: {
-		summary: 'Run a server-side background script on the instance and return its captured output. Disabled by default (sn-scriptsync.backgroundScripts.enabled).',
+		summary: 'Run a server-side background script on the instance and return its captured output. Controlled per-instance in the SN Utils helper tab.',
 		request: { command: 'run_background_script', id: 'bg_1', params: { script: "gs.print('hello from ' + gs.getUserName());" } },
 	},
 	async handle(ctx, params) {
-		if (!isBackgroundScriptsEnabled()) {
-			throw new AgentError('E_DISABLED', 'Background scripts are disabled. Enable sn-scriptsync.backgroundScripts.enabled to allow run_background_script.');
-		}
 		const script = params?.script;
 		if (!script || typeof script !== 'string') {
 			throw new AgentError('E_INVALID_PARAMS', 'Missing required param: script (string)');
@@ -36,16 +25,10 @@ const delete_application: CommandHandler = {
 	name: 'delete_application',
 	requiresBrowser: true,
 	docs: {
-		summary: 'Cascade-delete a scoped application (its scoped metadata + the sys_app record) via a guarded background script. Requires confirm:true and both delete + background-script settings enabled.',
+		summary: 'Cascade-delete a scoped application (its scoped metadata + the sys_app record) via a guarded background script. Requires confirm:true and permission in helper tab.',
 		request: { command: 'delete_application', id: 'delapp_1', params: { scope: 'x_acme_myapp', confirm: true } },
 	},
 	async handle(ctx, params) {
-		if (!isDeleteRecordsEnabled()) {
-			throw new AgentError('E_DISABLED', 'Record deletion is disabled. Enable sn-scriptsync.deleteRecords.enabled to allow delete_application.');
-		}
-		if (!isBackgroundScriptsEnabled()) {
-			throw new AgentError('E_DISABLED', 'delete_application runs a background script. Enable sn-scriptsync.backgroundScripts.enabled to allow it.');
-		}
 		if (params?.confirm !== true) {
 			throw new AgentError('E_CONFIRM_REQUIRED', 'delete_application is destructive and irreversible. Pass confirm:true to proceed.');
 		}

@@ -19,6 +19,7 @@ export interface Runtime {
 	stageAgentWrite?(input: StagedWriteMeta & { request: AgentRequest; instanceFolder: string }): StagedWriteResult;
 	/** Build/license handshake of the connected helper tab, if any. */
 	getHelperBuildInfo?(): HelperBuildInfo | null;
+	getInstanceGates?(origin: string): Record<string, any> | null;
 }
 
 let runtime: Runtime | undefined;
@@ -49,6 +50,7 @@ export function buildContext(request: AgentRequest, instanceFolder: string): Age
 		log: (msg) => r.log(msg),
 		reviewWritesEnabled: () => (r.reviewWritesEnabled ? r.reviewWritesEnabled() : false),
 		getHelperBuildInfo: () => (r.getHelperBuildInfo ? r.getHelperBuildInfo() : null),
+		getInstanceGates: (origin) => (r.getInstanceGates ? r.getInstanceGates(origin) : null),
 		stageWrite: (meta) => {
 			if (!r.stageAgentWrite) {
 				throw new Error('Review mode is on but the host did not wire stageAgentWrite().');
@@ -58,6 +60,7 @@ export function buildContext(request: AgentRequest, instanceFolder: string): Age
 		waitForBrowserResponse: <T = any>(correlationId: string, timeoutMs = DEFAULT_BROWSER_TIMEOUT_MS) =>
 			pendingRegistry.register<T>({
 				id: correlationId,
+				requestId: request.id,
 				command: request.command,
 				instanceFolder,
 				timeoutMs,

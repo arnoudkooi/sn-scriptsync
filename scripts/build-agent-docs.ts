@@ -129,7 +129,7 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               1977 (ephemeral fallback), global port file
 //               ~/.sn-scriptsync/agent-port.json, and self-describing docs
 //               endpoints (GET /api/instructions, /api/skills[/<name>]).
-const INSTRUCTIONS_VERSION = 18;
+const INSTRUCTIONS_VERSION = 19;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -140,7 +140,7 @@ const SKILL_MARKER = `<!-- SN-SCRIPTSYNC:SKILL apiVersion=${INSTRUCTIONS_VERSION
 // Grouped for the auto-generated command index in the core. The flattened list
 // is also the canonical command order inside the skills that own them.
 const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
-	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
+	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'get_review_result', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
 	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_artifact', 'delete_record'] },
 	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'create_table', 'add_column', 'delete_application'] },
 	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote'] },
@@ -190,7 +190,7 @@ const SKILLS: SkillDef[] = [
 		description:
 			'SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.',
 		intro: 'Full reference for the SN ScriptSync Agent API and every command except the live-form g_form bridge (see the snu-form-automation skill) and the browser debugger (see the snu-browser-debug skill).',
-		sections: ['70-agent-api', '71-legacy-file-api'],
+		sections: ['70-agent-api'],
 		commands: COMMAND_ORDER.filter((c) => !FORM_COMMANDS.has(c) && !CDP_COMMANDS.has(c)),
 	},
 	{

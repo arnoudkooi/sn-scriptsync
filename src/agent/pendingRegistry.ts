@@ -2,6 +2,7 @@ import { AgentError, AgentErrorCode } from './errors';
 
 export interface PendingEntry {
 	id: string;
+	requestId?: string;
 	command: string;
 	instanceFolder: string;
 	createdAt: number;
@@ -14,6 +15,7 @@ const pending = new Map<string, PendingEntry>();
 
 export interface RegisterOptions {
 	id: string;
+	requestId?: string;
 	command: string;
 	instanceFolder: string;
 	timeoutMs: number;
@@ -29,6 +31,7 @@ export function register<T = any>(opts: RegisterOptions): Promise<T> {
 
 		pending.set(opts.id, {
 			id: opts.id,
+			requestId: opts.requestId,
 			command: opts.command,
 			instanceFolder: opts.instanceFolder,
 			createdAt: Date.now(),
@@ -55,6 +58,26 @@ export function reject(id: string, code: AgentErrorCode, message: string, detail
 	pending.delete(id);
 	entry.reject(new AgentError(code, message, details));
 	return true;
+}
+
+export function cancel(id: string, reason = 'CANCELLED'): boolean {
+	let cancelled = false;
+	const entry = pending.get(id);
+	if (entry) {
+		clearTimeout(entry.timer);
+		pending.delete(id);
+		entry.reject(new AgentError('E_COMMAND_FAILED', `Request was cancelled: ${reason}`));
+		cancelled = true;
+	}
+	for (const [key, e] of Array.from(pending.entries())) {
+		if (e.requestId === id || key.startsWith(`agent_${id}_`) || key.startsWith(`snu_req_${id}_`)) {
+			clearTimeout(e.timer);
+			pending.delete(key);
+			e.reject(new AgentError('E_COMMAND_FAILED', `Request was cancelled: ${reason}`));
+			cancelled = true;
+		}
+	}
+	return cancelled;
 }
 
 export function has(id: string): boolean {

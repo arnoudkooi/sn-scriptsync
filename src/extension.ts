@@ -28,14 +28,11 @@ import {
 	setGlobalPortFileEnabled,
 	AGENT_CONNECT_SNIPPET,
 	stopAgentHttpServer,
-	startAgentFileTransport,
-	logAgentRequestToFile,
 	dispatchAgentCommand,
 	pendingRegistry,
 	inferCodeFromMessage,
 	AGENT_API_VERSION,
 	HttpServerState,
-	FileTransportHandle,
 	AgentRequest,
 } from './agent';
 
@@ -49,7 +46,6 @@ let scopeJson : any = {};
 let wss;
 let serverRunning = false;
 let agentHttpState: HttpServerState | undefined;
-let agentFileHandle: FileTransportHandle | undefined;
 //let openFiles = {};
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
@@ -829,7 +825,18 @@ function canCreateArtifactFromFile(filePath: string, scriptObj: any): { ok: bool
 	return { ok: true };
 }
 
-function isCreateArtifactsEnabled(): boolean {
+function isCreateArtifactsEnabled(instanceUrl?: string): boolean {
+	if (instanceUrl) {
+		try {
+			const origin = new URL(instanceUrl).origin.toLowerCase();
+			const gates = helperInstanceGates.get(origin);
+			if (gates) {
+				// Helper-published gates are authoritative: only an explicit grant passes.
+				return gates.createArtifacts === 'auto' || gates.createArtifacts === 'approve';
+			}
+		} catch {}
+	}
+	// Legacy helper: same VS Code setting and default as v4.7.9.
 	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
 	return (settings.get('createArtifacts.enabled') as boolean) ?? true;
 }
@@ -1158,12 +1165,15 @@ vscode.workspace.onDidSaveTextDocument(document => {
 // Build/license handshake of the currently connected helper tab (from its
 // helperBuildInfo / helperLicenseInfo messages). Module-level so the Agent API
 // can report at connect time which SN Utils build it is talking to.
-let connectedHelperInfo: {
-	debuggerAvailable?: boolean;
-	proFeatures?: boolean;
-	tier?: 'free' | 'pro' | 'trial' | 'enterprise';
-	licenseResolved?: boolean;
-} | null = null;
+let connectedHelperInfo: import('./agent/types').HelperBuildInfo | null = null;
+
+// Per-instance gate snapshots published by a v8 helper (helperGatesUpdated).
+// Snapshots are validated strictly and applied only when their revision is
+// higher than the one already stored, so a stale or malformed message can
+// never widen permissions. Both maps are cleared when the helper disconnects.
+const helperInstanceGates = new Map<string, Record<string, any>>();
+const helperInstanceGateRevisions = new Map<string, number>();
+const HELPER_GATE_KEYS = ['backgroundScripts', 'deleteRecords', 'createArtifacts', 'browserDebugger', 'restRequest'];
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -1182,6 +1192,7 @@ export function activate(context: vscode.ExtensionContext) {
 		reviewWritesEnabled: () => reviewWritesEnabled(),
 		stageAgentWrite: (input) => stageAgentWrite(input),
 		getHelperBuildInfo: () => connectedHelperInfo,
+		getInstanceGates: (origin: string) => helperInstanceGates.get(origin.toLowerCase()) || null,
 	});
 	setSyncStateProvider(() => ({
 		pendingFiles: Array.from(pendingFiles),
@@ -1475,10 +1486,6 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
 	stopAgentHttpServer(agentHttpState).catch(() => { /* ignore */ });
 	agentHttpState = undefined;
-	if (agentFileHandle) {
-		try { agentFileHandle.dispose(); } catch { /* ignore */ }
-		agentFileHandle = undefined;
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1552,55 +1559,6 @@ const WELCOME_SETTINGS: WelcomeSetting[] = [
 		label: 'Agent API: review writes before sync',
 		description: 'Hold Agent API writes (update_record, update_record_batch, create_artifact) in the Pending Saves queue so you can review and approve each one with Sync Now, instead of pushing them to the instance immediately. Off by default.',
 		default: false,
-	},
-	{
-		key: 'createArtifacts.enabled',
-		group: GROUP_AGENT,
-		type: 'boolean',
-		label: 'Agent API: create records',
-		description: 'Allow creating new records in ServiceNow from files and the Agent API.',
-		default: true,
-	},
-	{
-		key: 'restRequest.enabled',
-		group: GROUP_AGENT,
-		type: 'boolean',
-		label: 'Agent API: write via rest_request',
-		description: 'Allow the generic rest_request passthrough to perform write methods (POST/PUT/PATCH). GET is always allowed; DELETE additionally requires Delete records.',
-		default: false,
-	},
-	{
-		key: 'deleteRecords.enabled',
-		group: GROUP_AGENT,
-		type: 'boolean',
-		label: 'Agent API: delete records',
-		description: 'Allow the Agent API to delete records (delete_record, and DELETE via rest_request).',
-		default: false,
-	},
-	{
-		key: 'backgroundScripts.enabled',
-		group: GROUP_AGENT,
-		type: 'boolean',
-		label: 'Agent API: run background scripts',
-		description: 'Allow the Agent API to run server-side background scripts as the connected user. This executes arbitrary code on the instance.',
-		default: false,
-	},
-	{
-		key: 'browserDebugger.enabled',
-		group: GROUP_AGENT,
-		type: 'boolean',
-		label: 'Agent API: browser debugger',
-		description: 'Allow the Agent API to drive the connected ServiceNow tab through the Chrome DevTools Protocol (network/console capture, screenshots, dialogs). Needs SN Utils Pro and the Debug edition browser build.',
-		default: false,
-		link: { url: 'https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb', text: 'Get the SN Utils Debug edition →' },
-	},
-	{
-		key: 'agentApi.fileFallback',
-		group: GROUP_AGENT,
-		type: 'boolean',
-		label: 'Legacy file-based Agent API',
-		description: 'Keep the legacy file-based Agent API (agent/requests/*.json) active alongside the HTTP Agent API. Disable once all your agents use the HTTP endpoint.',
-		default: true,
 	},
 	{
 		key: 'debugLogging',
@@ -2133,15 +2091,6 @@ async function startServers() {
 			vscode.window.showWarningMessage(`SN ScriptSync: Agent HTTP API failed to start: ${err?.message || err}`);
 		});
 
-	const agentSettings = vscode.workspace.getConfiguration('sn-scriptsync');
-	const fileFallback = agentSettings.get<boolean>('agentApi.fileFallback', true);
-	if (fileFallback) {
-		agentFileHandle = startAgentFileTransport({
-			log: (m) => debugLog(m),
-			audit: (instanceFolder, request, response) => logAgentRequestToFile(instanceFolder, request, response),
-		});
-	}
-
 	//Start WebSocket Server
 	// Defensive: if a previous instance is somehow still around (e.g. a rapid
 	// stop→start), tear it down so we don't try to bind port 1978 twice.
@@ -2182,6 +2131,9 @@ async function startServers() {
 			proFeatures?: boolean;
 			tier?: 'free' | 'pro' | 'trial' | 'enterprise';
 			licenseResolved?: boolean;
+			capabilities?: Record<string, any>;
+			extensionName?: string;
+			extensionVersion?: string;
 		} | undefined;
 		let capabilityMessageSent = false;
 		let debugLicenseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2189,9 +2141,6 @@ async function startServers() {
 			if (capabilityMessageSent) return;
 
 			let message: string;
-			const debuggerEnabled = vscode.workspace
-				.getConfiguration('sn-scriptsync')
-				.get<boolean>('browserDebugger.enabled', false);
 			capabilityMessageSent = true;
 			const feedbackInvite = `<a href="https://snutils.com/contact?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_experience" target="_blank" class="promo-link">Share your experience →</a>`;
 			if (helperBuildInfo?.debuggerAvailable && helperBuildInfo?.proFeatures) {
@@ -2200,9 +2149,7 @@ async function startServers() {
 					: helperBuildInfo.tier === 'trial'
 						? 'Trial'
 						: 'Pro';
-				message = debuggerEnabled
-					? `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} connected.</b> Full agent debugging is active: full-page capture, console errors, network responses, native dialogs. ${feedbackInvite}`
-					: `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} recognized.</b> Enable <code>sn-scriptsync.browserDebugger.enabled</code> to activate full-page capture, console, network and dialog handling. ${feedbackInvite}`;
+				message = `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} connected.</b> Full agent debugging is active: full-page capture, console errors, network responses, native dialogs. ${feedbackInvite}`;
 			} else if (helperBuildInfo?.debuggerAvailable) {
 				message = helperBuildInfo.licenseResolved
 					? `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug.</b> Debugger build recognized. Activate Pro or start a free trial to unlock full-page capture, console, network and dialogs. <a href="https://snutils.com/trial?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_edition_connected" target="_blank" class="promo-link">Start free trial →</a>`
@@ -2244,6 +2191,8 @@ async function startServers() {
 			clearTimeout(capabilityMessageTimer);
 			if (debugLicenseTimer) clearTimeout(debugLicenseTimer);
 			connectedHelperInfo = null;
+			helperInstanceGates.clear();
+			helperInstanceGateRevisions.clear();
 			pendingRegistry.rejectAll('E_BROWSER_DISCONNECTED', 'Browser helper disconnected. Open the SN Utils helper tab and try again.');
 		});
 
@@ -2258,7 +2207,11 @@ async function startServers() {
 			try {
 				if (messageJson?.action === 'helperBuildInfo') {
 					helperBuildInfo = {
+						...helperBuildInfo,
 						debuggerAvailable: messageJson.debuggerAvailable === true,
+						capabilities: (messageJson.capabilities && typeof messageJson.capabilities === 'object') ? messageJson.capabilities : undefined,
+						extensionName: typeof messageJson.extensionName === 'string' ? messageJson.extensionName : undefined,
+						extensionVersion: typeof messageJson.extensionVersion === 'string' ? messageJson.extensionVersion : undefined,
 					};
 					connectedHelperInfo = { ...helperBuildInfo };
 					clearTimeout(capabilityMessageTimer);
@@ -2360,8 +2313,46 @@ async function startServers() {
 				handleRunSlashCommandResponse(messageJson);
 			else if (messageJson?.action == 'switchContextResponse')
 				handleSwitchContextResponse(messageJson);
+			else if (messageJson?.action === 'reviewResponse') {
+				if (messageJson.approved === false) {
+					pendingRegistry.reject(
+						messageJson.agentRequestId,
+						'E_USER_REJECTED',
+						messageJson.userFeedback ? `Execution rejected by developer: "${messageJson.userFeedback}"` : 'Execution rejected by developer in browser helper tab',
+						{ userFeedback: messageJson.userFeedback, reviewId: messageJson.reviewId }
+					);
+				} else {
+					broadcastToHelperTab({
+						action: 'executeApproved',
+						reviewId: messageJson.reviewId,
+						nonce: messageJson.nonce,
+						payloadHash: messageJson.payloadHash,
+						agentRequestId: messageJson.agentRequestId,
+					});
+				}
+			}
 			else if (messageJson?.agentRequestId && resolvePending(messageJson.agentRequestId, messageJson)) {
 				// Already resolved into a pending Agent API request.
+			}
+			else if (messageJson.action === 'helperGatesUpdated') {
+				const gates = messageJson.gates;
+				let origin = '';
+				try {
+					if (typeof messageJson.instanceOrigin === 'string') origin = new URL(messageJson.instanceOrigin).origin.toLowerCase();
+				} catch {}
+				const revision = typeof messageJson.revision === 'number' ? Math.floor(messageJson.revision) : NaN;
+				const validMode = (v: any) => v === 'off' || v === 'auto' || v === 'approve';
+				const valid = !!origin && Number.isSafeInteger(revision) && revision >= 1 &&
+					gates && typeof gates === 'object' && HELPER_GATE_KEYS.every((k) => validMode(gates[k]));
+				if (valid) {
+					const prevRevision = helperInstanceGateRevisions.get(origin);
+					if (prevRevision === undefined || revision > prevRevision) {
+						const snapshot: Record<string, any> = {};
+						for (const k of HELPER_GATE_KEYS) snapshot[k] = gates[k];
+						helperInstanceGates.set(origin, snapshot);
+						helperInstanceGateRevisions.set(origin, revision);
+					}
+				}
 			}
 			else if (message.instance && !message?.action)
 				refreshedToken(messageJson);
@@ -2416,11 +2407,11 @@ async function startServers() {
 			}
 		});
 
-		//send immediatly a feedback to the incoming connection    
-		ws.send('["Connected to VS Code ScriptScync WebSocket"]', function () { });
+		// send immediately a feedback to the incoming connection
+		ws.send('["Connected to VS Code ScriptSync WebSocket"]', function () { });
 		ws.send(JSON.stringify({
 			action: 'bannerMessage',
-			message: `v4.7: AI Agent API — agents can build & edit artifacts, drive the live form, run code search, and with Pro capture network/console logs & full-page screenshots via the browser debugger. HTTP API on 127.0.0.1 (see .vscode/sn-agent-port.json, X-Agent-Token header).`,
+			message: `v4.8: AI Agent Bridge & Review Queue: interactive two-phase human review for high-risk commands, per-instance security permissions, automatic Debug edition detection, and standalone @snutils/snu CLI / MCP tools. HTTP API on 127.0.0.1 (port 1977).`,
 			class: 'alert alert-primary',
 		}), function () { });
 
@@ -2636,16 +2627,14 @@ function stopServers() {
 	}
 	stopAgentHttpServer(agentHttpState).catch(() => { /* ignore */ });
 	agentHttpState = undefined;
-	if (agentFileHandle) {
-		try { agentFileHandle.dispose(); } catch { /* ignore */ }
-		agentFileHandle = undefined;
-	}
 	// Staged agent creates can't be replayed once the bridge is down — drop their
 	// bookkeeping. The materialised files stay on disk (and in the queue) as plain
 	// local edits the user can keep or discard.
 	clearStagedCreates();
 	reportedUnresolvedScopes.clear();
 	connectedHelperInfo = null;
+	helperInstanceGates.clear();
+	helperInstanceGateRevisions.clear();
 	pendingRegistry.rejectAll('E_SERVER_NOT_RUNNING', 'ScriptSync server stopped.');
 	scriptSyncStatusBarItem.tooltip = undefined;
 	updateScriptSyncStatusBarItem('Stopped');
@@ -3324,14 +3313,14 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 	// Handle new artifacts that have no sys_id yet - create them in ServiceNow
 	if (!scriptObj.sys_id) {
 		if (scriptObj.tableName && scriptObj.fieldName) {
-			if (!isCreateArtifactsEnabled()) {
+			if (!isCreateArtifactsEnabled(scriptObj.instance?.url)) {
 				auditLog('create_guard_blocked', {
 					filePath,
 					tableName: scriptObj.tableName,
 					fieldName: scriptObj.fieldName,
 					reason: 'create_setting_disabled'
 				}, runId);
-				vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+				vscode.window.showWarningMessage('Artifact creation is disabled for this instance in the SN Utils helper tab.');
 				return false;
 			}
 
@@ -3776,8 +3765,8 @@ async function createNewArtifact(scriptObj: any) {
 		scope: scriptObj?.scope
 	}, runId);
 
-	if (!isCreateArtifactsEnabled()) {
-		vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+	if (!isCreateArtifactsEnabled(scriptObj?.instance?.url)) {
+		vscode.window.showWarningMessage('Artifact creation is disabled for this instance in the SN Utils helper tab.');
 		auditLog('create_blocked', { reason: 'create_setting_disabled', tableName: scriptObj?.tableName, name: scriptObj?.name }, runId);
 		return;
 	}
@@ -3847,8 +3836,8 @@ function handleCheckNameExistsResponse(responseJson: any) {
 }
 
 function proceedWithArtifactCreation(scriptObj: any) {
-	if (!isCreateArtifactsEnabled()) {
-		vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+	if (!isCreateArtifactsEnabled(scriptObj?.instance?.url)) {
+		vscode.window.showWarningMessage('Artifact creation is disabled for this instance in the SN Utils helper tab.');
 		auditLog('create_blocked', { reason: 'create_setting_disabled', tableName: scriptObj?.tableName, name: scriptObj?.name });
 		return;
 	}
@@ -3913,7 +3902,7 @@ function proceedWithArtifactCreation(scriptObj: any) {
 
 async function createArtifact(artifact: any) {
 	if (!isCreateArtifactsEnabled()) {
-		vscode.window.showWarningMessage('Artifact creation is disabled by setting sn-scriptsync.createArtifacts.enabled');
+		vscode.window.showWarningMessage('Artifact creation is disabled for this instance in the SN Utils helper tab.');
 		auditLog('create_blocked', { reason: 'create_setting_disabled', source: 'command_palette' });
 		return;
 	}

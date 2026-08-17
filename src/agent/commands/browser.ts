@@ -633,13 +633,6 @@ const run_ui_action: CommandHandler = {
 	},
 	async handle(ctx, params) {
 		const uiAction = params?.uiAction || params?.action || 'save';
-		// A destructive verb (e.g. sysverb_delete) would, with the confirm() now
-		// auto-accepted, silently delete the record — bypassing the guard that
-		// gates delete_record / rest_request DELETE / delete_application. Keep
-		// deletes consistently behind the same opt-in.
-		if (/delete/i.test(uiAction) && !getSetting<boolean>('deleteRecords.enabled', false)) {
-			throw new AgentError('E_DISABLED', `run_ui_action '${uiAction}' deletes the record and is disabled. Enable sn-scriptsync.deleteRecords.enabled, or use delete_record.`);
-		}
 		const r = await pageRoundTrip(ctx, 'agentRunUiAction', {
 			uiAction,
 			suppressDialogs: params?.suppressDialogs !== false,

@@ -1,6 +1,11 @@
 // Wire-format interfaces shared by every transport and every command.
 // Nothing in this file knows about HTTP, the file system, or ServiceNow.
 
+import { AgentErrorCode } from './errors';
+import { SecurityGates, CommandPolicy } from './policy';
+
+export { SecurityGates, CommandPolicy };
+
 export interface AgentRequest {
 	id: string;
 	command: string;
@@ -11,27 +16,67 @@ export interface AgentRequest {
 	timestamp?: number;
 }
 
-export interface AgentResponse {
+export interface AgentResponse<T = any> {
 	id: string;
 	command: string;
 	status: 'success' | 'error';
-	result?: any;
+	result?: T;
 	error?: string;
 	/** Structured error code (see errors.ts). Present when status === 'error'. */
-	code?: string;
+	code?: AgentErrorCode;
 	timestamp: number;
+	details?: {
+		userFeedback?: string;
+		reviewId?: string;
+		instanceOrigin?: string;
+		expiresIn?: number;
+		[key: string]: any;
+	};
 }
 
-/**
- * The runtime a command handler sees. Commands never touch ws, fs, or the VS
- * Code API directly; they ask the context.
- */
+export interface HelperCapabilities {
+	protocolVersion?: number;
+	commandReview?: 1 | 0;
+	rejectionFeedback?: 1 | 0;
+	instanceSecurityGates?: 1 | 0;
+	[key: string]: any;
+}
+
+export interface InstanceGateSnapshot {
+	instanceOrigin: string; // Canonicalized: new URL(url).origin.toLowerCase()
+	revision: number; // Monotonically increasing safe integer
+	receivedAt: number; // Server-generated Date.now()
+	gates: SecurityGates;
+}
+
 /** What the connected SN Utils build reported about itself on connect. */
 export interface HelperBuildInfo {
 	debuggerAvailable?: boolean;
 	proFeatures?: boolean;
 	tier?: 'free' | 'pro' | 'trial' | 'enterprise';
 	licenseResolved?: boolean;
+	capabilities?: HelperCapabilities;
+	cdp?: { available: boolean; reason: string | null };
+	sessionEpoch?: string;
+	instanceGates?: Record<string, InstanceGateSnapshot>;
+}
+
+export interface ReviewEnvelope {
+	required: true;
+	reviewId: string;
+	nonce: string;
+	payloadHash: string;
+	kind: 'background_script' | 'record_delete' | 'rest_delete' | 'ui_action' | 'bulk_delete';
+	summary: string;
+	targets?: Array<{ table: string; sys_id: string; display?: string }>;
+	script?: string;
+	instanceOrigin: string;
+	client: {
+		name: string;
+		version?: string;
+		hostKind: 'vscode' | 'standalone';
+		pid?: number;
+	};
 }
 
 export interface AgentContext {
@@ -54,6 +99,8 @@ export interface AgentContext {
 	/** Build/license handshake of the connected helper tab (helperBuildInfo /
 	 * helperLicenseInfo), or null before the handshake / when disconnected. */
 	getHelperBuildInfo(): HelperBuildInfo | null;
+	/** Live security gate settings per instance origin from helper tab. */
+	getInstanceGates?(origin: string): Record<string, any> | null;
 	/** Stage a write for manual review instead of pushing it now. Returns the
 	 * staged response a command should hand straight back to the caller. */
 	stageWrite(meta: StagedWriteMeta): StagedWriteResult;

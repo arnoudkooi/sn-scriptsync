@@ -16,8 +16,10 @@ import { AgentPortFile } from './types';
 // (~/.sn-scriptsync/agent-port.json) + self-describing docs endpoints
 // (GET /api/instructions, /api/skills[/<name>]); check_connection reports the
 // connected SN Utils build (helper.*); new E_PAUSED refusal (helper-tab pause
-// switch). All additive.
-export const AGENT_API_VERSION = 7;
+// v7 -> v8: Two-phase Monaco review protocol, command policies, per-instance
+// monotonic gate cache, deny-wins security model, cancellation propagation,
+// structured userFeedback and E_USER_REJECTED.
+export const AGENT_API_VERSION = 8;
 
 /** Preferred fixed port for the Agent API. If it's taken the server falls back
  * to an ephemeral port — the port files below always carry the actual port. */
