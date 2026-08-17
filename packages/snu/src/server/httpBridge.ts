@@ -135,11 +135,13 @@ export class StandaloneHttpBridge {
 
           req.on('data', (chunk) => (body += chunk));
 
-          req.on('close', () => {
+          const cancelPendingRequest = () => {
             if (!res.writableEnded && parsedRequest?.id) {
               this.dispatcher.cancel(parsedRequest.id, 'HTTP_REQUEST_CLOSED');
             }
-          });
+          };
+          req.on('aborted', cancelPendingRequest);
+          res.on('close', cancelPendingRequest);
 
           req.on('end', async () => {
             try {

@@ -199,11 +199,13 @@ export async function startAgentHttpServer(opts: {
 				let body: any;
 				let parsedRequestId: string | undefined;
 
-				req.on('close', () => {
+				const cancelPendingRequest = () => {
 					if (!res.writableEnded && parsedRequestId) {
 						pendingRegistry.cancel(parsedRequestId, 'HTTP_REQUEST_CLOSED');
 					}
-				});
+				};
+				req.on('aborted', cancelPendingRequest);
+				res.on('close', cancelPendingRequest);
 
 				try {
 					body = await readJsonBody(req);

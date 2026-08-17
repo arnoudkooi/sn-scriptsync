@@ -15,6 +15,12 @@ Unified CLI and Model Context Protocol (MCP) server for ServiceNow development, 
 
 ## 1. Installation & Quickstart
 
+### Requirements
+
+- Node.js 20 or newer.
+- Attached mode requires ScriptSync 4.8.0 or newer.
+- A connected SN Utils helper tab is required for ServiceNow operations.
+
 ### Using `npx` (No Installation Needed)
 ```bash
 # Run a quick query

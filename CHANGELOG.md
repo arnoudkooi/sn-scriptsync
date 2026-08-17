@@ -7,6 +7,7 @@
 - **Per-instance security gates (deny-wins):** A v8 SN Utils helper publishes tri-state gates (`off` / `auto` / `approve`) per instance and owns enforcement; anything it has not explicitly granted is refused. Connected to an older SN Utils build, the VS Code settings that gated 4.7.9 (`backgroundScripts`, `deleteRecords`, `createArtifacts`, `restRequest`, `browserDebugger`) keep working unchanged, so existing setups see no behavior change.
 - **Standalone `@snutils/snu` Package:** Standalone CLI, HTTP bridge daemon, and Model Context Protocol (MCP) server for terminal agents (`claude`, `cursor`, etc.) without requiring VS Code to be open.
 - **Graceful Port Handover:** Seamless cooperative handover (`POST /api`, command `yield`) between the Standalone daemon and VS Code on the fixed Agent API port 1977.
+- **Fixed CLI requests being cancelled after upload:** HTTP commands that wait for a browser response, including `snu schema`, no longer treat the normally completed request body as a disconnected client.
 - **Removed: the legacy file-based Agent API** (`agent/requests/*.json`) and its `sn-scriptsync.agentApi.fileFallback` setting; all agent flows now use the HTTP Agent API. **Changed: `get_capabilities`** now reports `apiVersion`, helper `capabilities`, and per-instance `instanceGates` instead of the old VS Code `gates` block.
 
 ## 4.7.9 (2026-08-08)
@@ -491,4 +492,3 @@ Features:
 Fixes / changes:
   - updated d.ts files
   - added TemplatePrinter intellisense based on PR #75
-

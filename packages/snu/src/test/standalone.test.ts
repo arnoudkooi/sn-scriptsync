@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { WebSocket } from 'ws';
 import { StandaloneBridge } from '../server/standalone.js';
+import { StandaloneHttpBridge } from '../server/httpBridge.js';
 import { StandaloneWsBridge } from '../server/wsBridge.js';
 import { PendingRegistry } from '../server/pendingRegistry.js';
 
@@ -103,5 +104,55 @@ test('Standalone: HTTP bridge serves health and handles yield command', async ()
   } finally {
     await bridge.stop();
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Standalone: completed request body does not cancel a pending command', async () => {
+  let cancelReason: string | undefined;
+  const dispatcher = {
+    async dispatch(request: any) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        id: request.id,
+        status: 'success',
+        result: { table: request.params.table },
+      };
+    },
+    cancel(_id: string, reason: string) {
+      cancelReason = reason;
+      return true;
+    },
+  };
+
+  const bridge = new StandaloneHttpBridge({
+    port: 0,
+    token: 'test-token',
+    dispatcher: dispatcher as any,
+  });
+
+  try {
+    const port = await bridge.start();
+    const response = await fetch(`http://127.0.0.1:${port}/api`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Agent-Token': 'test-token',
+      },
+      body: JSON.stringify({
+        id: 'schema_request',
+        command: 'get_table_metadata',
+        params: { table: 'sys_user' },
+      }),
+    });
+
+    assert.strictEqual(response.status, 200);
+    assert.deepStrictEqual((await response.json()) as any, {
+      id: 'schema_request',
+      status: 'success',
+      result: { table: 'sys_user' },
+    });
+    assert.strictEqual(cancelReason, undefined);
+  } finally {
+    await bridge.close();
   }
 });
