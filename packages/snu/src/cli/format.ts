@@ -103,7 +103,7 @@ export function formatHumanOutput(command: string, result: any): string {
     }
 
     if (result.instances && result.instances.length > 0) {
-      lines.push(`\n${ANSI.bold}Workspace Instances (${result.instances.length}):${ANSI.reset}`);
+      lines.push(`\n${ANSI.bold}Available Instances (${result.instances.length}):${ANSI.reset}`);
       for (const inst of result.instances) {
         const isDefault = inst.name === result.defaultInstance ? ` ${ANSI.cyan}(default)${ANSI.reset}` : '';
         const activeAge = inst.lastActiveAgeMs !== null ? `${ANSI.gray}${Math.round(inst.lastActiveAgeMs / 60000)}m ago${ANSI.reset}` : `${ANSI.gray}never active${ANSI.reset}`;

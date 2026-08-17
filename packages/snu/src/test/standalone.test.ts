@@ -8,6 +8,7 @@ import { StandaloneBridge } from '../server/standalone.js';
 import { StandaloneHttpBridge } from '../server/httpBridge.js';
 import { StandaloneWsBridge } from '../server/wsBridge.js';
 import { PendingRegistry } from '../server/pendingRegistry.js';
+import { StandaloneDispatcher } from '../server/dispatcher.js';
 
 test('Standalone: WebSocket bridge starts, connects to mock client, and handles messages', async () => {
   const pending = new PendingRegistry();
@@ -39,6 +40,22 @@ test('Standalone: WebSocket bridge starts, connects to mock client, and handles 
     assert.strictEqual(helper.tier, 'pro');
     assert.strictEqual(helper.proFeatures, true);
 
+    // `/token` is an unsolicited instance push. Standalone mode must retain it
+    // in memory so subsequent CLI commands have both a target URL and session.
+    ws.send(JSON.stringify({
+      instance: {
+        name: 'dev123',
+        url: 'https://dev123.service-now.com',
+        g_ck: 'live-session-token',
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepStrictEqual(wsBridge.getLiveInstances().map(({ name, url, g_ck }) => ({ name, url, g_ck })), [{
+      name: 'dev123',
+      url: 'https://dev123.service-now.com',
+      g_ck: 'live-session-token',
+    }]);
+
     // Test request/response correlation
     const pendingPromise = pending.register({ id: 'test_req_1', command: 'test' });
     wsBridge.sendToBrowser({ action: 'test', agentRequestId: 'test_req_1' });
@@ -57,6 +74,56 @@ test('Standalone: WebSocket bridge starts, connects to mock client, and handles 
     ws.close();
   } finally {
     await wsBridge.close();
+  }
+});
+
+test('Standalone: query uses the most recently authenticated /token instance', async () => {
+  const pending = new PendingRegistry();
+  const wsBridge = new StandaloneWsBridge(0, pending);
+  const wsPort = await wsBridge.start();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-live-instance-test-'));
+  const dispatcher = new StandaloneDispatcher({ cwd: tmpDir, wsBridge, pending });
+  const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+
+  try {
+    await new Promise<void>((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({
+      instance: {
+        name: 'dev123',
+        url: 'https://dev123.service-now.com',
+        g_ck: 'live-session-token',
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    ws.on('message', (raw) => {
+      const request = JSON.parse(raw.toString());
+      if (request.action !== 'agentRestApi') return;
+      assert.strictEqual(request.instance.url, 'https://dev123.service-now.com');
+      assert.strictEqual(request.instance.g_ck, 'live-session-token');
+      ws.send(JSON.stringify({
+        agentRequestId: request.agentRequestId,
+        success: true,
+        data: { result: [{ sys_id: 'abc123', number: 'INC0010001' }] },
+      }));
+    });
+
+    const response = await dispatcher.dispatch({
+      id: 'query_live_instance',
+      command: 'query_records',
+      params: { table: 'incident', query: 'active=true', limit: 1 },
+    });
+
+    assert.strictEqual(response.status, 'success');
+    assert.deepStrictEqual((response.result as any).records, [{ sys_id: 'abc123', number: 'INC0010001' }]);
+
+    const roster = await dispatcher.dispatch({ id: 'list_live_instances', command: 'list_instances', params: {} });
+    assert.strictEqual((roster.result as any).defaultInstance, 'dev123');
+    assert.strictEqual((roster.result as any).instances[0].source, 'browser');
+  } finally {
+    ws.close();
+    await wsBridge.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 

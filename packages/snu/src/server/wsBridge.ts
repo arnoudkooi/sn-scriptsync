@@ -10,6 +10,14 @@ export interface HelperState {
   capabilities: HelperCapabilities;
   sessionEpoch: string;
   instanceGates: Map<string, InstanceGateSnapshot>;
+  liveInstances: Map<string, LiveInstance>;
+}
+
+export interface LiveInstance {
+  name: string;
+  url: string;
+  g_ck: string;
+  lastActiveAt: number;
 }
 
 export interface ActiveReview {
@@ -34,6 +42,7 @@ export class StandaloneWsBridge {
     capabilities: { protocolVersion: 1 },
     sessionEpoch: '',
     instanceGates: new Map(),
+    liveInstances: new Map(),
   };
   private activeReviews = new Map<string, ActiveReview>();
 
@@ -114,12 +123,33 @@ export class StandaloneWsBridge {
       capabilities: { protocolVersion: 1 },
       sessionEpoch: '',
       instanceGates: new Map(),
+      liveInstances: new Map(),
     };
     this.activeReviews.clear();
   }
 
   private handleMessage(ws: WebSocket, msg: any): void {
     if (ws !== this.activeClient) return;
+
+    // `/token` and all normal instance-to-editor pushes already carry the live
+    // instance session object. The standalone bridge has no workspace settings
+    // file, so retain that object in memory for CLI/MCP commands. It is cleared
+    // as soon as the helper disconnects and is never written to disk.
+    if (msg?.instance?.url && msg?.instance?.g_ck) {
+      try {
+        const origin = new URL(msg.instance.url).origin.toLowerCase();
+        const hostname = new URL(origin).hostname;
+        const name = typeof msg.instance.name === 'string' && msg.instance.name.trim()
+          ? msg.instance.name.trim()
+          : hostname.split('.')[0];
+        this.state.liveInstances.set(origin, {
+          name,
+          url: origin,
+          g_ck: String(msg.instance.g_ck),
+          lastActiveAt: Date.now(),
+        });
+      } catch {}
+    }
 
     // 1. Immutable merge for license / build info
     if (msg.action === 'helperLicenseInfo' || msg.action === 'helperBuildInfo' || msg.action === 'helperHello') {
@@ -288,6 +318,10 @@ export class StandaloneWsBridge {
 
   getHelperState(): HelperState {
     return this.state;
+  }
+
+  getLiveInstances(): LiveInstance[] {
+    return [...this.state.liveInstances.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   }
 
   getInstanceGate(instanceUrl?: string, gate?: keyof SecurityGates): import('./policy.js').GateMode {

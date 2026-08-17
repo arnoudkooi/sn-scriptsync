@@ -61,16 +61,32 @@ export class StandaloneDispatcher {
 
   resolveInstance(requestInstance?: string): { name: string; folder: string; settings: any } {
     const folders = this.listInstanceFolders();
+    const liveInstances = this.ws.getLiveInstances();
 
     if (requestInstance) {
-      const targetFolder = path.join(this.cwd, requestInstance);
       const settings = this.getInstanceSettings(requestInstance);
-      if (!settings) {
-        throw Object.assign(new Error(`Instance folder not found or missing _settings.json: ${requestInstance}`), {
-          code: 'E_INSTANCE_NOT_FOUND',
-        });
+      if (settings) {
+        return { name: requestInstance, folder: path.join(this.cwd, requestInstance), settings };
       }
-      return { name: requestInstance, folder: targetFolder, settings };
+
+      const needle = requestInstance.toLowerCase().replace(/\/$/, '');
+      const live = liveInstances.find((candidate) => {
+        try {
+          const url = new URL(candidate.url);
+          return candidate.name.toLowerCase() === needle ||
+            url.hostname.toLowerCase() === needle ||
+            url.origin.toLowerCase() === needle;
+        } catch {
+          return false;
+        }
+      });
+      if (live) {
+        return { name: live.name, folder: this.cwd, settings: live };
+      }
+
+      throw Object.assign(new Error(`No authenticated instance named "${requestInstance}" is connected. Run /token on that ServiceNow instance and retry.`), {
+        code: 'E_INSTANCE_NOT_FOUND',
+      });
     }
 
     if (folders.length === 1) {
@@ -79,7 +95,13 @@ export class StandaloneDispatcher {
     }
 
     if (folders.length === 0) {
-      return { name: 'default', folder: this.cwd, settings: {} };
+      if (liveInstances.length > 0) {
+        const live = liveInstances[0];
+        return { name: live.name, folder: this.cwd, settings: live };
+      }
+      throw Object.assign(new Error('No authenticated ServiceNow instance is connected. Run /token on the instance and retry.'), {
+        code: 'E_INSTANCE_REQUIRED',
+      });
     }
 
     // Check freshness to find default instance
@@ -141,7 +163,14 @@ export class StandaloneDispatcher {
       if (req.command === 'list_instances') {
         const folders = this.listInstanceFolders();
         const now = Date.now();
-        const instances = folders.map((f) => {
+        const instances: Array<{
+          name: string;
+          url: string | null;
+          hasSettings: boolean;
+          recentlyActive: boolean;
+          lastActiveAgeMs: number | null;
+          source: 'workspace' | 'browser';
+        }> = folders.map((f) => {
           const name = path.basename(f);
           const settings = this.getInstanceSettings(name) || {};
           let lastActiveAgeMs: number | null = null;
@@ -155,8 +184,27 @@ export class StandaloneDispatcher {
             hasSettings: !!settings.url,
             recentlyActive: lastActiveAgeMs !== null && lastActiveAgeMs < 10 * 3600 * 1000,
             lastActiveAgeMs,
+            source: 'workspace' as const,
           };
         });
+
+        for (const live of this.ws.getLiveInstances()) {
+          const origin = new URL(live.url).origin.toLowerCase();
+          const duplicate = instances.some((instance) => {
+            try { return instance.url ? new URL(instance.url).origin.toLowerCase() === origin : false; } catch { return false; }
+          });
+          if (!duplicate) {
+            const lastActiveAgeMs = Math.max(0, now - live.lastActiveAt);
+            instances.push({
+              name: live.name,
+              url: live.url,
+              hasSettings: true,
+              recentlyActive: true,
+              lastActiveAgeMs,
+              source: 'browser',
+            });
+          }
+        }
 
         instances.sort((a, b) => {
           if (a.lastActiveAgeMs === null) return 1;
@@ -164,8 +212,9 @@ export class StandaloneDispatcher {
           return a.lastActiveAgeMs - b.lastActiveAgeMs;
         });
 
+        const liveDefault = this.ws.getLiveInstances()[0]?.name;
         const recent = instances.filter((i) => i.recentlyActive);
-        const defaultInstance = recent.length === 1 ? recent[0].name : (instances[0]?.name || null);
+        const defaultInstance = liveDefault || (recent.length === 1 ? recent[0].name : (instances[0]?.name || null));
 
         return {
           id: req.id,

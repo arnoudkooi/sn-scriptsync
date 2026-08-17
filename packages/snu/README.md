@@ -19,7 +19,7 @@ Unified CLI and Model Context Protocol (MCP) server for ServiceNow development, 
 
 - Node.js 20 or newer.
 - Attached mode requires ScriptSync 4.8.0 or newer.
-- A connected SN Utils helper tab is required for ServiceNow operations.
+- A connected SN Utils helper tab is required for ServiceNow operations. In standalone mode, start the bridge first and then run `/token` on the ServiceNow instance you want to use. The live session remains in memory only and is cleared when the helper disconnects.
 
 ### Using `npx` (No Installation Needed)
 ```bash
@@ -37,7 +37,10 @@ npx @snutils/snu search "GlideRecord"
 ```bash
 npm install -g @snutils/snu
 
-# Now run 'snu' anywhere
+# Standalone: keep this running, then run /token in ServiceNow
+snu serve
+
+# In another terminal, run 'snu' anywhere
 snu context
 snu query sys_script_include "active=true"
 snu run "gs.print('Hello from ' + gs.getUserName());"
@@ -153,7 +156,7 @@ snu screenshot
 - **Standalone Mode (VS Code Closed):** `snu serve` (or `snu --mcp`) hosts the WebSocket server on `127.0.0.1:1978` and HTTP API on `127.0.0.1:1977`.
 - **Safe Handover:** When VS Code launches while a standalone bridge is active, VS Code sends an automated `yield` signal to acquire the WebSocket and HTTP ports cleanly without port collisions.
 
-All credentials stay in your browser—zero tokens or passwords are ever stored or sent over the internet.
+Session credentials stay on your machine. The standalone bridge keeps the `/token` session in memory only, clears it when the helper disconnects, and never writes it to disk or sends it over the internet.
 
 ---
 
