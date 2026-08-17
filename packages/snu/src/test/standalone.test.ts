@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { spawn } from 'child_process';
 import { WebSocket } from 'ws';
 import { StandaloneBridge } from '../server/standalone.js';
 import { StandaloneHttpBridge } from '../server/httpBridge.js';
@@ -221,5 +222,47 @@ test('Standalone: completed request body does not cancel a pending command', asy
     assert.strictEqual(cancelReason, undefined);
   } finally {
     await bridge.close();
+  }
+});
+
+test('Standalone: SIGTERM closes the daemon and removes its port file', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-signal-test-'));
+  const modulePath = path.resolve(__dirname, '../server/standalone.js');
+  const script = `
+    const { StandaloneBridge } = require(${JSON.stringify(modulePath)});
+    const bridge = new StandaloneBridge({ cwd: ${JSON.stringify(tmpDir)}, httpPort: 0, wsPort: 0 });
+    bridge.start().then(() => process.stdout.write('READY\\n'));
+  `;
+  const child = spawn(process.execPath, ['-e', script], {
+    env: { ...process.env, HOME: tmpDir },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Child bridge did not start')), 3000);
+      child.stdout.on('data', (chunk) => {
+        if (chunk.toString().includes('READY')) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      child.once('error', reject);
+    });
+
+    child.kill('SIGTERM');
+    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Child bridge did not exit after SIGTERM')), 3000);
+      child.once('exit', (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+
+    assert.deepStrictEqual(result, { code: 0, signal: null });
+    assert.strictEqual(fs.existsSync(path.join(tmpDir, '.sn-scriptsync', 'agent-port.json')), false);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

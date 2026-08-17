@@ -19,6 +19,8 @@ export class StandaloneBridge {
   private token: string;
   private cwd: string;
   private writtenPortFiles: string[] = [];
+  private signalHandler?: () => void;
+  private exitHandler?: () => void;
 
   constructor(private options: StandaloneBridgeOptions = {}) {
     this.token = crypto.randomBytes(24).toString('hex');
@@ -56,12 +58,13 @@ export class StandaloneBridge {
     this.writePortFiles(httpPort);
 
     // 5. Clean up on exit
-    const cleanup = () => {
-      this.cleanPortFiles();
+    this.signalHandler = () => {
+      void this.stop().finally(() => process.exit(0));
     };
-    process.once('SIGINT', cleanup);
-    process.once('SIGTERM', cleanup);
-    process.once('exit', cleanup);
+    this.exitHandler = () => this.cleanPortFiles();
+    process.once('SIGINT', this.signalHandler);
+    process.once('SIGTERM', this.signalHandler);
+    process.once('exit', this.exitHandler);
 
     return { httpPort, wsPort, token: this.token };
   }
@@ -120,6 +123,15 @@ export class StandaloneBridge {
   }
 
   async stop(): Promise<void> {
+    if (this.signalHandler) {
+      process.off('SIGINT', this.signalHandler);
+      process.off('SIGTERM', this.signalHandler);
+      this.signalHandler = undefined;
+    }
+    if (this.exitHandler) {
+      process.off('exit', this.exitHandler);
+      this.exitHandler = undefined;
+    }
     this.cleanPortFiles();
     if (this.httpBridge) {
       await this.httpBridge.close();
