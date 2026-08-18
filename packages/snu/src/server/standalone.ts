@@ -11,6 +11,7 @@ export interface StandaloneBridgeOptions {
   wsPort?: number;
   cwd?: string;
   onYield?: () => void;
+  portFileMode?: 'default' | 'workspace-only' | 'none';
 }
 
 export class StandaloneBridge {
@@ -83,27 +84,33 @@ export class StandaloneBridge {
       2
     );
 
+    const portFileMode = this.options.portFileMode ?? 'default';
+
     // 1. Workspace port file: .vscode/sn-agent-port.json
-    try {
-      const vscodeDir = path.join(this.cwd, '.vscode');
-      if (!fs.existsSync(vscodeDir)) {
-        fs.mkdirSync(vscodeDir, { recursive: true });
-      }
-      const wsPortFile = path.join(vscodeDir, 'sn-agent-port.json');
-      fs.writeFileSync(wsPortFile, payload);
-      this.writtenPortFiles.push(wsPortFile);
-    } catch {}
+    if (portFileMode !== 'none') {
+      try {
+        const vscodeDir = path.join(this.cwd, '.vscode');
+        if (!fs.existsSync(vscodeDir)) {
+          fs.mkdirSync(vscodeDir, { recursive: true });
+        }
+        const wsPortFile = path.join(vscodeDir, 'sn-agent-port.json');
+        fs.writeFileSync(wsPortFile, payload);
+        this.writtenPortFiles.push(wsPortFile);
+      } catch {}
+    }
 
     // 2. Global port file: ~/.sn-scriptsync/agent-port.json
-    try {
-      const globalDir = path.join(os.homedir(), '.sn-scriptsync');
-      if (!fs.existsSync(globalDir)) {
-        fs.mkdirSync(globalDir, { recursive: true });
-      }
-      const globalPortFile = path.join(globalDir, 'agent-port.json');
-      fs.writeFileSync(globalPortFile, payload);
-      this.writtenPortFiles.push(globalPortFile);
-    } catch {}
+    if (portFileMode === 'default') {
+      try {
+        const globalDir = path.join(os.homedir(), '.sn-scriptsync');
+        if (!fs.existsSync(globalDir)) {
+          fs.mkdirSync(globalDir, { recursive: true });
+        }
+        const globalPortFile = path.join(globalDir, 'agent-port.json');
+        fs.writeFileSync(globalPortFile, payload);
+        this.writtenPortFiles.push(globalPortFile);
+      } catch {}
+    }
   }
 
   cleanPortFiles(): void {

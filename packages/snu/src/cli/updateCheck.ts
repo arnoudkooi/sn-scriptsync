@@ -18,6 +18,11 @@ interface UpdateResponse {
 
 type UpdateFetch = (url: string, init: { signal: AbortSignal }) => Promise<UpdateResponse>;
 
+export interface LatestVersionOptions {
+  timeoutMs?: number;
+  fetchImpl?: UpdateFetch;
+}
+
 export interface UpdateCheckOptions {
   currentVersion: string;
   cacheFile?: string;
@@ -86,6 +91,22 @@ function writeCache(cacheFile: string, cache: UpdateCache): void {
   }
 }
 
+export async function fetchLatestVersion(options: LatestVersionOptions = {}): Promise<string | undefined> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  try {
+    const fetchImpl = options.fetchImpl ?? (fetch as unknown as UpdateFetch);
+    const response = await fetchImpl(REGISTRY_URL, { signal: controller.signal });
+    if (!response.ok) return undefined;
+    const payload = await response.json();
+    return typeof payload.version === 'string' ? payload.version : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getUpdateNotice(options: UpdateCheckOptions): Promise<string | undefined> {
   const now = options.now ?? Date.now();
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
@@ -94,21 +115,14 @@ export async function getUpdateNotice(options: UpdateCheckOptions): Promise<stri
 
   if (cached && now - cached.checkedAt < intervalMs) return undefined;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   let latestVersion: string | undefined;
 
   try {
-    const fetchImpl = options.fetchImpl ?? (fetch as unknown as UpdateFetch);
-    const response = await fetchImpl(REGISTRY_URL, { signal: controller.signal });
-    if (response.ok) {
-      const payload = await response.json();
-      if (typeof payload.version === 'string') latestVersion = payload.version;
-    }
-  } catch {
-    // Network availability must not affect CLI behavior.
+    latestVersion = await fetchLatestVersion({
+      timeoutMs: options.timeoutMs,
+      fetchImpl: options.fetchImpl,
+    });
   } finally {
-    clearTimeout(timer);
     writeCache(cacheFile, { checkedAt: now, latestVersion });
   }
 

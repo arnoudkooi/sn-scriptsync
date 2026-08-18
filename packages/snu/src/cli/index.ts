@@ -8,6 +8,8 @@ import { formatHumanOutput, outputJson, outputError } from './format.js';
 import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { getUpdateNotice, shouldCheckForUpdates } from './updateCheck.js';
+import { inspectBridge, requestStandaloneYield, waitForBridgeExit } from './daemon.js';
+import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 
 const packageMetadata = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
@@ -33,6 +35,10 @@ export function printHelp(): void {
   snu <command> [arguments...] [options...]
   snu --mcp                           Start Model Context Protocol (MCP) server on stdio
   snu serve [--port <p>] [--ws <p>]   Start persistent standalone bridge daemon
+  snu status                          Show the active local bridge process
+  snu restart                         Gracefully replace a standalone bridge
+  snu stop                            Gracefully stop a standalone bridge
+  snu update [--check]                Check for or install the latest CLI release
 
 \x1b[1mCORE COMMANDS:\x1b[0m
   context                             Show active connection, helper tab, and instance roster
@@ -111,27 +117,156 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
 
-  const updateNotice = startUpdateCheck(!isJsonMode);
+  const lifecycleCommand = nonGlobalTokens[0];
+  const updateNotice = startUpdateCheck(!isJsonMode && lifecycleCommand !== 'update');
 
-  // Handle standalone daemon command: snu serve
-  if (nonGlobalTokens[0] === 'serve') {
+  const lifecycleArgs = parseArgs({
+    args: nonGlobalTokens.slice(1),
+    options: {
+      port: { type: 'string' },
+      ws: { type: 'string' },
+      check: { type: 'boolean' },
+    },
+    allowPositionals: true,
+    strict: false,
+  });
+  const lifecycleValues = lifecycleArgs.values as Record<string, string | boolean | undefined>;
+  const parsePort = (name: 'port' | 'ws', fallback: number): number => {
+    const raw = lifecycleValues[name];
+    if (raw === undefined) return fallback;
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+      throw new ScriptSyncClientError(`Invalid --${name} value: ${raw}`, 'E_INVALID_PARAMS');
+    }
+    return parsed;
+  };
+
+  const startStandalone = async (): Promise<void> => {
     const standalone = new StandaloneBridge({
       cwd: process.cwd(),
+      httpPort: parsePort('port', 1977),
+      wsPort: parsePort('ws', 1978),
       onYield: () => {
-        console.log('\n[snu] VS Code requested port handover. Standalone bridge yielded ports.');
+        console.log('\n[snu] Standalone bridge stopped.');
         process.exit(0);
       },
     });
 
-    try {
-      const { httpPort, wsPort } = await standalone.start();
+    const { httpPort, wsPort } = await standalone.start();
+    if (isJsonMode) {
+      outputJson({ running: true, hostKind: 'standalone', pid: process.pid, httpPort, wsPort });
+    } else {
       console.log(`\n\x1b[1m\x1b[32m[snu] Standalone Bridge Active\x1b[0m`);
+      console.log(`  • PID:         ${process.pid}`);
       console.log(`  • HTTP API:    http://127.0.0.1:${httpPort}/api`);
       console.log(`  • WebSocket:   ws://127.0.0.1:${wsPort} (connect via SN Utils helper tab)`);
       console.log(`\n\x1b[90mRunning standalone. Press Ctrl+C to stop.\x1b[0m\n`);
-      await printUpdateNotice(updateNotice);
+    }
+    await printUpdateNotice(updateNotice);
+  };
+
+  // Standalone bridge lifecycle commands.
+  if (['serve', 'status', 'stop', 'restart'].includes(lifecycleCommand)) {
+    try {
+      const status = await inspectBridge({ portFile, cwd: process.cwd() });
+
+      if (lifecycleCommand === 'status') {
+        const result = status.running
+          ? {
+              running: true,
+              hostKind: status.health.hostKind || 'unknown',
+              pid: status.health.pid,
+              httpPort: status.discovery.port,
+              apiVersion: status.health.apiVersion,
+            }
+          : { running: false };
+        if (isJsonMode) outputJson(result);
+        else if (status.running) {
+          console.log(`\nSN Utils Bridge: active`);
+          console.log(`  Host:      ${status.health.hostKind || 'unknown'}`);
+          console.log(`  PID:       ${status.health.pid}`);
+          console.log(`  HTTP API:  http://127.0.0.1:${status.discovery.port}/api\n`);
+        } else {
+          console.log('\nSN Utils Bridge: not running\n');
+        }
+        await printUpdateNotice(updateNotice);
+        return;
+      }
+
+      if (lifecycleCommand === 'serve' && status.running) {
+        if (isJsonMode) {
+          outputJson({ running: true, alreadyRunning: true, hostKind: status.health.hostKind, pid: status.health.pid });
+        } else if (status.health.hostKind === 'standalone') {
+          console.log(`\nSN Utils standalone bridge is already active (PID ${status.health.pid}).`);
+          console.log('Use `snu restart` to replace it.\n');
+        } else {
+          console.log(`\nScriptSync bridge is active in VS Code (PID ${status.health.pid}).`);
+          console.log('A separate standalone bridge is not needed.\n');
+        }
+        await printUpdateNotice(updateNotice);
+        return;
+      }
+
+      if (lifecycleCommand === 'stop') {
+        if (!status.running) {
+          if (isJsonMode) outputJson({ stopped: false, alreadyStopped: true });
+          else console.log('\nSN Utils standalone bridge is already stopped.\n');
+          return;
+        }
+        const pid = status.discovery.pid;
+        await requestStandaloneYield(status);
+        await waitForBridgeExit(pid);
+        if (isJsonMode) outputJson({ stopped: true, pid });
+        else console.log(`\nStopped SN Utils standalone bridge (PID ${pid}).\n`);
+        return;
+      }
+
+      if (lifecycleCommand === 'restart' && status.running) {
+        const pid = status.discovery.pid;
+        await requestStandaloneYield(status);
+        await waitForBridgeExit(pid);
+        if (!isJsonMode) console.log(`\nStopped SN Utils standalone bridge (PID ${pid}). Restarting...`);
+      }
+
+      await startStandalone();
     } catch (err: any) {
-      outputError(err, false);
+      outputError(err, isJsonMode);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (lifecycleCommand === 'update') {
+    try {
+      const checkOnly = lifecycleValues.check === true;
+      if (isJsonMode && !checkOnly) {
+        throw new ScriptSyncClientError('Use `snu update --check --json` for machine-readable output.', 'E_INVALID_PARAMS');
+      }
+      const decision = await checkForCliUpdate(VERSION);
+      if (isJsonMode) {
+        outputJson(decision);
+        return;
+      }
+      if (decision.action === 'current') {
+        console.log(`\nsnu v${VERSION} is already current (npm latest: v${decision.latestVersion}).\n`);
+        return;
+      }
+      if (decision.action === 'npx') {
+        console.log(`\nA newer release is available: v${decision.latestVersion}.`);
+        console.log('This command is running through npx; restart it with `@snutils/snu@latest`.\n');
+        return;
+      }
+      if (checkOnly) {
+        console.log(`\nUpdate available: snu v${VERSION} -> v${decision.latestVersion}`);
+        console.log('Run `snu update` to install it.\n');
+        return;
+      }
+      console.log(`\nUpdating snu v${VERSION} -> v${decision.latestVersion}...\n`);
+      await installLatestWithNpm();
+      console.log(`\nUpdated @snutils/snu to v${decision.latestVersion}.`);
+      console.log('If a standalone bridge is active, run `snu restart` to use the new version.\n');
+    } catch (err: any) {
+      outputError(err, isJsonMode);
       process.exit(1);
     }
     return;

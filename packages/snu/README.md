@@ -173,9 +173,22 @@ snu context
 # Start a persistent standalone bridge daemon
 snu serve
 
+# Inspect, gracefully restart, or stop the standalone bridge
+snu status
+snu restart
+snu stop
+
+# Check for a newer global CLI, then install it explicitly
+snu update --check
+snu update
+
 # GraphQL field-index code search across script tables (Pro)
 snu search "OAuthUtil" --tables sys_script_include,sys_ui_action --limit 20
 ```
+
+`snu serve` is idempotent: if a healthy bridge already owns the ports, it reports that process instead of failing with `EADDRINUSE`. `snu stop` and `snu restart` only manage a bridge that identifies itself as a standalone `snu` host and whose authenticated port file matches its live PID. They refuse to stop a VS Code-owned bridge or an unrelated process.
+
+`snu update` checks npm and updates a global installation with `npm install --global @snutils/snu@latest`. Use `snu update --check` for a read-only check. When running through `npx`, restart the MCP or CLI process with `@snutils/snu@latest` instead; there is no global installation to replace.
 
 ### Query & Schema
 ```bash

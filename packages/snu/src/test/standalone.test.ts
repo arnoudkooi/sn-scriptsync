@@ -136,6 +136,7 @@ test('Standalone: HTTP bridge serves health and handles yield command', async ()
     cwd: tmpDir,
     httpPort: 0,
     wsPort: 0,
+    portFileMode: 'workspace-only',
     onYield: () => {
       yielded = true;
     },
@@ -230,11 +231,10 @@ test('Standalone: SIGTERM closes the daemon and removes its port file', async ()
   const modulePath = path.resolve(__dirname, '../server/standalone.js');
   const script = `
     const { StandaloneBridge } = require(${JSON.stringify(modulePath)});
-    const bridge = new StandaloneBridge({ cwd: ${JSON.stringify(tmpDir)}, httpPort: 0, wsPort: 0 });
+    const bridge = new StandaloneBridge({ cwd: ${JSON.stringify(tmpDir)}, httpPort: 0, wsPort: 0, portFileMode: 'workspace-only' });
     bridge.start().then(() => process.stdout.write('READY\\n'));
   `;
   const child = spawn(process.execPath, ['-e', script], {
-    env: { ...process.env, HOME: tmpDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -260,7 +260,7 @@ test('Standalone: SIGTERM closes the daemon and removes its port file', async ()
     });
 
     assert.deepStrictEqual(result, { code: 0, signal: null });
-    assert.strictEqual(fs.existsSync(path.join(tmpDir, '.sn-scriptsync', 'agent-port.json')), false);
+    assert.strictEqual(fs.existsSync(path.join(tmpDir, '.vscode', 'sn-agent-port.json')), false);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     fs.rmSync(tmpDir, { recursive: true, force: true });
