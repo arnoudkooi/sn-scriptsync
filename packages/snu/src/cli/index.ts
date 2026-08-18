@@ -7,12 +7,23 @@ import { resolveContentInput } from './stdin.js';
 import { formatHumanOutput, outputJson, outputError } from './format.js';
 import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
+import { getUpdateNotice, shouldCheckForUpdates } from './updateCheck.js';
 
 const packageMetadata = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
 ) as { version: string };
 
 export const VERSION = packageMetadata.version;
+
+function startUpdateCheck(enabled: boolean): Promise<string | undefined> {
+  if (!enabled || !shouldCheckForUpdates()) return Promise.resolve(undefined);
+  return getUpdateNotice({ currentVersion: VERSION });
+}
+
+async function printUpdateNotice(noticePromise: Promise<string | undefined>): Promise<void> {
+  const notice = await noticePromise;
+  if (notice) process.stderr.write(notice);
+}
 
 export function printHelp(): void {
   console.log(`
@@ -61,11 +72,13 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
 
   if (argv.includes('-h') || argv.includes('--help') || argv.length === 0) {
     printHelp();
+    await printUpdateNotice(startUpdateCheck(true));
     return;
   }
 
   if (argv.includes('-v') || argv.includes('--version')) {
     console.log(`snu v${VERSION}`);
+    await printUpdateNotice(startUpdateCheck(true));
     return;
   }
 
@@ -94,8 +107,11 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
 
   if (nonGlobalTokens.length === 0) {
     printHelp();
+    await printUpdateNotice(startUpdateCheck(!isJsonMode));
     return;
   }
+
+  const updateNotice = startUpdateCheck(!isJsonMode);
 
   // Handle standalone daemon command: snu serve
   if (nonGlobalTokens[0] === 'serve') {
@@ -113,6 +129,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       console.log(`  • HTTP API:    http://127.0.0.1:${httpPort}/api`);
       console.log(`  • WebSocket:   ws://127.0.0.1:${wsPort} (connect via SN Utils helper tab)`);
       console.log(`\n\x1b[90mRunning standalone. Press Ctrl+C to stop.\x1b[0m\n`);
+      await printUpdateNotice(updateNotice);
     } catch (err: any) {
       outputError(err, false);
       process.exit(1);
@@ -312,6 +329,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     } else {
       process.stdout.write(formatHumanOutput(tool.agentCommand, result));
     }
+    await printUpdateNotice(updateNotice);
   } catch (err: any) {
     outputError(err, isJsonMode);
     process.exit(1);

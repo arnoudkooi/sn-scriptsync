@@ -7,7 +7,7 @@ Unified CLI and Model Context Protocol (MCP) server for ServiceNow development, 
 ## Features
 
 - **Zero Manual Credentials:** Connects to your live browser session via SN Utils, automatically inheriting authenticated SSO/MFA sessions, cookies, update set, and application scope.
-- **Dual Mode (CLI + MCP):** Use it as a terminal command tool (`snu query`, `snu search`, `snu schema`) or as an MCP server (`snu --mcp`) in Cursor, Windsurf, Claude Desktop, and Antigravity.
+- **Dual Mode (CLI + MCP):** Use it as a terminal command tool (`snu query`, `snu search`, `snu schema`) or as a local stdio MCP server (`snu --mcp`) in any compatible AI client.
 - **Works Attached & Standalone:** Operates seamlessly when VS Code is open (Attached Mode), or completely standalone without VS Code (Standalone Mode with in-process bridge and auto-handover).
 - **14 Strictly-Typed Tools:** Fast GraphQL code search, schema dictionary inspection, record queries, CRUD operations, background script execution, and live form automation.
 
@@ -48,22 +48,29 @@ snu run "gs.print('Hello from ' + gs.getUserName());"
 
 ---
 
-## 2. MCP Configuration (Cursor / Claude Desktop / Windsurf)
+## 2. Use as an MCP Server
 
-Add the following block to your editor's MCP configuration (`mcp.json` or `claude_desktop_config.json`):
+`@snutils/snu` exposes the same ServiceNow capabilities as 14 MCP tools. The MCP client starts `snu --mcp` as a local stdio process; no remote MCP endpoint or API key is required.
+
+### Configure your MCP client
+
+Add this server to your client's MCP configuration. Depending on the client, this may be an `mcp.json`, `claude_desktop_config.json`, project setting, or an **Add MCP server** screen.
+
+Using `npx` is the easiest option because it does not require a global installation:
 
 ```json
 {
   "mcpServers": {
     "sn-utils": {
       "command": "npx",
-      "args": ["-y", "@snutils/snu", "--mcp"]
+      "args": ["--yes", "--prefer-online", "@snutils/snu@latest", "--mcp"]
     }
   }
 }
 ```
 
-Or if installed globally:
+If the package is installed globally, use the shorter command:
+
 ```json
 {
   "mcpServers": {
@@ -75,7 +82,84 @@ Or if installed globally:
 }
 ```
 
-> **Standalone MCP:** When you launch `snu --mcp`, it automatically detects if VS Code is running. If not, it spins up an in-process standalone bridge so your AI editor connects directly to your browser's SN Utils helper tab with zero extra steps.
+Restart or refresh the MCP client after changing its configuration. The server should appear as `sn-utils` with 14 tools. `@latest` with `--prefer-online` checks npm for a newer release each time the MCP process starts; a running MCP process is never replaced underneath an active session.
+
+### Connect a ServiceNow instance
+
+1. Start or enable the `sn-utils` server in your MCP client.
+2. Open the ServiceNow instance in a browser where you are already signed in.
+3. Run `/token` from the SN Utils slash command box. This opens the ScriptSync and AI Agent Helper tab.
+4. Keep the helper tab open while the agent is working.
+5. Ask the agent to call `snu_get_context` before doing other work. It reports the connected instance, helper status, license tier, and effective permission gates.
+
+You normally do **not** need to run `snu serve` separately. `snu --mcp` first looks for the ScriptSync bridge supplied by VS Code or an existing standalone daemon. If neither is available, it starts an in-process standalone bridge automatically. Run `snu serve` only when you also want a persistent bridge for separate terminal commands.
+
+The `/token` connection must be made after a bridge is running. If the MCP client or standalone bridge is restarted, run `/token` again. Session credentials remain in memory and are cleared when the helper disconnects.
+
+### Try it from your agent
+
+Example prompts:
+
+```text
+Use snu_get_context and summarize the connected ServiceNow instance and permission gates.
+
+Inspect the incident table schema, then query five active priority 1 incidents.
+
+Find active Script Includes containing "GlideRecordSecure" and summarize what they do.
+
+Read the current incident form and explain which fields are populated. Do not change anything.
+```
+
+When more than one instance is connected, tell the agent which instance to use or pass the optional `instance` argument to a tool.
+
+### Available MCP tools
+
+| Category | Tools | Purpose |
+| --- | --- | --- |
+| Connection | `snu_get_context` | Inspect the bridge, helper, instances, license, and permission gates. |
+| Schema and search | `snu_get_schema`, `snu_code_search` | Inspect table metadata and search server-side code. Code Search requires SN Utils Pro. |
+| Record reads | `snu_query_records`, `snu_get_record` | Query tables or fetch a record by `sys_id`. |
+| Record writes | `snu_create_artifact`, `snu_update_record`, `snu_delete_record` | Create scriptable artifacts, update fields, or delete a record. |
+| Server execution | `snu_run_background_script` | Run server-side JavaScript and return its captured output. |
+| Browser and forms | `snu_get_form_state`, `snu_set_form_field`, `snu_run_ui_action`, `snu_navigate`, `snu_take_screenshot` | Inspect and operate the connected ServiceNow browser tab. |
+
+### Permissions and human review
+
+The helper tab applies permissions per ServiceNow instance:
+
+- **Off** blocks that class of operation.
+- **Approve** sends high-risk operations to the helper's Review Queue for one-time approval.
+- **Auto** allows that operation without a review prompt.
+
+Standalone mode also has fail-closed host gates. Background Scripts, record deletion, REST writes, and browser debugger access are disabled by default; artifact creation is enabled by default. Both the host gate and the instance gate must allow an operation.
+
+For an MCP process, host gates can be enabled through environment variables in clients that support an `env` block. Only enable the capabilities you intend to give the agent:
+
+```json
+{
+  "mcpServers": {
+    "sn-utils": {
+      "command": "npx",
+      "args": ["--yes", "--prefer-online", "@snutils/snu@latest", "--mcp"],
+      "env": {
+        "SNU_ALLOW_BACKGROUND_SCRIPTS": "1"
+      }
+    }
+  }
+}
+```
+
+Supported host settings are `SNU_ALLOW_BACKGROUND_SCRIPTS`, `SNU_ALLOW_DELETE_RECORDS`, `SNU_ALLOW_CREATE_ARTIFACTS`, `SNU_ALLOW_BROWSER_DEBUGGER`, and `SNU_ALLOW_REST_REQUEST`. Global defaults can alternatively be stored in `~/.sn-scriptsync/settings.json`.
+
+Interactive CLI commands check for a newer release at most once every 24 hours and print an update hint when one is available. MCP, JSON output, CI, and npm offline mode never perform this check. Set `SNU_DISABLE_UPDATE_CHECK=1` to opt out explicitly.
+
+### MCP troubleshooting
+
+- **`Missing instance URL or authentication token`:** make sure the MCP server is running, then run `/token` again from the intended ServiceNow instance.
+- **`E_BROWSER_DISCONNECTED`:** reopen the helper with `/token` and leave that tab open.
+- **An operation is disabled:** check both the host setting and the matching per-instance permission in the helper's Agent Access tab.
+- **The MCP server is not listed:** refresh or restart the MCP client after editing its configuration. With a global install, verify that the client can resolve `snu`; otherwise use the `npx` configuration.
+- **Multiple instances are connected:** pass the tool's `instance` argument or name the target instance in the prompt.
 
 ---
 
