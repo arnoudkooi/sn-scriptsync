@@ -54,7 +54,15 @@ snu run "gs.print('Hello from ' + gs.getUserName());"
 
 ### Configure your MCP client
 
-Add this server to your client's MCP configuration. Depending on the client, this may be an `mcp.json`, `claude_desktop_config.json`, project setting, or an **Add MCP server** screen.
+The fastest path is the built-in installer. It detects Claude Code, Cursor, Claude Desktop, and Windsurf, and writes the entry below into each one's configuration (merge-only and idempotent; existing config keys are never touched):
+
+```bash
+npx -y @snutils/snu@latest setup
+```
+
+Useful variants: `snu setup --print` shows copy-paste blocks for every dialect without writing anything, `snu setup --client cursor` targets one client, `--project` writes project-scoped config (Cursor, VS Code, Claude Code), and `--client vscode` writes a workspace `.vscode/mcp.json`. The config is static and secret-free (discovery of the bridge port and auth token happens at call time), so project-scoped files are safe to commit and share with a team.
+
+To configure a client manually instead, add this server to its MCP configuration. Depending on the client, this may be an `mcp.json`, `claude_desktop_config.json`, project setting, or an **Add MCP server** screen.
 
 Using `npx` is the easiest option because it does not require a global installation:
 

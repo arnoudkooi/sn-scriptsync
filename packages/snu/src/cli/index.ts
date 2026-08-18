@@ -10,6 +10,7 @@ import { StandaloneBridge } from '../server/standalone.js';
 import { getUpdateNotice, shouldCheckForUpdates } from './updateCheck.js';
 import { inspectBridge, requestStandaloneYield, waitForBridgeExit } from './daemon.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
+import { runSetup } from './setup.js';
 
 const packageMetadata = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
@@ -39,6 +40,7 @@ export function printHelp(): void {
   snu restart                         Gracefully replace a standalone bridge
   snu stop                            Gracefully stop a standalone bridge
   snu update [--check]                Check for or install the latest CLI release
+  snu setup [options]                 Configure AI clients (Claude Code, Cursor, ...) to use the MCP server
 
 \x1b[1mCORE COMMANDS:\x1b[0m
   context                             Show active connection, helper tab, and instance roster
@@ -59,6 +61,12 @@ export function printHelp(): void {
   browser action <action>             Trigger form UI action (e.g. save, sysverb_update)
   browser nav <url>                   Navigate connected tab to URL and wait for load
   screenshot                          Capture viewport screenshot of active tab
+
+\x1b[1mSETUP OPTIONS:\x1b[0m
+  --client <name>                     One of: claude-code, cursor, claude-desktop, windsurf, vscode
+  --project                           Write project-scoped config (cursor, vscode, claude-code)
+  --print                             Print copy-paste config blocks instead of writing files
+  -y, --yes                           Skip the confirmation prompt
 
 \x1b[1mGLOBAL OPTIONS:\x1b[0m
   -j, --json                          Output strict JSON on stdout for scripting/agents
@@ -229,6 +237,36 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       }
 
       await startStandalone();
+    } catch (err: any) {
+      outputError(err, isJsonMode);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (lifecycleCommand === 'setup') {
+    try {
+      const setupArgs = parseArgs({
+        args: nonGlobalTokens.slice(1),
+        options: {
+          client: { type: 'string' },
+          project: { type: 'boolean' },
+          print: { type: 'boolean' },
+          yes: { type: 'boolean', short: 'y' },
+        },
+        allowPositionals: false,
+        strict: false,
+      });
+      const setupValues = setupArgs.values as Record<string, string | boolean | undefined>;
+      await runSetup({
+        client: setupValues.client as string | undefined,
+        project: setupValues.project === true,
+        print: setupValues.print === true,
+        yes: setupValues.yes === true,
+        json: isJsonMode,
+        portFile,
+      });
+      await printUpdateNotice(updateNotice);
     } catch (err: any) {
       outputError(err, isJsonMode);
       process.exit(1);
