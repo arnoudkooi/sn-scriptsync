@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { TOOLS, getToolByName, getToolByCliCommand } from '../registry.js';
 import { formatHumanOutput } from '../cli/format.js';
+import { resolveContextSecurity } from '../client.js';
 
 test('Registry: exactly 14 tools registered', () => {
   assert.strictEqual(TOOLS.length, 14);
@@ -130,4 +131,99 @@ test('Format: Staged write formatting in CLI', () => {
   assert.ok(output.includes('[Staged]'));
   assert.ok(output.includes('review_99'));
   assert.ok(output.includes('Pending Saves'));
+});
+
+test('Context security: combines standalone host and selected-instance gates with deny-wins', () => {
+  const security = resolveContextSecurity({
+    gates: {
+      backgroundScripts: false,
+      deleteRecords: true,
+      createArtifacts: true,
+      browserDebugger: false,
+      restRequest: true,
+    },
+    capabilities: { commandReview: 1, instanceSecurityGates: 1 },
+    instanceGates: {
+      'https://dev123.service-now.com': {
+        gates: {
+          backgroundScripts: 'approve',
+          deleteRecords: 'approve',
+          createArtifacts: 'auto',
+          browserDebugger: 'off',
+          restRequest: 'auto',
+        },
+      },
+    },
+  }, {
+    defaultInstance: 'dev123',
+    instances: [{ name: 'dev123', url: 'https://dev123.service-now.com/' }],
+  });
+
+  assert.strictEqual(security.instance?.origin, 'https://dev123.service-now.com');
+  assert.strictEqual(security.effectiveGates.backgroundScripts.result, 'blocked_host');
+  assert.strictEqual(security.effectiveGates.deleteRecords.result, 'approval_required');
+  assert.strictEqual(security.effectiveGates.createArtifacts.result, 'allowed');
+  assert.strictEqual(security.effectiveGates.browserDebugger.result, 'blocked_host');
+});
+
+test('Context security: missing instance snapshot fails closed', () => {
+  const security = resolveContextSecurity({
+    gates: { backgroundScripts: true },
+    capabilities: { instanceSecurityGates: 1 },
+    instanceGates: {},
+  }, {
+    defaultInstance: 'dev123',
+    instances: [{ name: 'dev123', url: 'https://dev123.service-now.com' }],
+  });
+
+  assert.strictEqual(security.effectiveGates.backgroundScripts.instance, 'missing');
+  assert.strictEqual(security.effectiveGates.backgroundScripts.result, 'blocked_instance');
+});
+
+test('Context security: resolves an explicitly named policy when an older daemon has no roster', () => {
+  const security = resolveContextSecurity({
+    gates: { createArtifacts: true },
+    capabilities: { instanceSecurityGates: 1 },
+    instanceGates: {
+      'https://ven08329.service-now.com': {
+        gates: { createArtifacts: 'auto' },
+      },
+      'https://dev324741.service-now.com': {
+        gates: { createArtifacts: 'off' },
+      },
+    },
+  }, { instances: [] }, 'ven08329');
+
+  assert.strictEqual(security.instance?.origin, 'https://ven08329.service-now.com');
+  assert.strictEqual(security.effectiveGates.createArtifacts.result, 'allowed');
+  assert.deepStrictEqual(security.availableInstancePolicies.map((item) => item.name), ['ven08329', 'dev324741']);
+});
+
+test('Format: context labels host, instance, and effective policy separately', () => {
+  const output = formatHumanOutput('get_context', {
+    bridgeReady: true,
+    serviceNowReady: true,
+    browserConnected: true,
+    security: {
+      instance: { name: 'dev123', origin: 'https://dev123.service-now.com' },
+      hostGates: { backgroundScripts: false },
+      instanceGateProtocol: true,
+      effectiveGates: {
+        backgroundScripts: { host: false, instance: 'approve', result: 'blocked_host' },
+        deleteRecords: { host: true, instance: 'approve', result: 'approval_required' },
+        createArtifacts: { host: true, instance: 'auto', result: 'allowed' },
+        browserDebugger: { host: false, instance: 'off', result: 'blocked_host' },
+        restRequest: { host: true, instance: 'missing', result: 'blocked_instance' },
+      },
+    },
+    instances: [],
+  });
+
+  assert.ok(output.includes('Security Policy for dev123 (https://dev123.service-now.com)'));
+  assert.ok(output.includes('Host'));
+  assert.ok(output.includes('Instance'));
+  assert.ok(output.includes('Blocked by host'));
+  assert.ok(output.includes('Approval required'));
+  assert.ok(output.includes('Allowed'));
+  assert.ok(!output.includes('Capabilities & Effective Permission Gates'));
 });

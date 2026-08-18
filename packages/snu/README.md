@@ -90,7 +90,7 @@ Restart or refresh the MCP client after changing its configuration. The server s
 2. Open the ServiceNow instance in a browser where you are already signed in.
 3. Run `/token` from the SN Utils slash command box. This opens the ScriptSync and AI Agent Helper tab.
 4. Keep the helper tab open while the agent is working.
-5. Ask the agent to call `snu_get_context` before doing other work. It reports the connected instance, helper status, license tier, and effective permission gates.
+5. Ask the agent to call `snu_get_context` before doing other work. It reports the connected instance, helper status, license tier, host policy, per-instance setting, and their deny-wins combined result.
 
 You normally do **not** need to run `snu serve` separately. `snu --mcp` first looks for the ScriptSync bridge supplied by VS Code or an existing standalone daemon. If neither is available, it starts an in-process standalone bridge automatically. Run `snu serve` only when you also want a persistent bridge for separate terminal commands.
 
@@ -132,6 +132,8 @@ The helper tab applies permissions per ServiceNow instance:
 - **Auto** allows that operation without a review prompt.
 
 Standalone mode also has fail-closed host gates. Background Scripts, record deletion, REST writes, and browser debugger access are disabled by default; artifact creation is enabled by default. Both the host gate and the instance gate must allow an operation.
+
+`snu context` shows these sources separately. **Host** is the standalone daemon/MCP process policy, **Instance** is the setting published by the helper tab for the selected ServiceNow origin, and **Effective** is the combined result. In attached VS Code mode the host column is blank because the current helper's per-instance setting is authoritative; older helpers fall back to VS Code settings.
 
 For an MCP process, host gates can be enabled through environment variables in clients that support an `env` block. Only enable the capabilities you intend to give the agent:
 

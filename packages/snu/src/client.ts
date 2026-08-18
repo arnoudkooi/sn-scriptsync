@@ -18,6 +18,129 @@ export const DEFAULT_COMMAND_TIMEOUT_MS = 70_000;
 export const REVIEWED_COMMAND_TIMEOUT_MS = 310_000; // 5m 10s
 export const HEALTH_CHECK_TIMEOUT_MS = 1_500;
 
+const CONTEXT_GATE_KEYS = [
+  'backgroundScripts',
+  'deleteRecords',
+  'createArtifacts',
+  'browserDebugger',
+  'restRequest',
+] as const;
+
+type ContextGateKey = (typeof CONTEXT_GATE_KEYS)[number];
+type ContextInstanceGate = 'off' | 'approve' | 'auto' | 'on' | 'missing' | null;
+type ContextGateResult = 'blocked_host' | 'blocked_instance' | 'approval_required' | 'allowed' | 'unknown';
+
+export interface ContextSecurity {
+  instance: { name: string; url: string | null; origin: string | null } | null;
+  availableInstancePolicies: Array<{ name: string; origin: string }>;
+  hostGates: Record<string, boolean> | null;
+  instanceGates: Record<string, any> | null;
+  instanceGateProtocol: boolean;
+  effectiveGates: Record<ContextGateKey, {
+    host: boolean | null;
+    instance: ContextInstanceGate;
+    result: ContextGateResult;
+  }>;
+}
+
+function canonicalOrigin(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    return new URL(value).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the host and helper-tab policies for the selected instance. Exported
+ * so the deny-wins calculation can be tested independently of a live bridge.
+ */
+export function resolveContextSecurity(
+  capabilities: any,
+  instancesData: any,
+  requestedInstance?: string,
+  resolvedInstanceInfo?: any
+): ContextSecurity {
+  const instances = Array.isArray(instancesData?.instances) ? instancesData.instances : [];
+  const resolvedName = resolvedInstanceInfo?.instanceName || requestedInstance || instancesData?.defaultInstance || null;
+  const requestedOrigin = canonicalOrigin(requestedInstance);
+  let target = instances.find((candidate: any) => {
+    if (resolvedName && String(candidate?.name).toLowerCase() === String(resolvedName).toLowerCase()) return true;
+    return requestedOrigin !== null && canonicalOrigin(candidate?.url) === requestedOrigin;
+  }) || null;
+
+  const hostGates = capabilities?.gates && typeof capabilities.gates === 'object'
+    ? capabilities.gates as Record<string, boolean>
+    : null;
+  const instanceGateProtocol = capabilities?.capabilities?.instanceSecurityGates === 1;
+  const snapshots = capabilities?.instanceGates && typeof capabilities.instanceGates === 'object'
+    ? capabilities.instanceGates
+    : {};
+  const availableInstancePolicies = Object.keys(snapshots).flatMap((value) => {
+    const origin = canonicalOrigin(value);
+    if (!origin) return [];
+    const name = new URL(origin).hostname.split('.')[0];
+    return [{ name, origin }];
+  });
+  if (!target) {
+    const requested = String(resolvedName || '').toLowerCase();
+    const matchingPolicy = availableInstancePolicies.find((candidate) =>
+      candidate.origin === requestedOrigin || candidate.name.toLowerCase() === requested
+    ) || (!resolvedName && availableInstancePolicies.length === 1 ? availableInstancePolicies[0] : null);
+    if (matchingPolicy) {
+      target = { name: matchingPolicy.name, url: matchingPolicy.origin };
+    }
+  }
+  const targetOrigin = canonicalOrigin(target?.url);
+  const snapshot = targetOrigin ? snapshots[targetOrigin] : null;
+  const selectedInstanceGates = snapshot?.gates && typeof snapshot.gates === 'object' ? snapshot.gates : null;
+  const reviewCapable = capabilities?.capabilities?.commandReview === 1;
+
+  const effectiveGates = {} as ContextSecurity['effectiveGates'];
+  for (const key of CONTEXT_GATE_KEYS) {
+    const host = hostGates ? hostGates[key] === true : null;
+    const rawInstance = selectedInstanceGates?.[key];
+    let instance: ContextInstanceGate = null;
+    if (instanceGateProtocol) {
+      if (!selectedInstanceGates || rawInstance === undefined) instance = 'missing';
+      else if (rawInstance === true) instance = 'on';
+      else if (rawInstance === false) instance = 'off';
+      else if (rawInstance === 'off' || rawInstance === 'approve' || rawInstance === 'auto') instance = rawInstance;
+      else instance = 'missing';
+    }
+
+    let result: ContextGateResult;
+    if (host === false) {
+      result = 'blocked_host';
+    } else if (instanceGateProtocol && (instance === 'off' || instance === 'missing')) {
+      result = 'blocked_instance';
+    } else if (
+      instanceGateProtocol &&
+      instance === 'approve' &&
+      reviewCapable &&
+      (key === 'backgroundScripts' || key === 'deleteRecords')
+    ) {
+      result = 'approval_required';
+    } else if (host === true || (instanceGateProtocol && (instance === 'auto' || instance === 'approve' || instance === 'on'))) {
+      result = 'allowed';
+    } else {
+      result = 'unknown';
+    }
+
+    effectiveGates[key] = { host, instance, result };
+  }
+
+  return {
+    instance: target ? { name: String(target.name), url: target.url || null, origin: targetOrigin } : null,
+    availableInstancePolicies,
+    hostGates,
+    instanceGates: selectedInstanceGates,
+    instanceGateProtocol,
+    effectiveGates,
+  };
+}
+
 export class ScriptSyncClientError extends Error {
   constructor(
     message: string,
@@ -338,6 +461,7 @@ export class ScriptSyncClient {
 
     const bridgeReady = conn.serverRunning === true;
     const serviceNowReady = bridgeReady && browserConnected;
+    const security = resolveContextSecurity(capabilities, instancesData, instance, specificInstanceInfo);
 
     return {
       bridgeReady,
@@ -358,6 +482,7 @@ export class ScriptSyncClient {
         : conn.helper || null,
       gates: capabilities?.gates || null,
       instanceGates: capabilities?.instanceGates || null,
+      security,
       instances: instancesData.instances || [],
       defaultInstance: instancesData.defaultInstance || null,
       selectedInstance: specificInstanceInfo,

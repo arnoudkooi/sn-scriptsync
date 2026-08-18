@@ -89,8 +89,43 @@ export function formatHumanOutput(command: string, result: any): string {
       lines.push(`  Helper Tier:      ${ANSI.cyan}${result.helper.tier || 'Free'}${ANSI.reset}${result.helper.proFeatures ? ` (${ANSI.green}Pro Active${ANSI.reset})` : ''}`);
     }
 
-    if (result.gates) {
-      lines.push(`\n${ANSI.bold}Capabilities & Effective Permission Gates:${ANSI.reset}`);
+    if (
+      result.security?.instance &&
+      result.security?.effectiveGates &&
+      (result.security.hostGates || result.security.instanceGateProtocol)
+    ) {
+      const target = result.security.instance;
+      const targetLabel = target.origin ? `${target.name} (${target.origin})` : target.name;
+      lines.push(`\n${ANSI.bold}Security Policy for ${targetLabel}:${ANSI.reset}`);
+      const labels: Record<string, string> = {
+        backgroundScripts: 'Background Scripts',
+        deleteRecords: 'Delete Records',
+        createArtifacts: 'Create Artifacts',
+        browserDebugger: 'Browser Debugger',
+        restRequest: 'REST Request API',
+      };
+      const hostLabel = (value: boolean | null) => value === null ? `${ANSI.gray}—${ANSI.reset}` : value ? `${ANSI.green}On${ANSI.reset}` : `${ANSI.gray}Off${ANSI.reset}`;
+      const instanceLabel = (value: string | null) => {
+        if (value === null) return `${ANSI.gray}—${ANSI.reset}`;
+        if (value === 'missing') return `${ANSI.red}Missing${ANSI.reset}`;
+        if (value === 'off') return `${ANSI.gray}Off${ANSI.reset}`;
+        if (value === 'approve') return `${ANSI.yellow}Approve${ANSI.reset}`;
+        return `${ANSI.green}${value === 'auto' ? 'Auto' : 'On'}${ANSI.reset}`;
+      };
+      const resultLabel = (value: string) => {
+        if (value === 'blocked_host') return `${ANSI.red}Blocked by host${ANSI.reset}`;
+        if (value === 'blocked_instance') return `${ANSI.red}Blocked by instance${ANSI.reset}`;
+        if (value === 'approval_required') return `${ANSI.yellow}Approval required${ANSI.reset}`;
+        if (value === 'allowed') return `${ANSI.green}Allowed${ANSI.reset}`;
+        return `${ANSI.gray}Unknown${ANSI.reset}`;
+      };
+      const rows = Object.keys(labels).map((key) => {
+        const gate = result.security.effectiveGates[key];
+        return [labels[key], hostLabel(gate.host), instanceLabel(gate.instance), resultLabel(gate.result)];
+      });
+      lines.push(formatTable(['Permission', 'Host', 'Instance', 'Effective'], rows).split('\n').map((line) => `  ${line}`).join('\n'));
+    } else if (result.gates) {
+      lines.push(`\n${ANSI.bold}Standalone Host Permission Gates:${ANSI.reset}`);
       const formatGate = (label: string, enabled?: boolean) => {
         const badge = enabled ? `${ANSI.green}● Enabled${ANSI.reset}` : `${ANSI.gray}○ Disabled${ANSI.reset}`;
         return `  • ${label.padEnd(22)} ${badge}`;
@@ -100,6 +135,13 @@ export function formatHumanOutput(command: string, result: any): string {
       lines.push(formatGate('Create Artifacts', result.gates.createArtifacts));
       lines.push(formatGate('Browser Debugger', result.gates.browserDebugger));
       lines.push(formatGate('REST Request API', result.gates.restRequest));
+      if (result.security?.instanceGateProtocol) {
+        const policies = result.security.availableInstancePolicies || [];
+        if (policies.length > 0) {
+          lines.push(`  ${ANSI.gray}Instance policies: ${policies.map((item: any) => item.name).join(', ')}${ANSI.reset}`);
+        }
+        lines.push(`  ${ANSI.gray}Run snu context --instance <name> to show a combined policy.${ANSI.reset}`);
+      }
     }
 
     if (result.instances && result.instances.length > 0) {
