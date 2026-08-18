@@ -1,9 +1,9 @@
 {
   "name": "@snutils/snu",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Unified CLI and Model Context Protocol (MCP) server for SN Utils and ScriptSync",
   "author": "Arnoud Kooi <arnoud@snutils.com>",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE.md",
   "publishConfig": {
     "access": "public"
   },
@@ -16,7 +16,8 @@
     "dist",
     "!dist/test",
     "bin",
-    "README.md"
+    "README.md",
+    "LICENSE.md"
   ],
   "engines": {
     "node": ">=20.0.0"

@@ -162,4 +162,4 @@ Session credentials stay on your machine. The standalone bridge keeps the `/toke
 
 ## License
 
-MIT © [SN Utils B.V. / Arnoud Kooi](https://snutils.com)
+Copyright © 2020–2026 SN Utils B.V. All rights reserved. Use of this package is governed by the [SN Utils Service Terms](https://snutils.com/legal/service-terms).

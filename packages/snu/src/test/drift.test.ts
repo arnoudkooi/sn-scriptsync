@@ -70,3 +70,16 @@ test('Drift: CLI version matches package metadata', () => {
 
   assert.strictEqual(VERSION, packageMetadata.version);
 });
+
+test('Drift: package publishes the SN Utils Service Terms notice', () => {
+  const packageRoot = path.resolve(__dirname, '../..');
+  const packageMetadata = JSON.parse(
+    fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')
+  ) as { license?: string; files?: string[] };
+
+  assert.strictEqual(packageMetadata.license, 'SEE LICENSE IN LICENSE.md');
+  assert.ok(packageMetadata.files?.includes('LICENSE.md'));
+  const licenseNotice = fs.readFileSync(path.join(packageRoot, 'LICENSE.md'), 'utf8');
+  assert.match(licenseNotice, /https:\/\/snutils\.com\/legal\/service-terms/);
+  assert.doesNotMatch(licenseNotice, /\bMIT\b|\bUNLICENSED\b/i);
+});

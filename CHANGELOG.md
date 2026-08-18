@@ -10,6 +10,7 @@
 - **Fixed CLI requests being cancelled after upload:** HTTP commands that wait for a browser response, including `snu schema`, no longer treat the normally completed request body as a disconnected client.
 - **Fixed standalone CLI instance authentication:** the standalone bridge now retains the live `/token` instance session in memory, exposes browser-authenticated instances in `snu context`, and automatically targets the most recently connected instance. Missing sessions now ask the user to run `/token` instead of surfacing a misleading helper authentication error.
 - **Fixed standalone daemon shutdown:** Ctrl+C and SIGTERM now close the bridge and exit cleanly instead of only removing the port file while leaving an invisible process holding ports 1977 and 1978.
+- **Corrected npm license metadata:** `@snutils/snu` now references the SN Utils Service Terms; the incorrect MIT declaration has been removed.
 - **Removed: the legacy file-based Agent API** (`agent/requests/*.json`) and its `sn-scriptsync.agentApi.fileFallback` setting; all agent flows now use the HTTP Agent API. **Changed: `get_capabilities`** now reports `apiVersion`, helper `capabilities`, and per-instance `instanceGates` instead of the old VS Code `gates` block.
 
 ## 4.7.9 (2026-08-08)
