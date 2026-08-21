@@ -76,7 +76,7 @@ export class StandaloneBridge {
         port: httpPort,
         token: this.token,
         pid: process.pid,
-        apiVersion: 8,
+        apiVersion: 9,
         startedAt: Date.now(),
         hostKind: 'standalone',
       },

@@ -273,7 +273,7 @@ async function validatePortFile(filePath: string, isGlobal: boolean): Promise<Di
     port: data.port,
     token: data.token,
     pid: data.pid,
-    apiVersion: data.apiVersion || 8,
+    apiVersion: data.apiVersion || 9,
     portFilePath: filePath,
     isGlobal,
   };

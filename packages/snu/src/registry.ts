@@ -132,7 +132,47 @@ export const TOOLS: ToolDefinition[] = [
     }),
   },
 
-  // 5. Get Record
+  // 5. Pull Records
+  {
+    name: 'snu_pull_records',
+    agentCommand: 'pull_records',
+    description:
+      'Pull records from ServiceNow and store code fields into canonical local workspace files with _map.json tracking.',
+    cliCommand: 'pull',
+    cliUsage: 'snu pull <table> [query] [--sys-id <id>] [--fields <f1,f2>] [--limit <n>] [--instance <i>] [--json]',
+    cliOptions: {
+      query: { type: 'string', short: 'q', description: 'Encoded query string' },
+      'sys-id': { type: 'string', short: 's', description: 'Specific record sys_id' },
+      fields: { type: 'string', short: 'f', description: 'Comma-separated field list to pull' },
+      limit: { type: 'string', short: 'l', description: 'Max records to return (default: 50)' },
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string', description: 'Table name to pull from (e.g. sys_script, sys_script_include, sp_widget)' },
+        query: { type: 'string', description: 'ServiceNow encoded query string (optional)' },
+        sys_id: { type: 'string', description: 'Specific record sys_id to pull (optional)' },
+        fields: { type: 'string', description: 'Comma-separated field list to project (optional)' },
+        limit: { type: 'integer', minimum: 1, maximum: 500, default: 50, description: 'Max records to pull' },
+        instance: { type: 'string', description: 'Target instance name/folder (optional)' },
+      },
+      required: ['table'],
+      additionalProperties: false,
+    },
+    mapInput: (input) => ({
+      command: 'pull_records',
+      instance: input.instance,
+      params: {
+        table: input.table,
+        query: input.query,
+        sys_id: input.sys_id || input['sys-id'],
+        fields: typeof input.fields === 'string' ? input.fields.split(',').map((s: string) => s.trim()) : undefined,
+        limit: typeof input.limit === 'number' ? input.limit : input.limit ? parseInt(input.limit, 10) : 50,
+      },
+    }),
+  },
+
+  // 6. Get Record
   {
     name: 'snu_get_record',
     agentCommand: 'get_record',

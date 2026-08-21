@@ -94,7 +94,7 @@ export class StandaloneHttpBridge {
           res.end(
             JSON.stringify({
               status: 'success',
-              apiVersion: 8,
+              apiVersion: 9,
               hostKind: 'standalone',
               pid: process.pid,
               commands: [
@@ -108,6 +108,8 @@ export class StandaloneHttpBridge {
                 'create_artifact',
                 'delete_record',
                 'get_table_metadata',
+                'pull_records',
+                'pull_artifacts',
                 'code_search',
                 'run_background_script',
                 'get_form_state',

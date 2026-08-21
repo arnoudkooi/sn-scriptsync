@@ -22,6 +22,8 @@ const BRIDGE_COMMANDS = new Set([
   'delete_record',
   'get_table_metadata',
   'check_name_exists_remote',
+  'pull_records',
+  'pull_artifacts',
   'query_records',
   'get_parent_options',
   'code_search',

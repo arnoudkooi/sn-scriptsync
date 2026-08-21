@@ -129,7 +129,9 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               1977 (ephemeral fallback), global port file
 //               ~/.sn-scriptsync/agent-port.json, and self-describing docs
 //               endpoints (GET /api/instructions, /api/skills[/<name>]).
-const INSTRUCTIONS_VERSION = 19;
+//   v19 -> v20: added pull_records (and pull_artifacts alias) for bulk and single
+//               artifact pulling to canonical local workspace files.
+const INSTRUCTIONS_VERSION = 20;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -143,7 +145,7 @@ const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
 	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'get_review_result', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
 	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_artifact', 'delete_record'] },
 	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'create_table', 'add_column', 'delete_application'] },
-	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote'] },
+	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote', 'pull_records'] },
 	{ label: 'Queries', cmds: ['query_records', 'get_parent_options', 'code_search'] },
 	{ label: 'Escape hatches', cmds: ['rest_request', 'run_background_script'] },
 	{ label: 'File-system helpers', cmds: ['list_tables', 'list_artifacts', 'check_name_exists', 'get_file_structure', 'validate_path'] },
@@ -164,6 +166,7 @@ const CDP_COMMANDS = new Set(['start_network_capture', 'stop_network_capture', '
 // zero-hop. Keep this short — it is a teaser, not the catalog.
 const EVERYDAY: Array<{ cmd: string; blurb: string }> = [
 	{ cmd: 'query_records', blurb: 'Encoded-query any table (fetch/check/explore records).' },
+	{ cmd: 'pull_records', blurb: 'Pull records from ServiceNow and write code fields to local files with _map.json sync.' },
 	{ cmd: 'get_record', blurb: 'Fetch one record by table + sys_id (e.g. confirm a write).' },
 	{ cmd: 'update_record', blurb: 'Update fields on an existing record (pass `await:true` to read back).' },
 	{ cmd: 'create_artifact', blurb: 'Create a record incl. config fields via payload (not loose files).' },

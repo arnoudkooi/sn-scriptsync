@@ -58,6 +58,10 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
     case 'update_record':
       return { risk: 'write', gates: [], review: 'never' };
 
+    case 'pull_records':
+    case 'pull_artifacts':
+      return { risk: 'read', gates: [], review: 'never' };
+
     case 'take_screenshot': {
       const useCdp = req.params?.exactUrl === true || req.params?.cdp === true;
       return { risk: 'read', gates: useCdp ? ['browserDebugger'] : [], review: 'never' };

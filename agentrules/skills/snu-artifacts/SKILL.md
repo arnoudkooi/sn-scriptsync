@@ -3,7 +3,7 @@ name: snu-artifacts
 description: How sn-scriptsync maps ServiceNow artifacts to files: the instance/scope/table layout, naming conventions per artifact type, creating new artifacts, and the _map.json / structure.json files. Read this when creating, naming, or organizing ServiceNow files.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=19 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=20 -->
 
 # SN ScriptSync — Artifacts & File Structure
 
@@ -114,12 +114,28 @@ A `sys_ws_operation` record requires:
 6. Extension creates the record with all required fields
 7. Extension updates `_map.json` with the new sys_id
 
+### Pulling Existing Records (`pull_records`)
+
+Use **`pull_records`** to fetch existing records (Script Includes, Business Rules, Widgets, UI Pages, etc.) matching a query or specific `sys_id` / `sys_ids` and write their code fields to disk with automatic `_map.json` registration:
+
+```json
+{
+  "command": "pull_records",
+  "params": {
+    "table": "sys_script",
+    "query": "nameSTARTSWITHincident^active=true",
+    "limit": 20
+  }
+}
+```
+This is the recommended way to pull scripts in the **Global scope** (where "Load Scope" is not practical) or ad-hoc sets of records across any table.
+
 ### Working with Scoped Applications
 
 **⚠️ IMPORTANT: Do NOT create scope folders manually**
 
 Before creating files in a new scope folder:
-1. **Sync at least one artifact first** from ServiceNow for that scope
+1. **Sync or pull at least one artifact first** from ServiceNow for that scope (via `pull_records` or the SN Utils sync button)
 2. This ensures the scope exists and the folder structure is correct
 3. The extension will create the scope folder automatically during the first sync
 
@@ -131,7 +147,7 @@ Before creating files in a new scope folder:
 **Correct Workflow:**
 1. Create or identify a scope in ServiceNow (e.g., `x_abc_my_app`)
 2. Create at least one artifact in that scope in ServiceNow
-3. Use the extension to pull/sync that artifact
+3. Pull that artifact using `pull_records` with `{"table": "sys_script_include", "query": "sys_scope.scope=x_abc_my_app"}`
 4. The extension creates: `<instance>/x_abc_my_app/<table>/`
 5. Now you can create new files in that scope folder
 

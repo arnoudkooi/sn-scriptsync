@@ -1,8 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { CommandHandler } from '../types';
 import { AgentError } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
+import { Constants } from '../../constants';
+import { safeJoinUnderRoot, sanitizePathComponent } from '../../pathSafety';
 import { mustGetInstanceSettings, getSetting, restRequest, readBackRecord } from './_shared';
 
 const eu = new ExtensionUtils();
@@ -449,6 +452,305 @@ const check_name_exists_remote: CommandHandler = {
 	},
 };
 
+let metaDataRelationsCache: any = null;
+function getMetaDataRelations(): any {
+	if (!metaDataRelationsCache) {
+		try {
+			const candidate = path.resolve(__dirname, '..', '..', '..', 'resources', 'metaDataRelations.json');
+			if (fs.existsSync(candidate)) {
+				metaDataRelationsCache = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+			}
+		} catch { /* best effort */ }
+	}
+	return metaDataRelationsCache;
+}
+
+function resolveTableCodeFields(tableName: string): string[] {
+	const meta = getMetaDataRelations();
+	const fields = meta?.tableFields?.[tableName]?.codeFields;
+	if (fields && typeof fields === 'object') {
+		const keys = Object.keys(fields).filter((k) => !k.startsWith('_'));
+		if (keys.length > 0) return keys;
+	}
+	return ['script'];
+}
+
+function resolveFieldExtension(tableName: string, fieldName: string): string {
+	const meta = getMetaDataRelations();
+	let fieldType = 'script';
+	try {
+		fieldType = meta?.tableFields?.[tableName]?.codeFields?.[fieldName]?.type || fieldName;
+	} catch {}
+
+	let ext = (Constants.FIELDTYPES as any)?.[fieldType]?.extension;
+	if (fieldType.includes('xml')) ext = '.xml';
+	else if (fieldType.includes('html')) ext = '.html';
+	else if (fieldType.includes('json')) ext = '.json';
+	else if (fieldType.includes('css') || fieldType === 'properties' || fieldName === 'css') ext = '.scss';
+	else if (fieldType.includes('string') || fieldType === 'conditions') ext = '.txt';
+	else if (fieldType.includes('graphql')) ext = '.graphql';
+	else if (!ext) ext = '.js';
+
+	return ext;
+}
+
+const pull_records: CommandHandler = {
+	name: 'pull_records',
+	requiresBrowser: true,
+	docs: {
+		summary: 'Pull records from ServiceNow and store code fields into canonical local files with _map.json tracking.',
+		request: {
+			command: 'pull_records',
+			id: 'pull_1',
+			params: { table: 'sys_script_include', query: 'active=true^nameSTARTSWITHincident', limit: 10, openFiles: false },
+		},
+	},
+	async handle(ctx, params) {
+		const rawTable = params?.table;
+		if (!rawTable || typeof rawTable !== 'string' || !/^[a-zA-Z0-9_]+$/.test(rawTable.trim())) {
+			throw new AgentError('E_INVALID_PARAMS', 'Missing or invalid required param "table" (must be alphanumeric/underscore)');
+		}
+		const table = rawTable.trim();
+
+		let limit = 50;
+		if (params?.limit !== undefined) {
+			if (typeof params.limit !== 'number' || !Number.isInteger(params.limit) || params.limit < 1 || params.limit > 500) {
+				throw new AgentError('E_INVALID_PARAMS', 'Parameter "limit" must be an integer between 1 and 500.');
+			}
+			limit = params.limit;
+		}
+
+		const openFiles = params?.openFiles === true;
+
+		// Normalize & validate sys_ids
+		const rawIds: string[] = [];
+		if (typeof params?.sys_id === 'string' && params.sys_id.trim()) {
+			rawIds.push(params.sys_id.trim());
+		}
+		if (Array.isArray(params?.sys_ids)) {
+			for (const id of params.sys_ids) {
+				if (typeof id === 'string' && id.trim()) rawIds.push(id.trim());
+			}
+		}
+		const validHexOrGlobal = /^(?:[0-9a-fA-F]{32}|global)$/;
+		const normalizedIds = Array.from(new Set(rawIds.map((id) => id.toLowerCase())));
+		for (const id of normalizedIds) {
+			if (!validHexOrGlobal.test(id)) {
+				throw new AgentError('E_INVALID_PARAMS', `Invalid sys_id "${id}". Must be a 32-character hexadecimal string or 'global'.`);
+			}
+		}
+
+		// Selection combination with ^ (AND)
+		const queryParts: string[] = [];
+		if (normalizedIds.length === 1) {
+			queryParts.push(`sys_id=${normalizedIds[0]}`);
+		} else if (normalizedIds.length > 1) {
+			queryParts.push(`sys_idIN${normalizedIds.join(',')}`);
+		}
+		if (typeof params?.query === 'string' && params.query.trim()) {
+			queryParts.push(params.query.trim());
+		}
+		const combinedQuery = queryParts.join('^');
+
+		// Resolve code fields
+		let codeFields: string[] = [];
+		if (Array.isArray(params?.fields)) {
+			codeFields = params.fields.filter((f: any) => typeof f === 'string' && /^[a-zA-Z0-9_]+$/.test(f.trim())).map((f: string) => f.trim());
+		} else if (typeof params?.field === 'string' && /^[a-zA-Z0-9_]+$/.test(params.field.trim())) {
+			codeFields = [params.field.trim()];
+		}
+		if (codeFields.length === 0) {
+			codeFields = resolveTableCodeFields(table);
+		}
+
+		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
+		const instanceName = path.basename(ctx.instanceFolder);
+
+		const displayFields = ['sys_id', 'name', 'sys_name', 'short_description', 'sys_scope', 'sys_scope.scope'];
+		const allRequestedFields = Array.from(new Set([...displayFields, ...codeFields])).join(',');
+
+		const queryParams: Record<string, string> = {
+			sysparm_fields: allRequestedFields,
+			sysparm_limit: String(limit),
+			sysparm_display_value: 'false',
+			sysparm_exclude_reference_link: 'true',
+			sysparm_no_count: 'true',
+		};
+		if (combinedQuery) {
+			queryParams.sysparm_query = combinedQuery;
+		}
+
+		const { data } = await restRequest(ctx, instanceSettings, {
+			endpoint: `/api/now/table/${table}`,
+			method: 'GET',
+			queryParams,
+		});
+
+		const matchedRecords: any[] = Array.isArray(data?.result) ? data.result : (data?.result ? [data.result] : []);
+		const isFolderRecordTable = Constants.FOLDERRECORDTABLES.includes(table);
+
+		let filesWritten = 0;
+		let skippedEmpty = 0;
+		const warnings: string[] = [];
+		const pulledRecordsList: Array<{
+			sys_id: string;
+			name: string;
+			scope: string;
+			files: Array<{ field: string; path: string; bytes: number; action: 'created' | 'updated' | 'cleared' | 'skipped_empty' }>;
+		}> = [];
+
+		for (const rec of matchedRecords) {
+			const sysId = typeof rec.sys_id === 'object' ? rec.sys_id.value : String(rec.sys_id || '');
+			if (!sysId) continue;
+
+			// Scope resolution
+			let scope = 'global';
+			if (rec['sys_scope.scope']) {
+				scope = String(rec['sys_scope.scope']);
+			} else if (rec.sys_scope) {
+				scope = typeof rec.sys_scope === 'object' ? String(rec.sys_scope.value || rec.sys_scope.display_value || 'global') : String(rec.sys_scope);
+			}
+			if (!scope || scope === 'null' || scope === 'undefined') scope = 'global';
+
+			const rawName = rec.name || rec.sys_name || rec.short_description || sysId;
+			const name = String(rawName).trim();
+
+			// Read / update _map.json
+			let mapPath: string;
+			try {
+				mapPath = safeJoinUnderRoot(ctx.workspaceRoot, instanceName, scope, table, '_map.json');
+			} catch (e: any) {
+				warnings.push(`Could not resolve map path for ${scope}/${table}: ${e?.message || e}`);
+				continue;
+			}
+
+			let nameToSysId: Record<string, string> = {};
+			if (fs.existsSync(mapPath)) {
+				try { nameToSysId = JSON.parse(fs.readFileSync(mapPath, 'utf8')) || {}; } catch {}
+			}
+
+			let cleanName = name.replace(/[^a-z0-9._\-+]+/gi, '').replace(/\./g, '-') || sysId;
+			const existingKey = Object.keys(nameToSysId).find((k) => nameToSysId[k] === sysId);
+			if (existingKey) {
+				cleanName = existingKey;
+			} else if (nameToSysId[cleanName] && nameToSysId[cleanName] !== sysId) {
+				cleanName = `${cleanName}-${sysId.slice(0, 2)}${sysId.slice(-2)}`.toUpperCase();
+			}
+			nameToSysId[cleanName] = sysId;
+
+			// Write _map.json
+			try {
+				ExtensionUtils.markSelfWrite(mapPath);
+				await fs.promises.mkdir(path.dirname(mapPath), { recursive: true });
+				await fs.promises.writeFile(mapPath, JSON.stringify(nameToSysId, null, 4), 'utf8');
+			} catch (e: any) {
+				warnings.push(`Failed to write _map.json at ${mapPath}: ${e?.message || e}`);
+			}
+
+			// Special handling for sp_widget: _test_urls.txt
+			if (table === 'sp_widget') {
+				try {
+					const testUrlsPath = safeJoinUnderRoot(ctx.workspaceRoot, instanceName, scope, table, cleanName, '_test_urls.txt');
+					if (!fs.existsSync(testUrlsPath)) {
+						const dispVal = name.toLowerCase().replace(/\s+/g, '_');
+						const testUrls = [
+							`${instanceSettings.url}/$sp.do?id=sp-preview&sys_id=${sysId}`,
+							`${instanceSettings.url}/sp_config?id=${dispVal}`,
+							`${instanceSettings.url}/sp?id=${dispVal}`,
+							`${instanceSettings.url}/esc?id=${dispVal}`,
+						].join('\n');
+						ExtensionUtils.markSelfWrite(testUrlsPath);
+						await fs.promises.mkdir(path.dirname(testUrlsPath), { recursive: true });
+						await fs.promises.writeFile(testUrlsPath, testUrls, 'utf8');
+					}
+				} catch {}
+			}
+
+			const recordFiles: Array<{ field: string; path: string; bytes: number; action: 'created' | 'updated' | 'cleared' | 'skipped_empty' }> = [];
+
+			for (const field of codeFields) {
+				const ext = resolveFieldExtension(table, field);
+				let targetPath: string;
+				try {
+					targetPath = isFolderRecordTable
+						? safeJoinUnderRoot(ctx.workspaceRoot, instanceName, scope, table, cleanName, `${field}${ext}`)
+						: safeJoinUnderRoot(ctx.workspaceRoot, instanceName, scope, table, `${cleanName}.${field}${ext}`);
+				} catch (e: any) {
+					warnings.push(`Unsafe path for ${scope}/${table}/${cleanName}.${field}: ${e?.message || e}`);
+					continue;
+				}
+
+				const relPath = path.relative(ctx.workspaceRoot, targetPath).replace(/\\/g, '/');
+				const rawVal = rec[field];
+				const content = rawVal !== null && rawVal !== undefined ? String(rawVal) : '';
+				const fileExisted = fs.existsSync(targetPath);
+
+				if (content.length > 0) {
+					try {
+						ExtensionUtils.markSelfWrite(targetPath);
+						await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+						await fs.promises.writeFile(targetPath, content, 'utf8');
+						filesWritten++;
+						const action = fileExisted ? 'updated' : 'created';
+						recordFiles.push({ field, path: relPath, bytes: Buffer.byteLength(content, 'utf8'), action });
+
+						if (openFiles) {
+							try {
+								const doc = await vscode.workspace.openTextDocument(targetPath);
+								await vscode.window.showTextDocument(doc, { preview: false });
+							} catch {}
+						}
+					} catch (e: any) {
+						warnings.push(`Failed to write ${relPath}: ${e?.message || e}`);
+					}
+				} else if (fileExisted) {
+					// Empty remote field, but local file exists -> clear stale code
+					try {
+						ExtensionUtils.markSelfWrite(targetPath);
+						await fs.promises.writeFile(targetPath, '', 'utf8');
+						filesWritten++;
+						recordFiles.push({ field, path: relPath, bytes: 0, action: 'cleared' });
+					} catch (e: any) {
+						warnings.push(`Failed to clear ${relPath}: ${e?.message || e}`);
+					}
+				} else {
+					// Empty remote field and no local file -> skip
+					skippedEmpty++;
+					recordFiles.push({ field, path: relPath, bytes: 0, action: 'skipped_empty' });
+				}
+			}
+
+			pulledRecordsList.push({
+				sys_id: sysId,
+				name,
+				scope,
+				files: recordFiles,
+			});
+		}
+
+		ctx.log(`Agent API: Pulled ${pulledRecordsList.length}/${matchedRecords.length} record(s) from ${table} (${filesWritten} file(s) written, ${skippedEmpty} skipped empty)`);
+
+		return {
+			table,
+			matchedRecords: matchedRecords.length,
+			pulledRecords: pulledRecordsList.length,
+			filesWritten,
+			skippedEmpty,
+			warnings,
+			records: pulledRecordsList,
+		};
+	},
+};
+
+const pull_artifacts: CommandHandler = {
+	...pull_records,
+	name: 'pull_artifacts',
+	docs: {
+		...pull_records.docs,
+		summary: 'Alias for pull_records: pull artifacts from ServiceNow into canonical local workspace files.',
+	},
+};
+
 export const recordsCommands: CommandHandler[] = [
 	update_record,
 	update_record_batch,
@@ -457,4 +759,7 @@ export const recordsCommands: CommandHandler[] = [
 	delete_record,
 	get_table_metadata,
 	check_name_exists_remote,
+	pull_records,
+	pull_artifacts,
 ];
+

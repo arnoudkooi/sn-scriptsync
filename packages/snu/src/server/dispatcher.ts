@@ -8,6 +8,105 @@ import { getCommandPolicy, SecurityGates } from './policy.js';
 import { resolveStandaloneConfig, StandaloneConfig } from './config.js';
 import { computePayloadHash } from './canonical.js';
 
+const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
+
+const FIELDTYPES: Record<string, { extension: string }> = {
+  script: { extension: '.js' },
+  script_plain: { extension: '.js' },
+  script_server: { extension: '.js' },
+  script_client: { extension: '.js' },
+  email_script: { extension: '.js' },
+  html_script: { extension: '.html' },
+  xml: { extension: '.xml' },
+  html: { extension: '.html' },
+  html_template: { extension: '.html' },
+  template: { extension: '.html' },
+  json: { extension: '.json' },
+  css: { extension: '.scss' },
+  condition_string: { extension: '.js' },
+  expression: { extension: '.js' },
+  graphql_schema: { extension: '.graphql' },
+  json_translations: { extension: '.json' },
+  translated_html: { extension: '.html' },
+  string: { extension: '.txt' },
+};
+
+function sanitizePathComponent(component: string): string {
+  if (typeof component !== 'string') {
+    throw new Error('Path component is not a string');
+  }
+  const value = component.trim();
+  if (!value || value === '.' || value === '..') {
+    throw new Error(`Unsafe path component ${JSON.stringify(component)}`);
+  }
+  if (/[\\/\0]/.test(value) || /^[A-Za-z]:/.test(value) || value.startsWith('~')) {
+    throw new Error(`Unsafe path component ${JSON.stringify(component)}`);
+  }
+  return value;
+}
+
+function safeJoinUnderRoot(root: string, ...components: string[]): string {
+  if (!root) {
+    throw new Error('No root path provided');
+  }
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, ...components.map(sanitizePathComponent));
+  const rel = path.relative(resolvedRoot, resolved);
+  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+    throw new Error(`Path escapes root: ${resolved}`);
+  }
+  return resolved;
+}
+
+let metaDataRelationsCache: any = null;
+function getMetaDataRelations(cwd: string): any {
+  if (!metaDataRelationsCache) {
+    const candidates = [
+      path.resolve(cwd, 'resources', 'metaDataRelations.json'),
+      path.resolve(__dirname, '../../../../resources/metaDataRelations.json'),
+      path.resolve(__dirname, '../../../resources/metaDataRelations.json'),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        try {
+          metaDataRelationsCache = JSON.parse(fs.readFileSync(c, 'utf8'));
+          break;
+        } catch {}
+      }
+    }
+  }
+  return metaDataRelationsCache;
+}
+
+function resolveTableCodeFields(tableName: string, cwd: string): string[] {
+  const meta = getMetaDataRelations(cwd);
+  const fields = meta?.tableFields?.[tableName]?.codeFields;
+  if (fields && typeof fields === 'object') {
+    const keys = Object.keys(fields).filter((k) => !k.startsWith('_'));
+    if (keys.length > 0) return keys;
+  }
+  return ['script'];
+}
+
+function resolveFieldExtension(tableName: string, fieldName: string, cwd: string): string {
+  const meta = getMetaDataRelations(cwd);
+  let fieldType = 'script';
+  try {
+    fieldType = meta?.tableFields?.[tableName]?.codeFields?.[fieldName]?.type || fieldName;
+  } catch {}
+
+  let ext = FIELDTYPES[fieldType]?.extension;
+  if (fieldType.includes('xml')) ext = '.xml';
+  else if (fieldType.includes('html')) ext = '.html';
+  else if (fieldType.includes('json')) ext = '.json';
+  else if (fieldType.includes('css') || fieldType === 'properties' || fieldName === 'css') ext = '.scss';
+  else if (fieldType.includes('string') || fieldType === 'conditions') ext = '.txt';
+  else if (fieldType.includes('graphql')) ext = '.graphql';
+  else if (!ext) ext = '.js';
+
+  return ext;
+}
+
 export interface StandaloneDispatcherOptions {
   cwd?: string;
   wsBridge: StandaloneWsBridge;
@@ -259,7 +358,7 @@ export class StandaloneDispatcher {
           status: 'success',
           timestamp: Date.now(),
           result: {
-            apiVersion: 8,
+            apiVersion: 9,
             tier: state.tier,
             proFeatures: state.proFeatures,
             cdp: state.cdp,
@@ -632,6 +731,234 @@ export class StandaloneDispatcher {
           status: 'success',
           timestamp: Date.now(),
           result: res.data?.result || res.data,
+        };
+      }
+
+      // Pull Records / Pull Artifacts
+      if (req.command === 'pull_records' || req.command === 'pull_artifacts') {
+        const rawTable = req.params?.table;
+        if (!rawTable || typeof rawTable !== 'string' || !/^[a-zA-Z0-9_]+$/.test(rawTable.trim())) {
+          throw Object.assign(new Error('Missing or invalid required param "table" (must be alphanumeric/underscore)'), { code: 'E_INVALID_PARAMS' });
+        }
+        const table = rawTable.trim();
+
+        let limit = 50;
+        if (req.params?.limit !== undefined) {
+          if (typeof req.params.limit !== 'number' || !Number.isInteger(req.params.limit) || req.params.limit < 1 || req.params.limit > 500) {
+            throw Object.assign(new Error('Parameter "limit" must be an integer between 1 and 500.'), { code: 'E_INVALID_PARAMS' });
+          }
+          limit = req.params.limit;
+        }
+
+        // Normalize & validate sys_ids
+        const rawIds: string[] = [];
+        if (typeof req.params?.sys_id === 'string' && req.params.sys_id.trim()) {
+          rawIds.push(req.params.sys_id.trim());
+        }
+        if (Array.isArray(req.params?.sys_ids)) {
+          for (const id of req.params.sys_ids) {
+            if (typeof id === 'string' && id.trim()) rawIds.push(id.trim());
+          }
+        }
+        const validHexOrGlobal = /^(?:[0-9a-fA-F]{32}|global)$/;
+        const normalizedIds = Array.from(new Set(rawIds.map((id) => id.toLowerCase())));
+        for (const id of normalizedIds) {
+          if (!validHexOrGlobal.test(id)) {
+            throw Object.assign(new Error(`Invalid sys_id "${id}". Must be a 32-character hexadecimal string or 'global'.`), { code: 'E_INVALID_PARAMS' });
+          }
+        }
+
+        // Selection combination with ^ (AND)
+        const queryParts: string[] = [];
+        if (normalizedIds.length === 1) {
+          queryParts.push(`sys_id=${normalizedIds[0]}`);
+        } else if (normalizedIds.length > 1) {
+          queryParts.push(`sys_idIN${normalizedIds.join(',')}`);
+        }
+        if (typeof req.params?.query === 'string' && req.params.query.trim()) {
+          queryParts.push(req.params.query.trim());
+        }
+        const combinedQuery = queryParts.join('^');
+
+        // Resolve code fields
+        let codeFields: string[] = [];
+        if (Array.isArray(req.params?.fields)) {
+          codeFields = req.params.fields.filter((f: any) => typeof f === 'string' && /^[a-zA-Z0-9_]+$/.test(f.trim())).map((f: string) => f.trim());
+        } else if (typeof req.params?.field === 'string' && /^[a-zA-Z0-9_]+$/.test(req.params.field.trim())) {
+          codeFields = [req.params.field.trim()];
+        }
+        if (codeFields.length === 0) {
+          codeFields = resolveTableCodeFields(table, this.cwd);
+        }
+
+        const displayFields = ['sys_id', 'name', 'sys_name', 'short_description', 'sys_scope', 'sys_scope.scope'];
+        const allRequestedFields = Array.from(new Set([...displayFields, ...codeFields])).join(',');
+
+        const queryParams: Record<string, string> = {
+          sysparm_fields: allRequestedFields,
+          sysparm_limit: String(limit),
+          sysparm_display_value: 'false',
+          sysparm_exclude_reference_link: 'true',
+          sysparm_no_count: 'true',
+        };
+        if (combinedQuery) {
+          queryParams.sysparm_query = combinedQuery;
+        }
+
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: 'agentRestApi',
+          agentRequestId: correlationId,
+          endpoint: `/api/now/table/${table}`,
+          method: 'GET',
+          queryParams,
+          instance: inst.settings,
+          appName: 'SN Utils CLI',
+        });
+        const res = await pendingPromise;
+        if (res.success === false) {
+          throw Object.assign(new Error(res.error || 'Failed to pull records'), { code: 'E_COMMAND_FAILED' });
+        }
+
+        const matchedRecords: any[] = Array.isArray(res.data?.result) ? res.data.result : (res.data?.result ? [res.data.result] : []);
+        const isFolderRecordTable = FOLDERRECORDTABLES.includes(table);
+
+        let filesWritten = 0;
+        let skippedEmpty = 0;
+        const warnings: string[] = [];
+        const pulledRecordsList: Array<{
+          sys_id: string;
+          name: string;
+          scope: string;
+          files: Array<{ field: string; path: string; bytes: number; action: 'created' | 'updated' | 'cleared' | 'skipped_empty' }>;
+        }> = [];
+
+        for (const rec of matchedRecords) {
+          const sysId = typeof rec.sys_id === 'object' ? rec.sys_id.value : String(rec.sys_id || '');
+          if (!sysId) continue;
+
+          let scope = 'global';
+          if (rec['sys_scope.scope']) {
+            scope = String(rec['sys_scope.scope']);
+          } else if (rec.sys_scope) {
+            scope = typeof rec.sys_scope === 'object' ? String(rec.sys_scope.value || rec.sys_scope.display_value || 'global') : String(rec.sys_scope);
+          }
+          if (!scope || scope === 'null' || scope === 'undefined') scope = 'global';
+
+          const rawName = rec.name || rec.sys_name || rec.short_description || sysId;
+          const name = String(rawName).trim();
+
+          let mapPath: string;
+          try {
+            mapPath = safeJoinUnderRoot(this.cwd, inst.name, scope, table, '_map.json');
+          } catch (e: any) {
+            warnings.push(`Could not resolve map path for ${scope}/${table}: ${e?.message || e}`);
+            continue;
+          }
+
+          let nameToSysId: Record<string, string> = {};
+          if (fs.existsSync(mapPath)) {
+            try { nameToSysId = JSON.parse(fs.readFileSync(mapPath, 'utf8')) || {}; } catch {}
+          }
+
+          let cleanName = name.replace(/[^a-z0-9._\-+]+/gi, '').replace(/\./g, '-') || sysId;
+          const existingKey = Object.keys(nameToSysId).find((k) => nameToSysId[k] === sysId);
+          if (existingKey) {
+            cleanName = existingKey;
+          } else if (nameToSysId[cleanName] && nameToSysId[cleanName] !== sysId) {
+            cleanName = `${cleanName}-${sysId.slice(0, 2)}${sysId.slice(-2)}`.toUpperCase();
+          }
+          nameToSysId[cleanName] = sysId;
+
+          try {
+            fs.mkdirSync(path.dirname(mapPath), { recursive: true });
+            fs.writeFileSync(mapPath, JSON.stringify(nameToSysId, null, 4), 'utf8');
+          } catch (e: any) {
+            warnings.push(`Failed to write _map.json at ${mapPath}: ${e?.message || e}`);
+          }
+
+          if (table === 'sp_widget') {
+            try {
+              const testUrlsPath = safeJoinUnderRoot(this.cwd, inst.name, scope, table, cleanName, '_test_urls.txt');
+              if (!fs.existsSync(testUrlsPath)) {
+                const dispVal = name.toLowerCase().replace(/\s+/g, '_');
+                const testUrls = [
+                  `${inst.settings.url}/$sp.do?id=sp-preview&sys_id=${sysId}`,
+                  `${inst.settings.url}/sp_config?id=${dispVal}`,
+                  `${inst.settings.url}/sp?id=${dispVal}`,
+                  `${inst.settings.url}/esc?id=${dispVal}`,
+                ].join('\n');
+                fs.mkdirSync(path.dirname(testUrlsPath), { recursive: true });
+                fs.writeFileSync(testUrlsPath, testUrls, 'utf8');
+              }
+            } catch {}
+          }
+
+          const recordFiles: Array<{ field: string; path: string; bytes: number; action: 'created' | 'updated' | 'cleared' | 'skipped_empty' }> = [];
+
+          for (const field of codeFields) {
+            const ext = resolveFieldExtension(table, field, this.cwd);
+            let targetPath: string;
+            try {
+              targetPath = isFolderRecordTable
+                ? safeJoinUnderRoot(this.cwd, inst.name, scope, table, cleanName, `${field}${ext}`)
+                : safeJoinUnderRoot(this.cwd, inst.name, scope, table, `${cleanName}.${field}${ext}`);
+            } catch (e: any) {
+              warnings.push(`Unsafe path for ${scope}/${table}/${cleanName}.${field}: ${e?.message || e}`);
+              continue;
+            }
+
+            const relPath = path.relative(this.cwd, targetPath).replace(/\\/g, '/');
+            const rawVal = rec[field];
+            const content = rawVal !== null && rawVal !== undefined ? String(rawVal) : '';
+            const fileExisted = fs.existsSync(targetPath);
+
+            if (content.length > 0) {
+              try {
+                fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+                fs.writeFileSync(targetPath, content, 'utf8');
+                filesWritten++;
+                const action = fileExisted ? 'updated' : 'created';
+                recordFiles.push({ field, path: relPath, bytes: Buffer.byteLength(content, 'utf8'), action });
+              } catch (e: any) {
+                warnings.push(`Failed to write ${relPath}: ${e?.message || e}`);
+              }
+            } else if (fileExisted) {
+              try {
+                fs.writeFileSync(targetPath, '', 'utf8');
+                filesWritten++;
+                recordFiles.push({ field, path: relPath, bytes: 0, action: 'cleared' });
+              } catch (e: any) {
+                warnings.push(`Failed to clear ${relPath}: ${e?.message || e}`);
+              }
+            } else {
+              skippedEmpty++;
+              recordFiles.push({ field, path: relPath, bytes: 0, action: 'skipped_empty' });
+            }
+          }
+
+          pulledRecordsList.push({
+            sys_id: sysId,
+            name,
+            scope,
+            files: recordFiles,
+          });
+        }
+
+        return {
+          id: req.id,
+          command: req.command,
+          status: 'success',
+          timestamp: Date.now(),
+          result: {
+            table,
+            matchedRecords: matchedRecords.length,
+            pulledRecords: pulledRecordsList.length,
+            filesWritten,
+            skippedEmpty,
+            warnings,
+            records: pulledRecordsList,
+          },
         };
       }
 

@@ -19,7 +19,9 @@ import { AgentPortFile } from './types';
 // v7 -> v8: Two-phase Monaco review protocol, command policies, per-instance
 // monotonic gate cache, deny-wins security model, cancellation propagation,
 // structured userFeedback and E_USER_REJECTED.
-export const AGENT_API_VERSION = 8;
+// v8 -> v9: added pull_records (and pull_artifacts alias) for bulk and single
+// artifact pulling to canonical local workspace files with _map.json sync.
+export const AGENT_API_VERSION = 9;
 
 /** Preferred fixed port for the Agent API. If it's taken the server falls back
  * to an ephemeral port — the port files below always carry the actual port. */

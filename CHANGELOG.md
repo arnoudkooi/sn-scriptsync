@@ -1,5 +1,15 @@
 # CHANGELOG.md
 
+## 4.8.2 (2026-08-21)
+
+**Agent API v9 & `pull_records` (alias: `pull_artifacts`):**
+- **Bulk & Single Artifact Pulling:** Added `pull_records` to fetch records by encoded query, single `sys_id`, or `sys_ids` array and write code fields to canonical local workspace files (`<instance>/<scope>/<table>/<name>.<field>.<ext>`).
+- **Canonical Mapping & Collision Handling:** Automatically registers pulled records into `<instance>/<scope>/<table>/_map.json`, preserving existing mapped filenames and suffixing colliding names with `-XXXX` sys_id hashes.
+- **Folder Record Tables:** Automatically organizes multi-field folder record tables (`sp_widget`, `sp_header_footer`, `sys_ui_page`) into dedicated subdirectories.
+- **Awaited Writes & Loopback Protection:** Every written file is marked as a self-write to prevent watcher echo, and writes are properly awaited before responding.
+- **Empty Field Management:** Clears stale local files when remote fields become empty (action: `cleared`), while cleanly reporting untouched empty fields as `skippedEmpty`.
+- **Standalone `@snutils/snu` CLI & MCP Parity:** Added `snu pull <table> [query] [--sys-id <id>] [--fields <f1,f2>] [--limit <n>]` with full MCP tool support.
+
 ## 4.8.0 (2026-08-17)
 
 **Agent API v8 & Standalone `@snutils/snu` CLI / MCP Server:**

@@ -10,5 +10,6 @@
 		"incremental": true,
 		"tsBuildInfoFile": "out/.tsbuildinfo"
 	},
-	"exclude": ["node_modules", ".vscode-test", "autocomplete", "scripts", "packages"]
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "node_modules.nosync", ".vscode-test", "autocomplete", "scripts", "packages"]
 }

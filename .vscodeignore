@@ -23,6 +23,9 @@ node_modules/.bin/**
 node_modules/@types/**
 node_modules/typescript/**
 node_modules/tslint/**
+node_modules.nosync/**
+* 2*
+* 2.*
 
 # iCloud Drive conflict-copy folders (e.g. "@types 2", "@parcel 2", "ws 2")
 node_modules/@types 2/**

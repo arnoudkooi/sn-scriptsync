@@ -4,14 +4,15 @@ import { TOOLS, getToolByName, getToolByCliCommand } from '../registry.js';
 import { formatHumanOutput } from '../cli/format.js';
 import { resolveContextSecurity } from '../client.js';
 
-test('Registry: exactly 14 tools registered', () => {
-  assert.strictEqual(TOOLS.length, 14);
+test('Registry: exactly 15 tools registered', () => {
+  assert.strictEqual(TOOLS.length, 15);
   const toolNames = TOOLS.map((t) => t.name);
   assert.deepStrictEqual(toolNames, [
     'snu_code_search',
     'snu_get_schema',
     'snu_get_context',
     'snu_query_records',
+    'snu_pull_records',
     'snu_get_record',
     'snu_create_artifact',
     'snu_update_record',
@@ -23,6 +24,26 @@ test('Registry: exactly 14 tools registered', () => {
     'snu_navigate',
     'snu_take_screenshot',
   ]);
+});
+
+test('Adapter: snu_pull_records maps parameters correctly', () => {
+  const tool = getToolByName('snu_pull_records')!;
+  const mapped = tool.mapInput({
+    table: 'sys_script_include',
+    query: 'active=true^nameSTARTSWITHincident',
+    'sys-id': '9659b9900a0a0b340079eb7c8a410eb8',
+    fields: 'script,name,api_name',
+    limit: '25',
+    instance: 'dev123',
+  });
+
+  assert.strictEqual(mapped.command, 'pull_records');
+  assert.strictEqual(mapped.instance, 'dev123');
+  assert.strictEqual(mapped.params.table, 'sys_script_include');
+  assert.strictEqual(mapped.params.query, 'active=true^nameSTARTSWITHincident');
+  assert.strictEqual(mapped.params.sys_id, '9659b9900a0a0b340079eb7c8a410eb8');
+  assert.deepStrictEqual(mapped.params.fields, ['script', 'name', 'api_name']);
+  assert.strictEqual(mapped.params.limit, 25);
 });
 
 test('Adapter: snu_code_search maps parameters correctly', () => {
