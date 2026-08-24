@@ -3456,6 +3456,80 @@ function handleResolveScopeForSave(responseJson: any) {
 	saveFieldAsFile(payload);
 }
 
+// A record renamed on the instance keeps its old local filename (the _map.json
+// entry is keyed by sys_id and wins). Instead of silently renaming files on
+// disk, tell the user and let them opt in to a local rename. Shown once per
+// session per record/name combination so repeated pushes don't nag.
+const offeredRenameNotices: Set<string> = new Set();
+
+function offerRecordRenameNotice(fullPath: string, scopeMappingFile: string, oldName: string, newName: string, sysId: string, tableName: string) {
+	const noticeKey = scopeMappingFile + '|' + sysId + '|' + newName;
+	if (offeredRenameNotices.has(noticeKey)) return;
+	offeredRenameNotices.add(noticeKey);
+	vscode.window.showInformationMessage(
+		`ScriptSync: this record was renamed on the instance ('${oldName}' is now '${newName}'). Local files keep the old name.`,
+		'Rename local files'
+	).then(choice => {
+		if (choice !== 'Rename local files') return;
+		renameSyncedRecordFiles(fullPath, scopeMappingFile, oldName, newName, sysId, tableName);
+	});
+}
+
+function renameSyncedRecordFiles(fullPath: string, scopeMappingFile: string, oldName: string, newName: string, sysId: string, tableName: string) {
+	// Both names must be safe single path segments before they build any path.
+	try {
+		sanitizePathComponent(oldName);
+		sanitizePathComponent(newName);
+	} catch (e) {
+		vscode.window.showWarningMessage('ScriptSync: rename skipped, unsafe file name: ' + (e as Error).message);
+		return;
+	}
+
+	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
+	if (nameToSysId[oldName] != sysId) {
+		vscode.window.showWarningMessage(`ScriptSync: the mapping for '${oldName}' changed since this notice, rename skipped. Push the record again.`);
+		return;
+	}
+	// Same collision rule as saveFieldAsFile: if the new name is already taken
+	// by another record, suffix with the first and last 2 chars of the sys_id.
+	let targetName = newName;
+	if (nameToSysId[targetName] && nameToSysId[targetName] != sysId)
+		targetName = targetName + ("-" + sysId.slice(0, 2) + sysId.slice(-2)).toUpperCase();
+
+	const isFolderRecordTable = Constants.FOLDERRECORDTABLES.includes(tableName);
+	const oldPrefix = fullPath + oldName;
+	const belongsToRecord = (filePath: string) =>
+		isFolderRecordTable
+			? filePath.startsWith(oldPrefix + nodePath.sep)
+			: nodePath.dirname(filePath) + nodePath.sep === fullPath && nodePath.basename(filePath).startsWith(oldName + '.');
+
+	// Don't move a file out from under unsaved edits: VS Code would mark the
+	// open document as deleted and the edits could be lost.
+	const dirtyDoc = vscode.workspace.textDocuments.find(doc => doc.isDirty && belongsToRecord(doc.fileName));
+	if (dirtyDoc) {
+		vscode.window.showWarningMessage(`ScriptSync: '${nodePath.basename(dirtyDoc.fileName)}' has unsaved changes. Save or close it, then push the record again to rename.`);
+		return;
+	}
+
+	try {
+		if (isFolderRecordTable) {
+			fs.renameSync(oldPrefix, fullPath + targetName);
+		} else {
+			fs.readdirSync(fullPath)
+				.filter(f => f.startsWith(oldName + '.'))
+				.forEach(f => fs.renameSync(fullPath + f, fullPath + targetName + f.slice(oldName.length)));
+		}
+	} catch (e) {
+		vscode.window.showWarningMessage('ScriptSync: rename failed: ' + (e as Error).message);
+		return;
+	}
+
+	delete nameToSysId[oldName];
+	nameToSysId[targetName] = sysId;
+	eu.writeOrReadNameToSysIdMapping(scopeMappingFile, nameToSysId, true);
+	vscode.window.showInformationMessage(`ScriptSync: renamed local files '${oldName}' to '${targetName}'.`);
+}
+
 function saveFieldAsFile(postedJson, retry = 0) {
 
 	// Instance-supplied name/table must be safe single path segments before they
@@ -3519,13 +3593,19 @@ function saveFieldAsFile(postedJson, retry = 0) {
 
 	let scopeMappingFile = fullPath + '_map.json';
 	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
-	let cleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
+	let incomingCleanName = postedJson.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || postedJson.sys_id + '';
+	let cleanName = incomingCleanName;
 	const runId = buildRunId();
-	// If this file was synced before, use whatever name is in the _map.json
-	cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === postedJson.sys_id) ?? cleanName
+	// If this file was synced before, use whatever name is in the _map.json.
+	// The local filename stays stable even when the record is renamed on the
+	// instance; a rename is detected below and offered as an explicit action.
+	let mappedName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === postedJson.sys_id);
+	cleanName = mappedName ?? cleanName;
 	if (nameToSysId[cleanName] && nameToSysId[cleanName] != postedJson.sys_id){
 		cleanName = cleanName + ("-" + postedJson.sys_id.slice(0,2) + postedJson.sys_id.slice(-2)).toUpperCase(); //if mapping already exist add first and last 2 chars of the syid to the filename
 	}
+	if (mappedName && mappedName !== incomingCleanName && !postedJson.stagingOnly)
+		offerRecordRenameNotice(fullPath, scopeMappingFile, mappedName, incomingCleanName, postedJson.sys_id + '', postedJson.table);
 	auditLog('map_resolution', {
 		tableName: postedJson.table,
 		sys_id: postedJson.sys_id,

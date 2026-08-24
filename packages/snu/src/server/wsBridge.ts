@@ -46,6 +46,10 @@ export class StandaloneWsBridge {
   };
   private activeReviews = new Map<string, ActiveReview>();
 
+  // Wired by StandaloneBridge to the dispatcher so ServiceNow save-icon
+  // pushes land in the sync workspace instead of being dropped.
+  onSaveFieldAsFile?: (msg: any) => void;
+
   constructor(
     private port = 1978,
     private pending: PendingRegistry = defaultPendingRegistry
@@ -149,6 +153,13 @@ export class StandaloneWsBridge {
           lastActiveAt: Date.now(),
         });
       } catch {}
+    }
+
+    // ServiceNow save-icon push: write the field to the sync workspace, the
+    // same message VS Code handles as saveFieldAsFile.
+    if (msg.action === 'saveFieldAsFile') {
+      if (this.onSaveFieldAsFile) this.onSaveFieldAsFile(msg);
+      return;
     }
 
     // 1. Immutable merge for license / build info
@@ -307,7 +318,11 @@ export class StandaloneWsBridge {
 
   sendToBrowser(payload: any): void {
     if (!this.activeClient || this.activeClient.readyState !== WebSocket.OPEN) {
-      throw new Error('No browser helper connected. Open the SN Utils helper tab via /token.');
+      // Same code as the dispatcher's precheck, so a helper tab that closes
+      // mid-command still surfaces as connect guidance, not a raw failure.
+      throw Object.assign(new Error('No browser helper connected. Open the SN Utils helper tab via /token.'), {
+        code: 'E_BROWSER_DISCONNECTED',
+      });
     }
     this.activeClient.send(JSON.stringify(payload));
   }

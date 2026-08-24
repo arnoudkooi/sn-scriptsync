@@ -291,6 +291,16 @@ export function outputError(err: any, isJsonMode = false): void {
       process.stderr.write(
         `\n${ANSI.red}${ANSI.bold}✕ Execution rejected by developer:${ANSI.reset} "${feedback}" ${ANSI.gray}(E_USER_REJECTED)${ANSI.reset}\n`
       );
+    } else if (err?.code === 'E_BROWSER_DISCONNECTED') {
+      // Setup state, not a tool failure: guide instead of alarming.
+      const steps: string[] = Array.isArray(err.details?.guidance) && err.details.guidance.length
+        ? err.details.guidance
+        : ['Open your ServiceNow instance in the browser, type /token in the SN Utils slash palette to open the helper tab, keep it open, then retry.'];
+      process.stderr.write(
+        `\n${ANSI.yellow}${ANSI.bold}ServiceNow is not connected${ANSI.reset} ${ANSI.gray}(the SN Utils helper tab is not open)${ANSI.reset}\n\n` +
+        steps.map((s, i) => `  ${ANSI.cyan}${i + 1}.${ANSI.reset} ${s}`).join('\n') +
+        `\n\n${ANSI.gray}Check readiness any time with: snu context${ANSI.reset}\n`
+      );
     } else {
       process.stderr.write(
         `\n${ANSI.red}${ANSI.bold}Error:${ANSI.reset} ${err?.message || err}\n` +

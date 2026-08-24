@@ -1,5 +1,12 @@
 # CHANGELOG.md
 
+## 4.8.3 (2026-08-24)
+
+- **Renamed records are now detected on push:** when a record synced earlier is renamed on the instance and pushed again, a notification shows the old and new name and offers a one-click "Rename local files" that renames the files and updates `_map.json`. Local files keep their stable name until you choose to rename, and the rename is skipped with a warning if the affected files have unsaved changes.
+- **Standalone `@snutils/snu` daemon now handles ServiceNow save-icon pushes:** clicking "push to sn-scriptsync" with only the standalone daemon running writes the field to the sync workspace (same canonical paths, `_map.json` and scope resolution as VS Code) instead of being silently dropped, and the helper tab logs the save as delivered. One-way: local edits still flow back via agent commands or VS Code.
+- **`pull_records` now reports instance renames:** pulling a record that was renamed on the instance keeps its stable local file name and adds a warning naming both the new instance name and the kept file name.
+- **Helper tab not open now guides instead of erroring:** CLI commands print connect steps (open the instance, `/token`, keep the tab open) as a friendly notice instead of a red error, and MCP tools return the same steps as a normal message so AI agents relay them to the user rather than failing or retry-looping. JSON mode and exit codes are unchanged for scripts.
+
 ## 4.8.2 (2026-08-21)
 
 **Agent API v9 & `pull_records` (alias: `pull_artifacts`):**

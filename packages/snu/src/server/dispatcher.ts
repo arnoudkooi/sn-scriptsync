@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { StandaloneWsBridge } from './wsBridge.js';
@@ -9,6 +10,15 @@ import { resolveStandaloneConfig, StandaloneConfig } from './config.js';
 import { computePayloadHash } from './canonical.js';
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
+
+// Steps a user must take to (re)connect the browser helper tab. Rendered by
+// the CLI as a friendly block and relayed verbatim by the MCP server so
+// agents guide the user instead of reporting a raw error.
+export const HELPER_CONNECT_GUIDANCE = [
+  'Open your ServiceNow instance in the browser (with the SN Utils extension installed).',
+  'On that page, type /token in the SN Utils slash palette: this opens the helper tab and connects it.',
+  'Keep the helper tab open, then retry.',
+];
 
 const FIELDTYPES: Record<string, { extension: string }> = {
   script: { extension: '.js' },
@@ -107,6 +117,59 @@ function resolveFieldExtension(tableName: string, fieldName: string, cwd: string
   return ext;
 }
 
+// Canonical filename resolution against a folder's _map.json, shared by
+// pull_records and browser save pushes. Mirrors the VS Code extension: an
+// existing mapping for the sys_id wins (so a record renamed on the instance
+// keeps its stable local filename, reported via `renamedTo`), and a name
+// collision with another sys_id gets a short sys_id suffix.
+export function resolveMappedFileName(
+  mapPath: string,
+  rawName: string,
+  sysId: string
+): { cleanName: string; renamedTo?: string; map: Record<string, string> } {
+  let nameToSysId: Record<string, string> = {};
+  if (fs.existsSync(mapPath)) {
+    try { nameToSysId = JSON.parse(fs.readFileSync(mapPath, 'utf8')) || {}; } catch {}
+  }
+
+  const computed = String(rawName).replace(/[^a-z0-9._\-+]+/gi, '').replace(/\./g, '-') || sysId;
+  let cleanName = computed;
+  let renamedTo: string | undefined;
+
+  const existingKey = Object.keys(nameToSysId).find((k) => nameToSysId[k] === sysId);
+  if (existingKey) {
+    cleanName = existingKey;
+    if (existingKey !== computed) renamedTo = computed;
+  } else if (nameToSysId[cleanName] && nameToSysId[cleanName] !== sysId) {
+    cleanName = cleanName + ('-' + sysId.slice(0, 2) + sysId.slice(-2)).toUpperCase();
+  }
+
+  nameToSysId[cleanName] = sysId;
+  return { cleanName, renamedTo, map: nameToSysId };
+}
+
+function writeMapFile(mapPath: string, map: Record<string, string>): void {
+  fs.mkdirSync(path.dirname(mapPath), { recursive: true });
+  fs.writeFileSync(mapPath, JSON.stringify(map, null, 4), 'utf8');
+}
+
+// Extension for a browser save push, derived from the payload's fieldType the
+// same way the VS Code extension does it (saveFieldAsFile).
+function extensionForBrowserSave(fieldType: string, fieldName: string, tableName: string, cleanName: string): string {
+  let ext = FIELDTYPES[fieldType]?.extension;
+  if (fieldType.includes('xml')) ext = '.xml';
+  else if (fieldType.includes('html')) ext = '.html';
+  else if (fieldType.includes('json')) ext = '.json';
+  else if (fieldType.includes('css') || fieldType === 'properties' || fieldName === 'css') ext = '.scss';
+  else if (cleanName.lastIndexOf('-') > -1 && tableName === 'ecc_agent_script_file') {
+    const suffix = cleanName.substring(cleanName.lastIndexOf('-') + 1);
+    if (suffix.length < 5) ext = '.' + suffix;
+  }
+  else if (fieldType.includes('string') || fieldType === 'conditions') ext = '.txt';
+  else if (fieldName === 'PowerShell') ext = '.ps1';
+  return ext || '.js';
+}
+
 export interface StandaloneDispatcherOptions {
   cwd?: string;
   wsBridge: StandaloneWsBridge;
@@ -143,6 +206,146 @@ export class StandaloneDispatcher {
       try { return JSON.parse(fs.readFileSync(p2, 'utf8')); } catch {}
     }
     return null;
+  }
+
+  // Browser save-icon pushes (action: 'saveFieldAsFile') arrive on the port
+  // 1978 socket whether VS Code or this daemon is listening; VS Code writes
+  // the field into the sync workspace, and historically the daemon dropped
+  // the message silently. Mirror the VS Code behavior so a daemon-only setup
+  // still lands pushes on disk. One-way by design: the daemon has no file
+  // watcher, so local edits flow back via agent commands or VS Code.
+  async handleBrowserFieldSave(msg: any): Promise<void> {
+    const echo = (payload: any) => {
+      try { this.ws.sendToBrowser(payload); } catch {}
+    };
+    try {
+      const instanceName = sanitizePathComponent(String(msg?.instance?.name || ''));
+      const table = sanitizePathComponent(String(msg?.table || ''));
+      const sysId = String(msg?.sys_id || '');
+      const rawName = String(msg?.name || '');
+      const field = String(msg?.field || '');
+      const content = typeof msg?.content === 'string' ? msg.content : String(msg?.content ?? '');
+      if (!sysId || !field) throw new Error('Save push is missing sys_id or field');
+
+      // Refuse to scatter files when the daemon was clearly started outside a
+      // sync workspace.
+      const resolvedCwd = path.resolve(this.cwd);
+      if (resolvedCwd === path.resolve(os.homedir()) || resolvedCwd === path.parse(resolvedCwd).root) {
+        console.warn(`[snu] Ignored a save push from the browser: ${resolvedCwd} does not look like a ScriptSync workspace. Start snu from your sync folder.`);
+        return;
+      }
+
+      const scope = await this.resolveScopeFolderForSave(msg, instanceName);
+
+      // Variable fields arrive as inputs.<var>.script
+      const fieldName = field.split('.').length === 3 ? 'variable-' + field.split('.')[2] : field;
+
+      const isFolderRecordTable = FOLDERRECORDTABLES.includes(table);
+      const mapPath = safeJoinUnderRoot(this.cwd, instanceName, scope, table, '_map.json');
+      const { cleanName, renamedTo, map } = resolveMappedFileName(mapPath, rawName, sysId);
+      writeMapFile(mapPath, map);
+      if (renamedTo) {
+        console.log(`[snu] Record ${table}/${sysId} is named '${renamedTo}' on the instance but keeps local file name '${cleanName}' (rename tracked in _map.json).`);
+      }
+
+      const ext = extensionForBrowserSave(String(msg?.fieldType || 'script'), fieldName, table, cleanName);
+      const targetPath = isFolderRecordTable
+        ? safeJoinUnderRoot(this.cwd, instanceName, scope, table, cleanName, `${fieldName}${ext}`)
+        : safeJoinUnderRoot(this.cwd, instanceName, scope, table, `${cleanName}.${fieldName}${ext}`);
+
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, content, 'utf8');
+      console.log(`[snu] Saved ${path.relative(this.cwd, targetPath)} (pushed from ${instanceName})`);
+
+      // Same success echo VS Code sends: the helper tab logs the push as
+      // delivered when it sees contentLength.
+      echo({ ...msg, result: '', contentLength: content.length, send: false });
+    } catch (e: any) {
+      const message = e?.message || String(e);
+      console.warn('[snu] Failed to save field pushed from browser:', message);
+      echo({ error: `Standalone snu could not save the pushed field: ${message}`, send: false, response: { result: {} } });
+    }
+  }
+
+  // Resolve the scope folder name for a browser save push. The payload's
+  // `scope` is a sys_scope sys_id ('global' for global, '' when the form has
+  // no sys_scope field). Mirrors the VS Code extension: scopes.json first,
+  // then ask the instance, falling back to no_scope / unknown_scope.
+  private async resolveScopeFolderForSave(msg: any, instanceName: string): Promise<string> {
+    const scopeVal = typeof msg?.scope === 'string' ? msg.scope.trim() : '';
+    if (scopeVal === 'global') return 'global';
+
+    if (!scopeVal) {
+      const fromRecord = await this.queryScopeFromInstance(
+        msg,
+        `/api/now/table/${msg.table}/${msg.sys_id}`,
+        { sysparm_fields: 'sys_scope.scope', sysparm_exclude_reference_link: 'true' },
+        'sys_scope.scope'
+      );
+      return fromRecord || 'no_scope';
+    }
+
+    if (/^[0-9a-f]{32}$/i.test(scopeVal)) {
+      const scopesPath = path.join(this.cwd, instanceName, 'scopes.json');
+      try {
+        const scopes = JSON.parse(fs.readFileSync(scopesPath, 'utf8')) || {};
+        const hit = Object.keys(scopes).find((k) => scopes[k] === scopeVal);
+        if (hit) return hit;
+      } catch {}
+
+      const fromScope = await this.queryScopeFromInstance(
+        msg,
+        `/api/now/table/sys_scope/${scopeVal}`,
+        { sysparm_fields: 'scope' },
+        'scope'
+      );
+      if (fromScope) {
+        // Best-effort persist name -> sys_id so the next save skips the round-trip.
+        try {
+          let scopes: Record<string, string> = {};
+          try { scopes = JSON.parse(fs.readFileSync(scopesPath, 'utf8')) || {}; } catch {}
+          if (scopes[fromScope] !== scopeVal) {
+            scopes[fromScope] = scopeVal;
+            fs.mkdirSync(path.dirname(scopesPath), { recursive: true });
+            fs.writeFileSync(scopesPath, JSON.stringify(scopes, null, 4), 'utf8');
+          }
+        } catch {}
+        return fromScope;
+      }
+      return 'unknown_scope';
+    }
+
+    // Already a scope name (e.g. flow action saves carry the name directly).
+    if (/^[a-z0-9_.\-]+$/i.test(scopeVal)) return scopeVal;
+    return 'unknown_scope';
+  }
+
+  private async queryScopeFromInstance(
+    msg: any,
+    endpoint: string,
+    queryParams: Record<string, string>,
+    resultField: string
+  ): Promise<string | undefined> {
+    if (!this.ws.hasBrowserClient()) return undefined;
+    try {
+      const correlationId = crypto.randomUUID();
+      const pendingPromise = this.pending.register({ id: correlationId, command: 'resolve_scope_for_save', timeoutMs: 15_000 });
+      this.ws.sendToBrowser({
+        action: 'agentRestApi',
+        agentRequestId: correlationId,
+        endpoint,
+        method: 'GET',
+        queryParams,
+        instance: msg.instance,
+        appName: 'SN Utils CLI',
+      });
+      const res: any = await pendingPromise;
+      if (res?.success === false) return undefined;
+      const value = res?.data?.result?.[resultField];
+      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   listInstanceFolders(): string[] {
@@ -369,10 +572,13 @@ export class StandaloneDispatcher {
         };
       }
 
-      // Check browser connection for all instance/remote commands
+      // Check browser connection for all instance/remote commands. Not a
+      // failure of the tool: a user-actionable setup state, so ship guidance
+      // steps in details for the CLI and MCP surfaces to render.
       if (!this.ws.hasBrowserClient()) {
-        throw Object.assign(new Error('Browser helper disconnected. Open the SN Utils helper tab via /token in ServiceNow.'), {
+        throw Object.assign(new Error('ServiceNow is not connected: the SN Utils helper tab is not open.'), {
           code: 'E_BROWSER_DISCONNECTED',
+          details: { guidance: HELPER_CONNECT_GUIDANCE },
         });
       }
 
@@ -856,25 +1062,14 @@ export class StandaloneDispatcher {
             continue;
           }
 
-          let nameToSysId: Record<string, string> = {};
-          if (fs.existsSync(mapPath)) {
-            try { nameToSysId = JSON.parse(fs.readFileSync(mapPath, 'utf8')) || {}; } catch {}
-          }
-
-          let cleanName = name.replace(/[^a-z0-9._\-+]+/gi, '').replace(/\./g, '-') || sysId;
-          const existingKey = Object.keys(nameToSysId).find((k) => nameToSysId[k] === sysId);
-          if (existingKey) {
-            cleanName = existingKey;
-          } else if (nameToSysId[cleanName] && nameToSysId[cleanName] !== sysId) {
-            cleanName = `${cleanName}-${sysId.slice(0, 2)}${sysId.slice(-2)}`.toUpperCase();
-          }
-          nameToSysId[cleanName] = sysId;
-
+          const { cleanName, renamedTo, map: nameToSysId } = resolveMappedFileName(mapPath, name, sysId);
           try {
-            fs.mkdirSync(path.dirname(mapPath), { recursive: true });
-            fs.writeFileSync(mapPath, JSON.stringify(nameToSysId, null, 4), 'utf8');
+            writeMapFile(mapPath, nameToSysId);
           } catch (e: any) {
             warnings.push(`Failed to write _map.json at ${mapPath}: ${e?.message || e}`);
+          }
+          if (renamedTo) {
+            warnings.push(`Record ${sysId} is named '${renamedTo}' on the instance but keeps local file name '${cleanName}' (rename tracked in _map.json).`);
           }
 
           if (table === 'sp_widget') {

@@ -39,6 +39,9 @@ export class StandaloneBridge {
       cwd: this.cwd,
       wsBridge,
     });
+    wsBridge.onSaveFieldAsFile = (msg) => {
+      void dispatcher.handleBrowserFieldSave(msg);
+    };
 
     // 3. Start HTTP Bridge on 1977
     const httpBridge = new StandaloneHttpBridge({

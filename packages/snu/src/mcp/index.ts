@@ -37,6 +37,26 @@ export async function createMcpServer(): Promise<McpServer> {
         content: [{ type: 'text' as const, text: JSON.stringify(resp.result, null, 2) }],
       };
     } catch (err: any) {
+      // Not a tool failure: the browser helper tab simply is not open. Return
+      // a normal result with instructions so the agent guides the user
+      // instead of surfacing (or retry-looping on) a raw error.
+      if (err?.code === 'E_BROWSER_DISCONNECTED') {
+        const steps: string[] = Array.isArray(err.details?.guidance) && err.details.guidance.length
+          ? err.details.guidance
+          : ['Open the ServiceNow instance in the browser, type /token in the SN Utils slash palette to open the helper tab, keep it open, then retry.'];
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                'ServiceNow is not connected yet: the SN Utils helper tab is not open in the browser. ' +
+                'This is a setup step only the user can do. Ask the user to:\n' +
+                steps.map((s, i) => `${i + 1}. ${s}`).join('\n') +
+                '\nThen run this tool again. Readiness can be checked with snu_get_context.',
+            },
+          ],
+        };
+      }
       console.error(`[snu-mcp] Error executing ${name}:`, err?.message || err);
       const userFeedback = err.details?.userFeedback ? ` - User Feedback: "${err.details.userFeedback}"` : '';
       return {

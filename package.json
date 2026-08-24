@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.8.2",
+	"version": "4.8.3",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -385,6 +385,11 @@
 		"compile": "npm run build:agent-docs && tsc -p ./",
 		"package": "vsce package --no-dependencies",
 		"publish:marketplace": "vsce publish --no-dependencies",
+		"release": "node scripts/publish.mjs",
+		"release:vsix": "node scripts/publish.mjs vsix",
+		"release:openvsx": "node scripts/publish.mjs openvsx",
+		"release:npm": "node scripts/publish.mjs npm",
+		"release:all": "node scripts/publish.mjs all",
 		"watch": "tsc -watch -p ./"
 	},
 	"devDependencies": {
