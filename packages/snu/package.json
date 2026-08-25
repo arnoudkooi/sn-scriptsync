@@ -26,6 +26,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -watch -p tsconfig.json",
     "test": "node --test dist/test/*.test.js",
+    "nosync": "node ../../scripts/nosync-node-modules.mjs",
     "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [

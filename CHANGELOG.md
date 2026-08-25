@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.8.4 (2026-08-25)
+
+- **Fixed: extension failed to activate after updating to 4.8.3** (no sn-scriptsync indicator in the VS Code status bar) — the 4.8.3 package was missing its runtime dependencies.
+
 ## 4.8.3 (2026-08-24)
 
 - **Renamed records are now detected on push:** when a record synced earlier is renamed on the instance and pushed again, a notification shows the old and new name and offers a one-click "Rename local files" that renames the files and updates `_map.json`. Local files keep their stable name until you choose to rename, and the rename is skipped with a warning if the affected files have unsaved changes.

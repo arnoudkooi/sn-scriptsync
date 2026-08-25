@@ -169,11 +169,25 @@ if (wants.size === 1 && wants.has('vsix') && targetsArg.includes('all')) {
 }
 
 // ---------- vsix ----------
+// NOTE: never pass --no-dependencies here. The extension is NOT bundled (main
+// is plain tsc output that requires 'ws' and 'sass' at module load), so the
+// runtime node_modules must be inside the VSIX. 4.8.3 shipped without them and
+// failed to activate (no status-bar item) — the check below makes that
+// impossible to repeat silently.
 if (wants.has('vsix')) {
   head('Package VSIX');
-  run('vsce package --no-dependencies');
+  run('vsce package');
   const vsix = path.join(ROOT, `${extPkg.name}-${extPkg.version}.vsix`);
   if (!fs.existsSync(vsix)) fail(`Expected ${path.basename(vsix)} was not produced.`);
+  const runtimeDeps = Object.keys(extPkg.dependencies || {});
+  if (runtimeDeps.length) {
+    const listing = capture(`unzip -l "${vsix}"`) || '';
+    const missing = runtimeDeps.filter((dep) => !listing.includes(`extension/node_modules/${dep}/package.json`));
+    if (missing.length) {
+      fail(`Packaged VSIX is missing runtime dependencies: ${missing.join(', ')}. The extension would fail to activate — do not publish this artifact.`);
+    }
+    ok(`Runtime dependencies bundled: ${runtimeDeps.join(', ')}`);
+  }
   const mb = (fs.statSync(vsix).size / 1024 / 1024).toFixed(1);
   ok(`${path.basename(vsix)} (${mb} MB)`);
 }
@@ -190,7 +204,7 @@ if (wants.has('marketplace')) {
     if (!(await confirm(`Publish ${extId} ${extPkg.version} to the VS Code Marketplace?`))) {
       warn('Marketplace publish skipped.');
     } else {
-      run('vsce publish --no-dependencies');
+      run('vsce publish');
       ok(`Published ${extId} ${extPkg.version}`);
     }
   }
