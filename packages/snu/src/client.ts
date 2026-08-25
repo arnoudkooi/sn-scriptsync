@@ -398,8 +398,17 @@ export class ScriptSyncClient {
           }
         }
 
+        // A bridge that predates a command answers E_UNKNOWN_COMMAND, which on
+        // its own reads like a bug in the caller. Name the actual cause so the
+        // agent reports "update the extension" instead of hunting for another
+        // way to do the same write.
+        let message = json.error || `Command ${mapped.command} failed`;
+        if ((json.code || '') === 'E_UNKNOWN_COMMAND') {
+          message += ` The connected ScriptSync bridge does not implement '${mapped.command}'. If VS Code is hosting the bridge, update the sn-scriptsync extension; otherwise update @snutils/snu.`;
+        }
+
         throw new ScriptSyncClientError(
-          json.error || `Command ${mapped.command} failed`,
+          message,
           json.code || 'E_COMMAND_FAILED',
           res.status,
           json.details || json.result

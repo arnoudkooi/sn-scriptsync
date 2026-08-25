@@ -8,6 +8,16 @@ function formatOrderBy(orderBy?: string): string | undefined {
   return `ORDERBY${trimmed}`;
 }
 
+function parseQueryPairs(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of raw.split(',')) {
+    const idx = pair.indexOf('=');
+    if (idx <= 0) continue;
+    out[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
+  }
+  return out;
+}
+
 export const TOOLS: ToolDefinition[] = [
   // 1. Code Search
   {
@@ -209,7 +219,7 @@ export const TOOLS: ToolDefinition[] = [
     name: 'snu_create_artifact',
     agentCommand: 'create_artifact',
     description:
-      'Create a new scriptable artifact (Script Include, Business Rule, etc.) in ServiceNow and track it locally. Requires fields.name and createArtifacts.enabled gate. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
+      'Create a new scriptable artifact (Script Include, Business Rule, UI Action, etc.) in ServiceNow and track it locally. Requires fields.name and the createArtifacts gate. NOT for plain data rows: to create an incident, task, sys_user, catalog request or any record whose display field is not "name", use snu_create_record instead. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
     cliCommand: 'artifact create',
     cliUsage: 'snu artifact create <table> <name> [--fields <json>] [--scope <scope>] [--instance <i>] [--json]',
     cliOptions: {
@@ -451,7 +461,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: 'snu_run_ui_action',
     agentCommand: 'run_ui_action',
-    description: 'Trigger a UI action on the active form (e.g. "save", "submit", "sysverb_update").',
+    description: 'Trigger a UI action on the form already open in the connected browser tab (e.g. "save", "submit", "sysverb_update"). This drives the live UI and is for exercising real form behaviour (client scripts, UI policies, business rules). It is NOT the way to create or update records as data: use snu_create_record and snu_update_record, which write through the REST API and are far more reliable.',
     cliCommand: 'browser action',
     cliUsage: 'snu browser action <action> [--no-suppress-dialogs] [--url <u>] [--tab <id>] [--instance <i>] [--json]',
     cliOptions: {
@@ -565,6 +575,101 @@ export const TOOLS: ToolDefinition[] = [
           tabId,
           fileName: input.fileName || input.file,
           exactUrl: input.exactUrl === true || input.exact === true,
+        },
+      };
+    },
+  },
+
+  // 15. Create Record (plain data rows)
+  {
+    name: 'snu_create_record',
+    agentCommand: 'create_record',
+    description:
+      'Create a record on any ServiceNow table by inserting it through the REST API (POST /api/now/table/<table>). This is the correct way to create ordinary data rows: incidents, tasks, users, groups, CMDB CIs, catalog items, anything whose display field is not "name". The inserted record is returned in the response, so no separate read-back is needed. Prefer this over driving the browser UI (navigate + set field + run UI action), which is slower and far more fragile. Covered by the same createArtifacts permission as the other create commands, which is on by default. For scriptable artifacts (Script Include, Business Rule, ...) use snu_create_artifact instead so the record is tracked locally.',
+    cliCommand: 'record create',
+    cliUsage: 'snu record create <table> [field=value ...] [--fields <json>] [--instance <i>] [--json]',
+    cliOptions: {
+      fields: { type: 'string', short: 'f', description: 'JSON object of field values' },
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string', description: 'Table to insert into (e.g. incident, sc_task, sys_user)' },
+        fields: {
+          type: 'object',
+          description: 'Field-value dictionary for the new record. Use raw values (sys_id for reference fields, choice value for choice fields), not display labels.',
+        },
+        instance: { type: 'string', description: 'Target instance name/folder (optional)' },
+      },
+      required: ['table', 'fields'],
+      additionalProperties: false,
+    },
+    mapInput: (input) => {
+      const table = typeof input.table === 'string' ? input.table.trim() : '';
+      if (!table || !/^[a-zA-Z0-9_]+$/.test(table)) {
+        throw new Error('Missing or invalid parameter "table" (must be alphanumeric/underscore)');
+      }
+      let fields: Record<string, any> = {};
+      if (input.fields) {
+        fields = typeof input.fields === 'string' ? JSON.parse(input.fields) : input.fields;
+      }
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
+        throw new Error('Missing required parameter "fields": provide at least one field value for the new record');
+      }
+      return {
+        command: 'create_record',
+        instance: input.instance,
+        params: { table, fields },
+      };
+    },
+  },
+
+  // 16. REST Request (generic escape hatch)
+  {
+    name: 'snu_rest_request',
+    agentCommand: 'rest_request',
+    description:
+      'Call any ServiceNow REST endpoint through the authenticated browser session. The escape hatch for what the typed tools do not cover (Attachment API, Aggregate API, Import Set API, scripted REST APIs). GET is always allowed; POST/PUT/PATCH need the restRequest gate and DELETE needs the deleteRecords gate. For a plain record insert prefer snu_create_record, which wraps this and returns a record-shaped result.',
+    cliCommand: 'rest',
+    cliUsage: "snu rest <endpoint> [--method <M>] [--body <json>] [--query <k=v,k=v>] [--instance <i>] [--json]",
+    cliOptions: {
+      method: { type: 'string', short: 'm', description: 'HTTP method (default: GET)' },
+      body: { type: 'string', short: 'b', description: 'JSON request body for POST/PUT/PATCH' },
+      query: { type: 'string', short: 'q', description: 'Query parameters as k=v,k=v' },
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        endpoint: { type: 'string', description: "Instance-relative path beginning with '/' (e.g. /api/now/table/incident)" },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], default: 'GET', description: 'HTTP method' },
+        body: { type: 'object', description: 'JSON request body for POST/PUT/PATCH' },
+        queryParams: { type: 'object', description: 'Query-string parameters as a flat object' },
+        instance: { type: 'string', description: 'Target instance name/folder (optional)' },
+      },
+      required: ['endpoint'],
+      additionalProperties: false,
+    },
+    mapInput: (input) => {
+      const endpoint = typeof input.endpoint === 'string' ? input.endpoint.trim() : '';
+      if (!endpoint.startsWith('/')) {
+        throw new Error("Missing/invalid 'endpoint': must be an instance-relative path beginning with '/' (e.g. /api/now/table/incident)");
+      }
+      const method = String(input.method || 'GET').toUpperCase();
+      if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        throw new Error('Invalid method. Must be one of: GET, POST, PUT, PATCH, DELETE');
+      }
+      let body = input.body;
+      if (typeof body === 'string' && body.trim()) body = JSON.parse(body);
+      let queryParams = input.queryParams;
+      if (typeof queryParams === 'string' && queryParams.trim()) queryParams = parseQueryPairs(queryParams);
+      return {
+        command: 'rest_request',
+        instance: input.instance,
+        params: {
+          endpoint,
+          method,
+          body: body && typeof body === 'object' ? body : undefined,
+          queryParams: queryParams && typeof queryParams === 'object' ? queryParams : undefined,
         },
       };
     },

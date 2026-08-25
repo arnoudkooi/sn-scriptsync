@@ -5,7 +5,7 @@ import * as path from 'path';
 import { TOOLS } from '../registry.js';
 import { VERSION } from '../cli/index.js';
 
-// The canonical list of 25 Agent API commands supported by the ScriptSync bridge (v7)
+// The canonical list of Agent API commands supported by the ScriptSync bridge (v7)
 const BRIDGE_COMMANDS = new Set([
   'check_connection',
   'get_sync_status',
@@ -18,6 +18,7 @@ const BRIDGE_COMMANDS = new Set([
   'update_record',
   'update_record_batch',
   'create_artifact',
+  'create_record',
   'get_record',
   'delete_record',
   'get_table_metadata',

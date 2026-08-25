@@ -5,11 +5,46 @@ import { TOOLS, getToolByName } from '../registry.js';
 import { ScriptSyncClient, discoverBridge } from '../client.js';
 import { StandaloneBridge } from '../server/standalone.js';
 
+// Surfaced verbatim by MCP clients. This is the only guidance an agent that
+// reaches the bridge over MCP ever sees: it has no access to the ScriptSync
+// agent rules unless it happens to be working inside a sync workspace. Keep it
+// short and keep it about routing (which tool for which job), not features.
+const SERVER_INSTRUCTIONS = [
+  'These tools drive a live ServiceNow instance through the user\'s authenticated browser session.',
+  '',
+  'Start of session: call snu_get_context once. It reports the connected instance, helper tab state,',
+  'license tier and which permission gates are open. Every ServiceNow-touching tool needs the SN Utils',
+  'helper tab open in the browser; without it you get E_BROWSER_DISCONNECTED, which is a setup step for',
+  'the user, not a tool failure.',
+  '',
+  'Choosing a write tool:',
+  '- Plain data row (incident, task, sys_user, sys_user_group, cmdb_ci, sc_request, ...) -> snu_create_record.',
+  '- Scriptable artifact (Script Include, Business Rule, Client Script, UI Action, widget) -> snu_create_artifact,',
+  '  which also tracks the record in the local workspace.',
+  '- Changing a field on an existing record -> snu_update_record.',
+  '- Anything the typed tools do not cover (Attachment API, Aggregate API, scripted REST) -> snu_rest_request.',
+  '',
+  'Do not create or edit records by driving the browser UI. snu_navigate, snu_set_form_field and',
+  'snu_run_ui_action exist to exercise real form behaviour (client scripts, UI policies, mandatory-field',
+  'handling) and to show the user something on screen. Using them as a way to write data is slow, silently',
+  'lossy, and leaves half-filled forms behind when a step fails.',
+  '',
+  'E_DISABLED means a permission gate is off. It is a deliberate user setting, not an obstacle to work',
+  'around: report which gate and how to enable it, then stop. Never substitute a different mechanism',
+  '(browser UI, background script) to achieve a write the user has gated off.',
+  '',
+  'After any write, the returned record is the confirmation. Read it back with snu_get_record only when',
+  'you need fields the write did not return.',
+].join('\n');
+
 export async function createMcpServer(): Promise<McpServer> {
-  const server = new McpServer({
-    name: 'sn-utils',
-    version: '0.1.0',
-  });
+  const server = new McpServer(
+    {
+      name: 'sn-utils',
+      version: '0.1.0',
+    },
+    { instructions: SERVER_INSTRUCTIONS }
+  );
 
   const client = new ScriptSyncClient();
 
@@ -263,6 +298,34 @@ export async function createMcpServer(): Promise<McpServer> {
     }
   );
 
+  // 15. Create Record
+  server.tool(
+    'snu_create_record',
+    'Create a record on any ServiceNow table by inserting it through the REST API (POST /api/now/table/<table>). This is the correct way to create ordinary data rows: incidents, tasks, users, groups, CMDB CIs, catalog items, anything whose display field is not "name". The inserted record is returned in the response, so no separate read-back is needed. Prefer this over driving the browser UI (navigate + set field + run UI action), which is slower and far more fragile. Covered by the same createArtifacts permission as the other create commands, which is on by default. For scriptable artifacts (Script Include, Business Rule, ...) use snu_create_artifact instead so the record is tracked locally.',
+    {
+      table: z.string().describe('Table to insert into (e.g. incident, sc_task, sys_user)'),
+      fields: z
+        .record(z.any())
+        .describe('Field-value dictionary for the new record. Use raw values (sys_id for reference fields, choice value for choice fields), not display labels.'),
+      instance: z.string().optional().describe('Target instance name/folder (optional)'),
+    },
+    async (args) => executeTool('snu_create_record', args)
+  );
+
+  // 16. REST Request
+  server.tool(
+    'snu_rest_request',
+    'Call any ServiceNow REST endpoint through the authenticated browser session. The escape hatch for what the typed tools do not cover (Attachment API, Aggregate API, Import Set API, scripted REST APIs). GET is always allowed; POST/PUT/PATCH need the restRequest gate and DELETE needs the deleteRecords gate. For a plain record insert prefer snu_create_record, which wraps this and returns a record-shaped result.',
+    {
+      endpoint: z.string().describe("Instance-relative path beginning with '/' (e.g. /api/now/table/incident)"),
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET').optional().describe('HTTP method'),
+      body: z.record(z.any()).optional().describe('JSON request body for POST/PUT/PATCH'),
+      queryParams: z.record(z.string()).optional().describe('Query-string parameters as a flat object'),
+      instance: z.string().optional().describe('Target instance name/folder (optional)'),
+    },
+    async (args) => executeTool('snu_rest_request', args)
+  );
+
   return server;
 }
 
@@ -289,5 +352,5 @@ export async function startMcpServer(): Promise<void> {
   const server = await createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[snu-mcp] Connected on stdio. 14 tools registered.');
+  console.error(`[snu-mcp] Connected on stdio. ${TOOLS.length} tools registered.`);
 }

@@ -131,7 +131,7 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               endpoints (GET /api/instructions, /api/skills[/<name>]).
 //   v19 -> v20: added pull_records (and pull_artifacts alias) for bulk and single
 //               artifact pulling to canonical local workspace files.
-const INSTRUCTIONS_VERSION = 20;
+const INSTRUCTIONS_VERSION = 21;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -143,7 +143,7 @@ const SKILL_MARKER = `<!-- SN-SCRIPTSYNC:SKILL apiVersion=${INSTRUCTIONS_VERSION
 // is also the canonical command order inside the skills that own them.
 const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
 	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'get_review_result', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
-	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_artifact', 'delete_record'] },
+	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_record', 'create_artifact', 'delete_record'] },
 	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'create_table', 'add_column', 'delete_application'] },
 	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote', 'pull_records'] },
 	{ label: 'Queries', cmds: ['query_records', 'get_parent_options', 'code_search'] },
@@ -169,7 +169,8 @@ const EVERYDAY: Array<{ cmd: string; blurb: string }> = [
 	{ cmd: 'pull_records', blurb: 'Pull records from ServiceNow and write code fields to local files with _map.json sync.' },
 	{ cmd: 'get_record', blurb: 'Fetch one record by table + sys_id (e.g. confirm a write).' },
 	{ cmd: 'update_record', blurb: 'Update fields on an existing record (pass `await:true` to read back).' },
-	{ cmd: 'create_artifact', blurb: 'Create a record incl. config fields via payload (not loose files).' },
+	{ cmd: 'create_record', blurb: 'Create a plain data row (incident, task, user) — never drive the form UI to do this.' },
+	{ cmd: 'create_artifact', blurb: 'Create a scriptable artifact incl. config fields via payload (not loose files).' },
 	{ cmd: 'navigate_and_screenshot', blurb: 'Open a page and capture it in one call to verify state.' },
 	{ cmd: 'code_search', blurb: 'Find existing code across script tables — `term` required (Pro). See the snu-agent-api skill for params/response.' },
 ];

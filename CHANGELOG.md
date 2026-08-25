@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+## 4.8.5 (2026-08-25)
+
+**Agents can create ordinary records again (`@snutils/snu` 0.2.1).**
+- **New `create_record` command, `snu record create`, and the `snu_create_record` MCP tool:** creates a plain data row (incident, task, `sys_user`, CMDB CI, anything whose display field is not `name`) and returns the inserted record, so the write needs no separate read-back. It shares the **Create Artifacts** permission with the other `create_*` commands and is therefore available by default. Until now neither the CLI nor the MCP surface had a record-creation tool at all, so agents that needed one fell back to filling in the browser form.
+- **New `snu rest` / `snu_rest_request`:** call any ServiceNow endpoint through the authenticated browser session, for what the typed commands do not cover (Attachment, Aggregate, Import Set, scripted REST APIs).
+- **`rest_request` now works without VS Code:** the standalone `snu` bridge implements it instead of answering `E_UNKNOWN_COMMAND`, so `SNU_ALLOW_REST_REQUEST` finally controls something in standalone mode.
+- **Fixed: a blocked command named a setting that does not exist.** `E_DISABLED` suggested `--allow-rest-request` (never a flag) and `SNU_ALLOW_RESTREQUEST` (never read); it now names the real variable for each gate, points at the helper tab's Agent Access tab for per-instance gates, and tells the agent to ask rather than route around the gate.
+- **MCP clients now receive routing instructions** covering which tool creates which kind of record and why the browser tools are not a write path.
+
 ## 4.8.4 (2026-08-25)
 
 - **Fixed: extension failed to activate after updating to 4.8.3** (no sn-scriptsync indicator in the VS Code status bar) — the 4.8.3 package was missing its runtime dependencies.

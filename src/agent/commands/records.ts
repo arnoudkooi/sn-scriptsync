@@ -301,6 +301,65 @@ const create_artifact: CommandHandler = {
 	},
 };
 
+const create_record: CommandHandler = {
+	name: 'create_record',
+	requiresBrowser: true,
+	docs: {
+		summary: 'Insert a plain data row on any table (incident, task, sys_user, cmdb_ci). Use create_artifact instead for scriptable artifacts, which are also tracked in the local workspace.',
+		request: {
+			command: 'create_record',
+			id: 'crec_1',
+			params: { table: 'incident', fields: { short_description: 'Printer on 3rd floor is down', urgency: '2' } },
+		},
+	},
+	async handle(ctx, params) {
+		const { table, fields } = params || {};
+		if (!table || typeof table !== 'string' || !/^[a-zA-Z0-9_]+$/.test(table.trim())) {
+			throw new AgentError('E_INVALID_PARAMS', 'Missing or invalid param "table" (must be alphanumeric/underscore)');
+		}
+		if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
+			throw new AgentError('E_INVALID_PARAMS', 'Missing required param "fields": provide at least one field value for the new record');
+		}
+
+		if (ctx.reviewWritesEnabled() && !isReviewBypass(params)) {
+			return ctx.stageWrite({
+				label: `create ${table}`,
+				description: `New row on ${table}`,
+				preview: JSON.stringify(fields, null, 2),
+				previewLanguage: 'json',
+				fileName: `${table}.json`,
+			});
+		}
+
+		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
+		const { data } = await restRequest(ctx, instanceSettings, {
+			endpoint: `/api/now/table/${table.trim()}`,
+			method: 'POST',
+			body: fields,
+			queryParams: { sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true' },
+		});
+
+		// POST /api/now/table returns the inserted row, so the write is already
+		// verified: no follow-up get_record needed.
+		const record = data?.result ?? null;
+		const readField = (name: string): string => {
+			const value = record?.[name];
+			if (value && typeof value === 'object') return String(value.value ?? value.display_value ?? '');
+			return value === undefined || value === null ? '' : String(value);
+		};
+		const sys_id = readField('sys_id');
+		ctx.log(`Agent API: Created ${table}/${sys_id || '(no sys_id returned)'}`);
+
+		return {
+			created: true,
+			table,
+			sys_id,
+			name: readField('number') || readField('name') || readField('sys_name') || readField('short_description'),
+			record,
+		};
+	},
+};
+
 const get_record: CommandHandler = {
 	name: 'get_record',
 	requiresBrowser: true,
@@ -755,6 +814,7 @@ export const recordsCommands: CommandHandler[] = [
 	update_record,
 	update_record_batch,
 	create_artifact,
+	create_record,
 	get_record,
 	delete_record,
 	get_table_metadata,

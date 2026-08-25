@@ -127,9 +127,14 @@ When more than one instance is connected, tell the agent which instance to use o
 | Connection | `snu_get_context` | Inspect the bridge, helper, instances, license, and permission gates. |
 | Schema and search | `snu_get_schema`, `snu_code_search` | Inspect table metadata and search server-side code. Code Search requires SN Utils Pro. |
 | Record reads | `snu_query_records`, `snu_get_record` | Query tables or fetch a record by `sys_id`. |
-| Record writes | `snu_create_artifact`, `snu_update_record`, `snu_delete_record` | Create scriptable artifacts, update fields, or delete a record. |
+| Record writes | `snu_create_record`, `snu_create_artifact`, `snu_update_record`, `snu_delete_record` | Create data rows or scriptable artifacts, update fields, or delete a record. |
+| Escape hatch | `snu_rest_request` | Call any ServiceNow REST endpoint through the authenticated browser session. |
 | Server execution | `snu_run_background_script` | Run server-side JavaScript and return its captured output. |
 | Browser and forms | `snu_get_form_state`, `snu_set_form_field`, `snu_run_ui_action`, `snu_navigate`, `snu_take_screenshot` | Inspect and operate the connected ServiceNow browser tab. |
+
+**Choosing a write tool.** `snu_create_record` inserts a plain data row (incident, task, `sys_user`, CMDB CI) and returns the inserted record. `snu_create_artifact` is for scriptable artifacts (Script Include, Business Rule, widget) and also tracks the record in the local workspace. Both sit on the same Create Artifacts permission, which is on by default. The browser tools exist to exercise real form behaviour and to show something on screen; they are not a record-writing path.
+
+The MCP server also publishes routing instructions that most clients surface to the agent, so an agent that only ever sees the tool list still knows which tool creates a record.
 
 ### Permissions and human review
 
@@ -217,6 +222,10 @@ snu query incident --json | jq '.records[].number'
 # Fetch record by sys_id
 snu record get incident <sys_id>
 
+# Create a data row (field=value pairs, or --fields with a JSON payload)
+snu record create incident "short_description=Printer on 3rd floor is down" urgency=2
+snu record create sys_user --fields '{"user_name":"jdoe","first_name":"Jane","last_name":"Doe"}'
+
 # Update record field (direct value, from file, or piped via stdin)
 snu record update incident <sys_id> short_description --value "Database latency resolved"
 snu record update sys_script_include <sys_id> script --file ./my_script.js
@@ -229,6 +238,16 @@ snu artifact create sys_script_include MyNewHelper --fields '{"script":"var MyNe
 snu record delete incident <sys_id> --dry-run
 snu record delete incident <sys_id> --confirm
 ```
+
+### Generic REST Calls
+```bash
+# Any endpoint the typed commands do not cover, through the browser session
+snu rest /api/now/table/incident --query "sysparm_limit=1,sysparm_query=active=true"
+snu rest /api/now/attachment/<sys_id>/file --method GET
+snu rest /api/now/table/incident --method POST --body '{"short_description":"Created from the CLI"}'
+```
+
+`GET` is always allowed. `POST`/`PUT`/`PATCH` need the REST Request gate and `DELETE` needs the Delete Records gate; `snu context` shows both the host and per-instance state.
 
 ### Background Scripts
 ```bash

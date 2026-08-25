@@ -4,8 +4,10 @@ Make an arbitrary ServiceNow REST call through the connected browser session (re
 
 **Gating:**
 - `GET` — always allowed.
-- `POST` / `PUT` / `PATCH` — require `sn-scriptsync.restRequest.enabled`.
-- `DELETE` — requires `sn-scriptsync.deleteRecords.enabled`.
+- `POST` / `PUT` / `PATCH` — require `sn-scriptsync.restRequest.enabled` (VS Code) or `SNU_ALLOW_REST_REQUEST=1` (standalone `snu` host).
+- `DELETE` — requires `sn-scriptsync.deleteRecords.enabled` (VS Code) or `SNU_ALLOW_DELETE_RECORDS=1` (standalone `snu` host).
+
+Both hosts implement this command. Over MCP it is also reachable as the `snu_rest_request` tool, and a plain record insert has a dedicated wrapper, `snu_create_record`, that returns the inserted record instead of a raw HTTP envelope.
 
 **Request:**
 ```json

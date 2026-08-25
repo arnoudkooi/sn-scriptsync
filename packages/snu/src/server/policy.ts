@@ -49,7 +49,12 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
       return { risk: 'execute', gates: [], review: 'never' };
     }
 
+    // create_record sits with the other create_* commands on purpose: from the
+    // user's side "let the agent create things on my instance" is one decision,
+    // and it would be odd for filing an incident to need a stricter permission
+    // than installing a Script Include.
     case 'create_artifact':
+    case 'create_record':
     case 'create_application':
     case 'create_table':
     case 'add_column':

@@ -57,8 +57,22 @@ export function formatTable(headers: string[], rows: string[][]): string {
   return [headerLine, dividerLine, ...formattedRows].join('\n');
 }
 
-export function formatHumanOutput(command: string, result: any): string {
+export function formatHumanOutput(command: string, result: any, cliCommand?: string): string {
   if (!result) return `${ANSI.gray}(empty result)${ANSI.reset}`;
+
+  // Raw REST passthrough: show the HTTP status, then the payload. Only `snu
+  // rest` lands here; `snu record create` rides the same bridge command but is
+  // reshaped into a {created, sys_id} envelope first.
+  if (cliCommand === 'rest') {
+    const status = result.status;
+    const badge =
+      typeof status === 'number' && status >= 200 && status < 300
+        ? `${ANSI.green}${status}${ANSI.reset}`
+        : `${ANSI.yellow}${status ?? '?'}${ANSI.reset}`;
+    const payload = result.data === undefined ? result : result.data;
+    const body = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    return `\n${ANSI.bold}HTTP ${badge}${ANSI.reset}\n${body}\n`;
+  }
 
   // Staged Write Response
   if (result.staged === true) {
@@ -246,7 +260,8 @@ export function formatHumanOutput(command: string, result: any): string {
 
   // 6. Generic Object/Status Responses
   if (result.created) {
-    return `\n${ANSI.green}✓ Created ${result.table || 'artifact'}:${ANSI.reset} ${result.name || result.sys_id} (${result.sys_id})\n`;
+    const label = result.name ? `${result.name} (${result.sys_id})` : String(result.sys_id || '');
+    return `\n${ANSI.green}✓ Created ${result.table || 'artifact'}:${ANSI.reset} ${label}\n`;
   }
   if (result.updated) {
     return `\n${ANSI.green}✓ Updated record:${ANSI.reset} ${result.sys_id} (${result.field || 'field'})\n`;

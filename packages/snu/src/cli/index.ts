@@ -51,9 +51,11 @@ export function printHelp(): void {
 
 \x1b[1mRECORD & ARTIFACT COMMANDS:\x1b[0m
   record get <table> <sys_id>         Fetch a record by sys_id
+  record create <table> [f=v ...]     Create a data row (incident, task, user) via the REST API
   record update <table> <sys_id> <f>  Update a record field (--value <v>, --file <p>, or stdin)
   record delete <table> <sys_id>      Delete a record (--confirm or --dry-run)
   artifact create <table> <name>      Create a scriptable artifact (Script Include, etc.)
+  rest <endpoint>                     Call any REST endpoint (--method, --body, --query)
 
 \x1b[1mBROWSER COMMANDS:\x1b[0m
   browser form                        Read live form table, sys_id, and fields via g_form
@@ -394,6 +396,43 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         inputData.name = positionals[1];
         break;
 
+      case 'record create': {
+        if (!positionals[0]) {
+          throw new ScriptSyncClientError('Usage: snu record create <table> [field=value ...] [--fields <json>]', 'E_INVALID_PARAMS');
+        }
+        inputData.table = positionals[0];
+        const fields: Record<string, any> = {};
+        if (values.fields) {
+          try {
+            Object.assign(fields, JSON.parse(String(values.fields)));
+          } catch (e: any) {
+            throw new ScriptSyncClientError(`--fields is not valid JSON: ${e?.message || e}`, 'E_INVALID_PARAMS');
+          }
+        }
+        for (const token of positionals.slice(1)) {
+          const eqIdx = token.indexOf('=');
+          if (eqIdx <= 0) {
+            throw new ScriptSyncClientError(`Invalid field token '${token}'. Expected field=value.`, 'E_INVALID_PARAMS');
+          }
+          fields[token.slice(0, eqIdx)] = token.slice(eqIdx + 1);
+        }
+        if (Object.keys(fields).length === 0) {
+          throw new ScriptSyncClientError('No field values given: pass field=value pairs or --fields <json>', 'E_INVALID_PARAMS');
+        }
+        inputData.fields = fields;
+        break;
+      }
+
+      case 'rest':
+        if (!positionals[0]) {
+          throw new ScriptSyncClientError("Usage: snu rest <endpoint> [--method <M>] [--body <json>] [--query <k=v,k=v>]", 'E_INVALID_PARAMS');
+        }
+        inputData.endpoint = positionals[0];
+        if (values.method) inputData.method = String(values.method);
+        if (values.body !== undefined) inputData.body = values.body;
+        if (values.query !== undefined) inputData.queryParams = values.query;
+        break;
+
       case 'record update':
         if (positionals.length < 2) {
           throw new ScriptSyncClientError('Usage: snu record update <table> <sys_id> <field> (--value <v> | --file <path> | stdin)', 'E_INVALID_PARAMS');
@@ -500,7 +539,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     if (isJsonMode) {
       outputJson(result);
     } else {
-      process.stdout.write(formatHumanOutput(tool.agentCommand, result));
+      process.stdout.write(formatHumanOutput(tool.agentCommand, result, tool.cliCommand));
     }
     await printUpdateNotice(updateNotice);
   } catch (err: any) {

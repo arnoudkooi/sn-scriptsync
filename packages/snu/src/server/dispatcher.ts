@@ -11,6 +11,42 @@ import { computePayloadHash } from './canonical.js';
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
 
+// Human labels + the environment variable each gate is *actually* read from in
+// config.ts. Deriving the variable name from the camelCase gate key produces
+// SNU_ALLOW_RESTREQUEST, which nothing reads, so an agent told to set it hits
+// the same wall twice and starts looking for a way around the gate. Keep these
+// tables in step with resolveStandaloneConfig().
+const GATE_LABELS: Record<keyof SecurityGates, string> = {
+  backgroundScripts: 'Background Scripts',
+  deleteRecords: 'Delete Records',
+  createArtifacts: 'Create Artifacts',
+  browserDebugger: 'Browser Debugger',
+  restRequest: 'REST Request API',
+};
+
+const REST_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+// Mirrors codeForRest() in the VS Code agent so both hosts report the same
+// code for the same HTTP failure.
+function codeForRestStatus(status: number | undefined, message: string): string {
+  if (status === 404) return 'E_NOT_FOUND';
+  if (status === 409) return 'E_REFERENCE_INTEGRITY';
+  if (status === 401 || status === 403) return 'E_ACL';
+  const lower = (message || '').toLowerCase();
+  if (lower.includes('cannot delete') || lower.includes('referenc') || lower.includes('cascade')) {
+    return 'E_REFERENCE_INTEGRITY';
+  }
+  return 'E_COMMAND_FAILED';
+}
+
+const GATE_ENV_VARS: Record<keyof SecurityGates, string> = {
+  backgroundScripts: 'SNU_ALLOW_BACKGROUND_SCRIPTS',
+  deleteRecords: 'SNU_ALLOW_DELETE_RECORDS',
+  createArtifacts: 'SNU_ALLOW_CREATE_ARTIFACTS',
+  browserDebugger: 'SNU_ALLOW_BROWSER_DEBUGGER',
+  restRequest: 'SNU_ALLOW_REST_REQUEST',
+};
+
 // Steps a user must take to (re)connect the browser helper tab. Rendered by
 // the CLI as a friendly block and relayed verbatim by the MCP server so
 // agents guide the user instead of reporting a raw error.
@@ -590,10 +626,15 @@ export class StandaloneDispatcher {
       for (const gateName of policy.gates) {
         // A. Check Host Gate (Fail-closed standalone authority)
         if (!this.config.gates[gateName]) {
-          const label = gateName === 'backgroundScripts' ? 'Background Scripts' : gateName === 'deleteRecords' ? 'Delete Records' : gateName;
+          const label = GATE_LABELS[gateName] || gateName;
+          const envVar = GATE_ENV_VARS[gateName];
           throw Object.assign(
-            new Error(`${label} is disabled in standalone host config. Pass --allow-${gateName.replace(/[A-Z]/g, (l) => '-' + l.toLowerCase())} or set SNU_ALLOW_${gateName.toUpperCase()}=1.`),
-            { code: 'E_DISABLED' }
+            new Error(
+              `${label} is disabled in this snu host config, so ${req.command} cannot run. ` +
+              `Turn it on with ${envVar}=1 in the MCP server's env block, or "${gateName}": true in ~/.sn-scriptsync/settings.json, then restart snu. ` +
+              `This is the user's decision to make: ask them to enable it rather than routing around it through the browser UI.`
+            ),
+            { code: 'E_DISABLED', details: { gate: gateName, envVar, source: 'host' } }
           );
         }
 
@@ -602,10 +643,14 @@ export class StandaloneDispatcher {
         if (helperState.capabilities?.instanceSecurityGates && instanceOrigin) {
           const helperGateMode = this.ws.getInstanceGate(instanceUrl, gateName);
           if (helperGateMode === 'off' || helperGateMode === false) {
-            const label = gateName === 'backgroundScripts' ? 'Background Scripts' : gateName === 'deleteRecords' ? 'Delete Records' : gateName;
+            const label = GATE_LABELS[gateName] || gateName;
             throw Object.assign(
-              new Error(`This instance (${instanceOrigin}) does not permit ${label.toLowerCase()} in SN Utils helper.`),
-              { code: 'E_DISABLED' }
+              new Error(
+                `This instance (${instanceOrigin}) does not permit ${label} in the SN Utils helper, so ${req.command} cannot run. ` +
+                `The user can turn it on in the helper tab's Agent Access tab for this instance. ` +
+                `This is the user's decision to make: ask them to enable it rather than routing around it through the browser UI.`
+              ),
+              { code: 'E_DISABLED', details: { gate: gateName, instanceOrigin, source: 'instance' } }
             );
           }
         }
@@ -915,6 +960,66 @@ export class StandaloneDispatcher {
         };
       }
 
+      // Create Record (plain data row). Same insert as create_artifact minus the
+      // name requirement and the local _map.json tracking, which only makes
+      // sense for artifacts that have a file in the workspace.
+      if (req.command === 'create_record') {
+        const rawTable = req.params?.table;
+        if (!rawTable || typeof rawTable !== 'string' || !/^[a-zA-Z0-9_]+$/.test(rawTable.trim())) {
+          throw Object.assign(new Error('Missing or invalid param "table" (must be alphanumeric/underscore)'), { code: 'E_INVALID_PARAMS' });
+        }
+        const table = rawTable.trim();
+        const fields = req.params?.fields;
+        if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
+          throw Object.assign(
+            new Error('Missing required param "fields": provide at least one field value for the new record'),
+            { code: 'E_INVALID_PARAMS' }
+          );
+        }
+
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: 'agentRestApi',
+          agentRequestId: correlationId,
+          endpoint: `/api/now/table/${table}`,
+          method: 'POST',
+          body: fields,
+          queryParams: { sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true' },
+          instance: inst.settings,
+          appName: 'SN Utils CLI',
+        });
+        const res = await pendingPromise;
+        if (res.success === false) {
+          const message = res.error || `Failed to create a record on ${table}`;
+          throw Object.assign(new Error(message), {
+            code: res.code || codeForRestStatus(res.status, message),
+            details: { status: res.status, detail: res.detail ?? null },
+          });
+        }
+
+        // POST /api/now/table returns the inserted row, so the write is already
+        // verified: no follow-up get_record needed.
+        const record = res.data?.result ?? null;
+        const readField = (name: string): string => {
+          const value = record?.[name];
+          if (value && typeof value === 'object') return String(value.value ?? value.display_value ?? '');
+          return value === undefined || value === null ? '' : String(value);
+        };
+        return {
+          id: req.id,
+          command: req.command,
+          status: 'success',
+          timestamp: Date.now(),
+          result: {
+            created: true,
+            table,
+            sys_id: readField('sys_id'),
+            name: readField('number') || readField('name') || readField('sys_name') || readField('short_description'),
+            record,
+          },
+        };
+      }
+
       // Schema Metadata
       if (req.command === 'get_table_metadata') {
         const table = req.params?.table;
@@ -1154,6 +1259,52 @@ export class StandaloneDispatcher {
             warnings,
             records: pulledRecordsList,
           },
+        };
+      }
+
+      // Generic REST passthrough. The escape hatch the typed commands are built
+      // on: the browser helper's agentRestApi action has always accepted every
+      // method plus a body, so this needs no extension-side change. Gating is
+      // handled above by getCommandPolicy (GET open, POST/PUT/PATCH behind
+      // restRequest, DELETE behind deleteRecords).
+      if (req.command === 'rest_request') {
+        const endpoint = req.params?.endpoint;
+        if (!endpoint || typeof endpoint !== 'string' || !endpoint.startsWith('/')) {
+          throw Object.assign(
+            new Error("Missing/invalid 'endpoint' (must be an instance-relative path beginning with '/', e.g. /api/now/table/incident)"),
+            { code: 'E_INVALID_PARAMS' }
+          );
+        }
+        const method = String(req.params?.method || 'GET').toUpperCase();
+        if (!REST_METHODS.includes(method)) {
+          throw Object.assign(new Error(`Invalid method. Must be one of: ${REST_METHODS.join(', ')}`), { code: 'E_INVALID_PARAMS' });
+        }
+
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: 'agentRestApi',
+          agentRequestId: correlationId,
+          endpoint,
+          method,
+          body: req.params?.body,
+          queryParams: req.params?.queryParams && typeof req.params.queryParams === 'object' ? req.params.queryParams : undefined,
+          instance: inst.settings,
+          appName: 'SN Utils CLI',
+        });
+        const res = await pendingPromise;
+        if (res.success === false) {
+          const message = res.error || 'REST request failed';
+          throw Object.assign(new Error(message), {
+            code: res.code || codeForRestStatus(res.status, message),
+            details: { status: res.status, detail: res.detail ?? null },
+          });
+        }
+        return {
+          id: req.id,
+          command: req.command,
+          status: 'success',
+          timestamp: Date.now(),
+          result: { status: res.status, data: res.data },
         };
       }
 
