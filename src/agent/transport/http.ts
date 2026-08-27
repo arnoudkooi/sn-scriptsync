@@ -89,42 +89,53 @@ function safeSkillName(name: string): boolean {
 }
 
 async function probeAndYieldStandalone(fixedPort: number): Promise<void> {
+	// Candidate HTTP endpoints for a standalone bridge: the fixed port, plus
+	// whatever the port files claim — a bridge whose HTTP bind lost the race
+	// for the fixed port sits on an ephemeral port only the files know about.
+	const ports: number[] = [fixedPort];
+	const fileTokens = new Map<number, string>(); // pid -> token
 	try {
-		const controller = new AbortController();
-		const t = setTimeout(() => controller.abort(), 800);
-		const res = await fetch(`http://127.0.0.1:${fixedPort}/api/health`, { signal: controller.signal });
-		clearTimeout(t);
-		if (res.ok) {
-			const health: any = await res.json();
-			if (health?.hostKind === 'standalone') {
-				let token = '';
-				try {
-					const wsPortFile = getPortFilePath();
-					if (wsPortFile && fs.existsSync(wsPortFile)) {
-						token = JSON.parse(fs.readFileSync(wsPortFile, 'utf8')).token;
-					} else {
-						const gPortFile = globalPortFilePath();
-						if (fs.existsSync(gPortFile)) {
-							token = JSON.parse(fs.readFileSync(gPortFile, 'utf8')).token;
-						}
-					}
-				} catch {}
-				if (token) {
-					const yieldCtrl = new AbortController();
-					const yt = setTimeout(() => yieldCtrl.abort(), 1000);
-					await fetch(`http://127.0.0.1:${fixedPort}/api`, {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json', 'X-Agent-Token': token },
-						body: JSON.stringify({ id: 'vscode_yield', command: 'yield' }),
-						signal: yieldCtrl.signal,
-					});
-					clearTimeout(yt);
-					await new Promise((r) => setTimeout(r, 150));
+		const candidates = [getPortFilePath(), globalPortFilePath()]
+			.filter((p): p is string => !!p && fs.existsSync(p));
+		for (const portFile of candidates) {
+			try {
+				const data = JSON.parse(fs.readFileSync(portFile, 'utf8'));
+				if (typeof data?.port === 'number' && !ports.includes(data.port)) ports.push(data.port);
+				if (typeof data?.pid === 'number' && typeof data?.token === 'string' && !fileTokens.has(data.pid)) {
+					fileTokens.set(data.pid, data.token);
 				}
-			}
+			} catch { /* corrupt candidate — skip */ }
 		}
-	} catch {
-		// Ignore if nothing responds
+	} catch { /* ignore */ }
+
+	for (const port of ports) {
+		try {
+			const controller = new AbortController();
+			const t = setTimeout(() => controller.abort(), 800);
+			const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: controller.signal });
+			clearTimeout(t);
+			if (!res.ok) continue;
+			const health: any = await res.json();
+			if (health?.hostKind !== 'standalone') continue;
+			// A stale workspace port file can coexist with the live global
+			// standalone file. Select the token belonging to the process we
+			// just probed instead of blindly preferring the workspace copy.
+			const token = fileTokens.get(health.pid) || '';
+			if (!token) continue;
+			const yieldCtrl = new AbortController();
+			const yt = setTimeout(() => yieldCtrl.abort(), 1000);
+			await fetch(`http://127.0.0.1:${port}/api`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'X-Agent-Token': token },
+				body: JSON.stringify({ id: 'vscode_yield', command: 'yield' }),
+				signal: yieldCtrl.signal,
+			});
+			clearTimeout(yt);
+			await new Promise((r) => setTimeout(r, 150));
+			return;
+		} catch {
+			// Nothing (or nothing healthy) on this candidate — try the next.
+		}
 	}
 }
 

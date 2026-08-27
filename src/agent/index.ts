@@ -5,6 +5,7 @@ export { setSyncStateProvider, SyncState } from './commands/connection';
 export { dispatchAgentCommand } from './dispatcher';
 export { AGENT_API_VERSION, getPortFilePath, setGlobalPortFileEnabled } from './portFile';
 export { startAgentHttpServer, stopAgentHttpServer, HttpServerState, AGENT_CONNECT_SNIPPET } from './transport/http';
+export { findPortListener, classifyListener, terminateListener, isPortFree } from './portReclaim';
 export * as pendingRegistry from './pendingRegistry';
 export { AgentError, AgentErrorCode, httpStatusForCode, inferCodeFromMessage } from './errors';
 export { listCommands, commandNames } from './commands';

@@ -79,18 +79,43 @@ export function setGlobalPortFileEnabled(enabled: boolean): void {
 	else removeGlobalPortFile();
 }
 
-function removeGlobalPortFile(): void {
+function pidAlive(pid: number): boolean {
 	try {
-		if (fs.existsSync(globalPortFilePath())) fs.unlinkSync(globalPortFilePath());
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Delete a port file unless it belongs to another live bridge process. A
+ * standalone `snu` bridge (e.g. spawned in-process by an MCP client) registers
+ * itself through these same files; blindly deleting them here used to leave
+ * that bridge undiscoverable — still holding ports 1977/1978 with no way for
+ * `snu stop` or the next ScriptSync start to find it.
+ */
+function removeIfOwnedOrDead(target: string): void {
+	try {
+		if (!fs.existsSync(target)) return;
+		try {
+			const data = JSON.parse(fs.readFileSync(target, 'utf8'));
+			if (typeof data?.pid === 'number' && data.pid !== process.pid && pidAlive(data.pid)) {
+				return; // a live foreign bridge owns this file — leave it discoverable
+			}
+		} catch { /* corrupt file — safe to delete */ }
+		fs.unlinkSync(target);
 	} catch { /* ignore */ }
+}
+
+function removeGlobalPortFile(): void {
+	removeIfOwnedOrDead(globalPortFilePath());
 }
 
 export function deletePortFile(): void {
 	[workspacePortFilePath(), globalPortFilePath()].forEach((target) => {
 		if (!target) return;
-		try {
-			if (fs.existsSync(target)) fs.unlinkSync(target);
-		} catch { /* ignore */ }
+		removeIfOwnedOrDead(target);
 	});
 }
 

@@ -9,6 +9,7 @@ import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { getUpdateNotice, shouldCheckForUpdates } from './updateCheck.js';
 import { inspectBridge, requestStandaloneYield, waitForBridgeExit } from './daemon.js';
+import { findPortListener, reclaimPort, terminateListener, ReclaimResult, PortListener } from './portReclaim.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 import { runSetup } from './setup.js';
 
@@ -37,8 +38,8 @@ export function printHelp(): void {
   snu --mcp                           Start Model Context Protocol (MCP) server on stdio
   snu serve [--port <p>] [--ws <p>]   Start persistent standalone bridge daemon
   snu status                          Show the active local bridge process
-  snu restart                         Gracefully replace a standalone bridge
-  snu stop                            Gracefully stop a standalone bridge
+  snu restart [--force]               Replace a standalone bridge (reclaims a stuck port)
+  snu stop [--force]                  Stop a standalone bridge, even an orphaned one holding port 1978
   snu update [--check]                Check for or install the latest CLI release
   snu setup [options]                 Configure AI clients (Claude Code, Cursor, ...) to use the MCP server
 
@@ -136,6 +137,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       port: { type: 'string' },
       ws: { type: 'string' },
       check: { type: 'boolean' },
+      force: { type: 'boolean' },
     },
     allowPositionals: true,
     strict: false,
@@ -177,10 +179,70 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
 
   // Standalone bridge lifecycle commands.
   if (['serve', 'status', 'stop', 'restart'].includes(lifecycleCommand)) {
+    const forceReclaim = lifecycleValues.force === true;
+    let bridgePorts: number[] = [1978, 1977];
+
+    const describeListener = (l: PortListener): string => {
+      const cmd = (l.command || '').trim();
+      const shortCmd = cmd.length > 90 ? `${cmd.slice(0, 87)}...` : cmd;
+      return `PID ${l.pid}${shortCmd ? ` (${shortCmd})` : ''}`;
+    };
+
+    const explainBlocked = (port: number, result: ReclaimResult): ScriptSyncClientError => {
+      const who = result.listener ? describeListener(result.listener) : 'an unknown process';
+      if (result.status === 'refused_vscode') {
+        return new ScriptSyncClientError(
+          `Port ${port} is held by a ScriptSync bridge inside VS Code (${who}). Stop it from the sn-scriptsync status bar in VS Code instead.`,
+          'E_NOT_STANDALONE'
+        );
+      }
+      if (result.status === 'refused_foreign') {
+        return new ScriptSyncClientError(
+          `Port ${port} is held by ${who}, which does not look like an snu bridge. Re-run with --force to stop it anyway.`,
+          'E_PORT_BUSY'
+        );
+      }
+      return new ScriptSyncClientError(`Could not free port ${port}: ${who} did not stop.`, 'E_STOP_FAILED');
+    };
+
+    // Free the bridge ports from ground truth. Port-file discovery can miss a
+    // live bridge (deleted or clobbered port file — e.g. an MCP host spawned
+    // `snu --mcp` and something else removed the global port file), which used
+    // to leave `snu stop` claiming "already stopped" while the port stayed
+    // bound.
+    const reclaimBridgePorts = async (): Promise<{
+      reclaimed: PortListener[];
+      blocked?: { port: number; result: ReclaimResult };
+    }> => {
+      const reclaimed: PortListener[] = [];
+      const seenPids = new Set<number>();
+      for (const port of bridgePorts) {
+        const result = await reclaimPort(port, { force: forceReclaim });
+        if (result.status === 'free') continue;
+        if (result.status === 'reclaimed') {
+          if (result.listener && !seenPids.has(result.listener.pid)) {
+            seenPids.add(result.listener.pid);
+            reclaimed.push(result.listener);
+          }
+          continue;
+        }
+        return { reclaimed, blocked: { port, result } };
+      }
+      return { reclaimed };
+    };
+
     try {
+      bridgePorts = [parsePort('ws', 1978), parsePort('port', 1977)];
       const status = await inspectBridge({ portFile, cwd: process.cwd() });
 
       if (lifecycleCommand === 'status') {
+        let orphan: PortListener | null = null;
+        if (!status.running) {
+          for (const port of bridgePorts) {
+            orphan = await findPortListener(port);
+            if (orphan) break;
+          }
+        }
         const result = status.running
           ? {
               running: true,
@@ -189,6 +251,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
               httpPort: status.discovery.port,
               apiVersion: status.health.apiVersion,
             }
+          : orphan
+          ? { running: false, orphanListener: { pid: orphan.pid, command: orphan.command } }
           : { running: false };
         if (isJsonMode) outputJson(result);
         else if (status.running) {
@@ -196,6 +260,10 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
           console.log(`  Host:      ${status.health.hostKind || 'unknown'}`);
           console.log(`  PID:       ${status.health.pid}`);
           console.log(`  HTTP API:  http://127.0.0.1:${status.discovery.port}/api\n`);
+        } else if (orphan) {
+          console.log('\nSN Utils Bridge: not discoverable, but a bridge port is still held by');
+          console.log(`  ${describeListener(orphan)}`);
+          console.log('Run `snu stop` to reclaim it.\n');
         } else {
           console.log('\nSN Utils Bridge: not running\n');
         }
@@ -217,26 +285,61 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         return;
       }
 
+      // Graceful stop of a discovered standalone bridge, escalating to a
+      // process-level stop when the yield request fails or times out.
+      const stopDiscoveredBridge = async (): Promise<number> => {
+        const pid = status.running ? status.discovery.pid : 0;
+        if (!status.running) return pid;
+        try {
+          await requestStandaloneYield(status);
+          await waitForBridgeExit(pid);
+        } catch (err: any) {
+          if (err?.code === 'E_NOT_STANDALONE') throw err; // VS Code owns it — never kill.
+          const stopped = await terminateListener(pid, status.discovery.port);
+          if (!stopped) throw err;
+        }
+        return pid;
+      };
+
       if (lifecycleCommand === 'stop') {
         if (!status.running) {
-          if (isJsonMode) outputJson({ stopped: false, alreadyStopped: true });
-          else console.log('\nSN Utils standalone bridge is already stopped.\n');
+          const { reclaimed, blocked } = await reclaimBridgePorts();
+          if (reclaimed.length && !isJsonMode) {
+            console.log('\nStopped a bridge that was holding the port without a valid port file:');
+            reclaimed.forEach((l) => console.log(`  ${describeListener(l)}`));
+            console.log('');
+          }
+          if (blocked) throw explainBlocked(blocked.port, blocked.result);
+          if (isJsonMode) {
+            if (reclaimed.length) outputJson({ stopped: true, reclaimedPids: reclaimed.map((l) => l.pid) });
+            else outputJson({ stopped: false, alreadyStopped: true });
+          } else if (!reclaimed.length) {
+            console.log('\nSN Utils standalone bridge is already stopped.\n');
+          }
           return;
         }
-        const pid = status.discovery.pid;
-        await requestStandaloneYield(status);
-        await waitForBridgeExit(pid);
+        const pid = await stopDiscoveredBridge();
+        // The discovered bridge is down; sweep for any second orphan still
+        // holding a port (e.g. discovery found HTTP but the WS port belongs
+        // to an older instance).
+        await reclaimBridgePorts();
         if (isJsonMode) outputJson({ stopped: true, pid });
         else console.log(`\nStopped SN Utils standalone bridge (PID ${pid}).\n`);
         return;
       }
 
       if (lifecycleCommand === 'restart' && status.running) {
-        const pid = status.discovery.pid;
-        await requestStandaloneYield(status);
-        await waitForBridgeExit(pid);
+        const pid = await stopDiscoveredBridge();
         if (!isJsonMode) console.log(`\nStopped SN Utils standalone bridge (PID ${pid}). Restarting...`);
       }
+
+      // serve / restart: make sure the ports are actually free before binding,
+      // even when discovery saw nothing.
+      const { reclaimed, blocked } = await reclaimBridgePorts();
+      if (reclaimed.length && !isJsonMode) {
+        reclaimed.forEach((l) => console.log(`\nStopped orphaned bridge ${describeListener(l)} to free the port.`));
+      }
+      if (blocked) throw explainBlocked(blocked.port, blocked.result);
 
       await startStandalone();
     } catch (err: any) {

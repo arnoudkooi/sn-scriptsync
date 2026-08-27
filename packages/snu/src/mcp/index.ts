@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { TOOLS, getToolByName } from '../registry.js';
 import { ScriptSyncClient, discoverBridge } from '../client.js';
 import { StandaloneBridge } from '../server/standalone.js';
+import { reclaimPort } from '../cli/portReclaim.js';
 
 // Surfaced verbatim by MCP clients. This is the only guidance an agent that
 // reaches the bridge over MCP ever sees: it has no access to the ScriptSync
@@ -343,9 +344,21 @@ export async function startMcpServer(): Promise<void> {
       err?.code === 'E_STALE_PORT_FILE'
     ) {
       console.error('[snu-mcp] No active VS Code bridge found. Starting in-process standalone bridge on WS 1978 & HTTP 1977...');
-      const standalone = new StandaloneBridge();
-      await standalone.start();
-      console.error('[snu-mcp] In-process standalone bridge active.');
+      // Discovery saw no bridge, yet the WS port may still be held by an
+      // orphaned snu instance (stale/clobbered port file). Reclaim it so this
+      // server takes over instead of crashing on EADDRINUSE. VS Code hosts and
+      // foreign processes are left alone.
+      try {
+        const reclaimed = await reclaimPort(1978, {});
+        if (reclaimed.status === 'reclaimed' && reclaimed.listener) {
+          console.error(`[snu-mcp] Stopped orphaned bridge PID ${reclaimed.listener.pid} to free port 1978.`);
+        }
+        const standalone = new StandaloneBridge();
+        await standalone.start();
+        console.error('[snu-mcp] In-process standalone bridge active.');
+      } catch (startErr: any) {
+        console.error(`[snu-mcp] Could not start in-process bridge: ${startErr?.message || startErr}. Continuing as MCP server only; ServiceNow commands will fail until a bridge is available.`);
+      }
     }
   }
 

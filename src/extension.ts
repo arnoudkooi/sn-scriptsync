@@ -34,6 +34,9 @@ import {
 	AGENT_API_VERSION,
 	HttpServerState,
 	AgentRequest,
+	findPortListener,
+	classifyListener,
+	terminateListener,
 } from './agent';
 
 
@@ -2079,17 +2082,20 @@ async function startServers() {
 
 	// Start the HTTP Agent API (preferred, event-driven) and optionally the
 	// legacy file-based transport. Both sit on top of the same dispatcher.
-	startAgentHttpServer({ onLog: (m) => debugLog(m), docsDir: agentRulesSourceDir })
-		.then((state) => {
-			agentHttpState = state;
-			debugLog(`Agent HTTP API listening on 127.0.0.1:${state.port}`);
-			// Surface the live endpoint so users can confirm the HTTP Agent API is up.
-			scriptSyncStatusBarItem.tooltip = `sn-scriptsync running\nAgent HTTP API: 127.0.0.1:${state.port}\nToken: ~/.sn-scriptsync/agent-port.json\nDocs: http://127.0.0.1:${state.port}/api/instructions`;
-		})
-		.catch((err) => {
-			debugLog(`Agent HTTP API failed to start: ${err?.message || err}`);
-			vscode.window.showWarningMessage(`SN ScriptSync: Agent HTTP API failed to start: ${err?.message || err}`);
-		});
+	// This startup also asks a standalone `snu` bridge to yield ports 1977/1978.
+	// Wait for that handoff before binding the browser save channel below;
+	// otherwise the first WebSocket bind races the graceful shutdown and the
+	// save icons remain connected to the standalone process instead of VS Code.
+	try {
+		const state = await startAgentHttpServer({ onLog: (m) => debugLog(m), docsDir: agentRulesSourceDir });
+		agentHttpState = state;
+		debugLog(`Agent HTTP API listening on 127.0.0.1:${state.port}`);
+		// Surface the live endpoint so users can confirm the HTTP Agent API is up.
+		scriptSyncStatusBarItem.tooltip = `sn-scriptsync running\nAgent HTTP API: 127.0.0.1:${state.port}\nToken: ~/.sn-scriptsync/agent-port.json\nDocs: http://127.0.0.1:${state.port}/api/instructions`;
+	} catch (err: any) {
+		debugLog(`Agent HTTP API failed to start: ${err?.message || err}`);
+		vscode.window.showWarningMessage(`SN ScriptSync: Agent HTTP API failed to start: ${err?.message || err}`);
+	}
 
 	//Start WebSocket Server
 	// Defensive: if a previous instance is somehow still around (e.g. a rapid
@@ -2101,6 +2107,49 @@ async function startServers() {
 		} catch { /* ignore */ }
 		wss = undefined;
 	}
+
+	// Port 1978 must be free for the browser save channel. The graceful yield
+	// during the Agent API start above handles a healthy standalone bridge; an
+	// orphaned one (stale/clobbered port file — e.g. an `snu --mcp` bridge
+	// spawned by Claude Desktop) or a foreign process still holds the port at
+	// this point. Identify it and ask the user to take the port over instead of
+	// failing with "port 1978 is still in use".
+	const holder = await findPortListener(1978);
+	if (holder) {
+		const abortStart = () => {
+			updateScriptSyncStatusBarItem('click to start.');
+			setServerRunningContext(false);
+		};
+		const kind = classifyListener(holder.command);
+		if (kind === 'vscode') {
+			vscode.window.showWarningMessage(
+				`SN ScriptSync: port 1978 is in use by another VS Code/Cursor window (PID ${holder.pid}). Stop ScriptSync in that window first, then click sn-scriptsync to start.`
+			);
+			abortStart();
+			return;
+		}
+		const shortCmd = (holder.command || '').length > 80 ? `${holder.command.slice(0, 77)}...` : holder.command;
+		const desc = kind === 'snu'
+			? `a standalone SN Utils bridge (PID ${holder.pid}, typically started by an AI client like Claude Desktop via "snu --mcp")`
+			: `${shortCmd ? `"${shortCmd}"` : 'an unknown process'} (PID ${holder.pid})`;
+		const pick = await vscode.window.showWarningMessage(
+			`ScriptSync needs port 1978 for the browser connection, but it is in use by ${desc}. Stop that process and take over the port?`,
+			{ modal: true },
+			'Stop and Take Over'
+		);
+		if (pick !== 'Stop and Take Over') {
+			abortStart();
+			return;
+		}
+		const freed = await terminateListener(holder.pid, 1978);
+		if (!freed) {
+			vscode.window.showErrorMessage(`SN ScriptSync: could not free port 1978 — PID ${holder.pid} did not stop.`);
+			abortStart();
+			return;
+		}
+		debugLog(`Took over port 1978 from PID ${holder.pid} (${kind}: ${holder.command || 'unknown command'})`);
+	}
+
 	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});
 	// Without an error handler an EADDRINUSE (port not yet released) is thrown as
 	// an uncaught exception and the server silently never starts. Surface it.
@@ -2109,7 +2158,7 @@ async function startServers() {
 		if (err && err.code === 'EADDRINUSE') {
 			updateScriptSyncStatusBarItem('click to start.');
 			setServerRunningContext(false);
-			vscode.window.showWarningMessage('SN ScriptSync: port 1978 is still in use. Wait a second, then click sn-scriptsync to start again.');
+			vscode.window.showWarningMessage('SN ScriptSync: port 1978 is still in use. Click sn-scriptsync to start again — if something else holds the port, you will be offered to stop it and take over.');
 		}
 	});
 	wss.on('connection', (ws: WebSocket, req) => {
@@ -3662,10 +3711,14 @@ function saveFieldAsFile(postedJson, retry = 0) {
 		if (err) {
 			// Staging writes surface their own errors; don't ping the helper tab.
 			if (postedJson.stagingOnly) return;
-			err.response = {};
-			err.response.result = {};
-			err.send = false;
-			broadcastToHelperTab(err);
+			const detail = err?.message || String(err);
+			debugLog(`Could not save browser field to ${fileName}: ${detail}`);
+			vscode.window.showErrorMessage(`SN ScriptSync: could not save ${nodePath.basename(fileName)}: ${detail}`);
+			broadcastToHelperTab({
+				error: { detail: `Could not save the field in VS Code: ${detail}` },
+				response: { result: {} },
+				send: false,
+			});
 		}
 		else {
 			// stagingOnly: file is materialised locally for review only — do NOT

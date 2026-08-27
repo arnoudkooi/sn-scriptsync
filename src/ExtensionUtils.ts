@@ -373,18 +373,21 @@ export class ExtensionUtils {
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             try { assertPathUnderRoot(path); } catch (e) { return cb(e); }
-            fs.writeFile(path, contents, (error) => { /* handle error */ });
-            vscode.workspace.openTextDocument(path).then(doc => {
-                if (openFile){
-                    vscode.window.showTextDocument(doc, { "preview": false });
+            fs.writeFile(path, contents, async (error) => {
+                if (error) return cb(error);
+                if (!openFile) return cb();
+
+                try {
+                    const doc = await vscode.workspace.openTextDocument(path);
+                    await vscode.window.showTextDocument(doc, { "preview": false });
                     //vscode.window.showInformationMessage("Data loaded from Instance and written to file")
                     myThis.showMessage("Data loaded from Instance and written to file");
-                    
+                    return cb();
+                } catch (openError) {
+                    return cb(openError);
                 }
             });
-            return cb();
         });
-        
     }
 
 
@@ -398,15 +401,20 @@ export class ExtensionUtils {
         fs.mkdir(getDirName(path), {recursive: true}, function (err) {
             if (err) return cb(err);
             try { assertPathUnderRoot(path); } catch (e) { return cb(e); }
-            fs.writeFile(path, contents, { "flag": "wx" }, (error) => { /* handle error */ });
-            vscode.workspace.openTextDocument(path).then(doc => {
-                if (openFile){
-                    vscode.window.showTextDocument(doc, { "preview": false });
-                    vscode.commands.executeCommand("editor.action.formatDocument");
-                    
+            fs.writeFile(path, contents, { "flag": "wx" }, async (error) => {
+                // Existing files are intentionally left untouched.
+                if (error && error.code !== 'EEXIST') return cb(error);
+                if (!openFile) return cb();
+
+                try {
+                    const doc = await vscode.workspace.openTextDocument(path);
+                    await vscode.window.showTextDocument(doc, { "preview": false });
+                    await vscode.commands.executeCommand("editor.action.formatDocument");
+                    return cb();
+                } catch (openError) {
+                    return cb(openError);
                 }
             });
-            return cb();
         });
     }
 
