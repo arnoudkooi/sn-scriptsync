@@ -587,9 +587,10 @@ export const TOOLS: ToolDefinition[] = [
     description:
       'Create a record on any ServiceNow table by inserting it through the REST API (POST /api/now/table/<table>). This is the correct way to create ordinary data rows: incidents, tasks, users, groups, CMDB CIs, catalog items, anything whose display field is not "name". The inserted record is returned in the response, so no separate read-back is needed. Prefer this over driving the browser UI (navigate + set field + run UI action), which is slower and far more fragile. Covered by the same createArtifacts permission as the other create commands, which is on by default. For scriptable artifacts (Script Include, Business Rule, ...) use snu_create_artifact instead so the record is tracked locally.',
     cliCommand: 'record create',
-    cliUsage: 'snu record create <table> [field=value ...] [--fields <json>] [--instance <i>] [--json]',
+    cliUsage: 'snu record create <table> [field=value ...] [--fields <json>] [--scope <scope>] [--instance <i>] [--json]',
     cliOptions: {
       fields: { type: 'string', short: 'f', description: 'JSON object of field values' },
+      scope: { type: 'string', short: 's', description: 'Application scope (name or sys_id) to insert in; needed for rows of scoped tables' },
     },
     inputSchema: {
       type: 'object',
@@ -599,6 +600,7 @@ export const TOOLS: ToolDefinition[] = [
           type: 'object',
           description: 'Field-value dictionary for the new record. Use raw values (sys_id for reference fields, choice value for choice fields), not display labels.',
         },
+        scope: { type: 'string', description: 'Application scope (name or sys_id) to run the insert in; needed for rows of scoped tables (optional)' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['table', 'fields'],
@@ -619,7 +621,7 @@ export const TOOLS: ToolDefinition[] = [
       return {
         command: 'create_record',
         instance: input.instance,
-        params: { table, fields },
+        params: { table, fields, ...(input.scope ? { scope: input.scope } : {}) },
       };
     },
   },

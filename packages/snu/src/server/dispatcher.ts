@@ -384,6 +384,49 @@ export class StandaloneDispatcher {
     }
   }
 
+  /**
+   * Resolve the application scope for a standalone create. Explicit
+   * fields.sys_scope wins; otherwise params.scope is accepted as a scope
+   * sys_id or a scope name (looked up on the instance). Returns undefined for
+   * global/unspecified. A named scope that does not exist throws instead of
+   * silently creating the record in global.
+   */
+  private async resolveCreateScope(inst: any, scopeParam: unknown, fields: any): Promise<string | undefined> {
+    const explicit = fields && typeof fields.sys_scope === 'string' ? fields.sys_scope.trim() : '';
+    if (explicit && explicit.toLowerCase() !== 'global') return explicit;
+    if (explicit) return undefined; // explicit global
+    const requested = typeof scopeParam === 'string' ? scopeParam.trim() : '';
+    if (!requested || requested.toLowerCase() === 'global') return undefined;
+    if (/^[0-9a-f]{32}$/i.test(requested)) return requested;
+    try {
+      const correlationId = crypto.randomUUID();
+      const pendingPromise = this.pending.register({ id: correlationId, command: 'resolve_create_scope', timeoutMs: 15_000 });
+      this.ws.sendToBrowser({
+        action: 'agentRestApi',
+        agentRequestId: correlationId,
+        endpoint: '/api/now/table/sys_scope',
+        method: 'GET',
+        queryParams: {
+          sysparm_query: `scope=${requested}`,
+          sysparm_fields: 'sys_id,scope',
+          sysparm_limit: '1',
+        },
+        instance: inst.settings,
+        appName: 'SN Utils CLI',
+      });
+      const res: any = await pendingPromise;
+      const row = Array.isArray(res?.data?.result) ? res.data.result[0] : undefined;
+      const sysId = row?.sys_id && typeof row.sys_id === 'object' ? row.sys_id.value : row?.sys_id;
+      if (typeof sysId === 'string' && sysId.trim()) return sysId.trim();
+    } catch {
+      // Fall through to the explicit error below.
+    }
+    throw Object.assign(
+      new Error(`Unknown application scope '${requested}' on this instance. Pass the scope's sys_id, its exact scope name (e.g. x_acme_app), or omit for global.`),
+      { code: 'E_INVALID_PARAMS' }
+    );
+  }
+
   listInstanceFolders(): string[] {
     try {
       const entries = fs.readdirSync(this.cwd, { withFileTypes: true });
@@ -931,13 +974,18 @@ export class StandaloneDispatcher {
       // Create Artifact
       if (req.command === 'create_artifact') {
         const { table, fields } = req.params || {};
+        // Scoped creates need both the row's sys_scope and a matching
+        // transaction scope, or the instance refuses the insert with the
+        // cross-scope security-constraint 403.
+        const scopeSysId = await this.resolveCreateScope(inst, req.params?.scope, fields);
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({
           action: 'agentRestApi',
           agentRequestId: correlationId,
           endpoint: `/api/now/table/${table}`,
           method: 'POST',
-          body: fields,
+          body: scopeSysId ? { ...fields, sys_scope: scopeSysId } : fields,
+          ...(scopeSysId ? { queryParams: { sysparm_transaction_scope: scopeSysId } } : {}),
           instance: inst.settings,
           appName: 'SN Utils CLI',
         });
@@ -977,6 +1025,9 @@ export class StandaloneDispatcher {
           );
         }
 
+        const scopeSysId = await this.resolveCreateScope(inst, req.params?.scope, fields);
+        const queryParams: Record<string, string> = { sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true' };
+        if (scopeSysId) queryParams.sysparm_transaction_scope = scopeSysId;
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({
           action: 'agentRestApi',
@@ -984,7 +1035,7 @@ export class StandaloneDispatcher {
           endpoint: `/api/now/table/${table}`,
           method: 'POST',
           body: fields,
-          queryParams: { sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true' },
+          queryParams,
           instance: inst.settings,
           appName: 'SN Utils CLI',
         });

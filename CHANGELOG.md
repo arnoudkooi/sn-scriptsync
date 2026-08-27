@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## Unreleased
+
+- **Standalone creates can target an application scope:** `snu artifact create --scope` now works without VS Code (scope name or sys_id; names are resolved on the instance, and an unknown name errors instead of silently creating in global), and `snu record create` gains the same `--scope` option for inserting rows into scoped tables. The insert runs in that scope (`sysparm_transaction_scope`), so it no longer trips the cross-scope security constraint.
+
 ## 4.8.6 (2026-08-27)
 
 **Reliable port takeover for ScriptSync and the `snu` CLI (`@snutils/snu` 0.2.2).**
