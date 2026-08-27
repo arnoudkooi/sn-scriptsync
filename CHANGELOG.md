@@ -1,8 +1,8 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.8.6 (2026-08-27)
 
-**Reliable port takeover for ScriptSync and the `snu` CLI.**
+**Reliable port takeover for ScriptSync and the `snu` CLI (`@snutils/snu` 0.2.2).**
 - **Starting ScriptSync now takes over a busy port 1978 instead of failing:** if another process still holds the port after the usual graceful handover (typically an orphaned `snu --mcp` bridge started by an AI client like Claude Desktop), a dialog names the process and offers "Stop and Take Over". ScriptSync running in another VS Code/Cursor window is never killed; you are pointed at that window instead.
 - **`snu stop` / `snu restart` now work from ground truth, not just port files:** a bridge whose port file was deleted or overwritten used to survive `snu stop` ("already stopped") and break `snu restart` with `EADDRINUSE`. Both commands now find the actual listener on ports 1978/1977, stop it when it is an snu bridge (graceful first, then hard), and `snu status` reports such an orphaned holder. A process that is not recognizably an snu bridge is only stopped with `--force`; a VS Code-hosted bridge is never touched.
 - **ScriptSync no longer deletes another live bridge's port registration:** starting or stopping the extension used to remove `~/.sn-scriptsync/agent-port.json` even when a running standalone bridge owned it, which is what orphaned those bridges in the first place.
