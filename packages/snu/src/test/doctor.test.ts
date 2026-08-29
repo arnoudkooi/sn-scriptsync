@@ -127,3 +127,45 @@ test('ownership disagreeing with reality is surfaced', () => {
   }));
   assert.match(report.findings.join(' '), /ownership and reality disagree/);
 });
+
+// ---------------------------------------------------------------------------
+// Found by running the diagnostic on a live machine: four of six instances were
+// not OK and the summary still read "the session checks passed". A summary that
+// claims more than it knows is the exact defect this tool exists to catch.
+// ---------------------------------------------------------------------------
+
+test('an unverifiable session is not silently counted as passing', () => {
+  const report = buildDoctorReport(sources({
+    auth: [
+      { instance: 'ven08329', state: 'AUTH_OK', ok: true },
+      { instance: 'snutils', state: 'AUTH_UNKNOWN', ok: false },
+    ],
+  }));
+  const text = report.findings.join(' ');
+  assert.match(text, /could not be verified for snutils/);
+  assert.ok(!/No problems found/.test(text), 'an unresolved probe is not "no problems"');
+});
+
+test('a never-connected instance is reported as expected, not as a failure', () => {
+  const report = buildDoctorReport(sources({
+    auth: [{ instance: 'empakooi', state: 'AUTH_MISSING', ok: false }],
+  }));
+  const text = report.findings.join(' ');
+  assert.match(text, /No session yet for empakooi/);
+  assert.match(text, /expected until/);
+});
+
+test('the all-clear states how many sessions were actually verified', () => {
+  const report = buildDoctorReport(sources({
+    auth: [
+      { instance: 'a', state: 'AUTH_OK', ok: true },
+      { instance: 'b', state: 'AUTH_OK', ok: true },
+    ],
+  }));
+  assert.match(report.findings.join(' '), /all 2 instance sessions verified/);
+});
+
+test('an all-clear with no sessions checked says so rather than implying they passed', () => {
+  const report = buildDoctorReport(sources({ auth: [] }));
+  assert.match(report.findings.join(' '), /No instance sessions were checked/);
+});

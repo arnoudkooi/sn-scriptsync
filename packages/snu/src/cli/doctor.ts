@@ -272,8 +272,32 @@ export function deriveFindings(report: DoctorReport): string[] {
 		findings.push('The SN Utils helper tab is not connected, so no session could be verified.');
 	}
 
+	// A probe that did not return a verdict is not a passing probe. Saying
+	// nothing about it and then declaring "session checks passed" is the same
+	// over-claim this diagnostic exists to catch.
+	const unknown = report.auth.filter((a) => a.state === 'AUTH_UNKNOWN' || a.state === 'AUTH_UNSUPPORTED');
+	if (unknown.length) {
+		findings.push(
+			`The session could not be verified for ${unknown.map((a) => a.instance).join(', ')} — the probe returned no verdict. Retry before treating those instances as usable.`
+		);
+	}
+
+	// Never-connected instances are normal, not broken. Worth stating so the
+	// difference between "no session yet" and "session rejected" is visible.
+	const missing = report.auth.filter((a) => a.state === 'AUTH_MISSING');
+	if (missing.length) {
+		findings.push(
+			`No session yet for ${missing.map((a) => a.instance).join(', ')}. That is expected until the instance is opened in the browser and /token is run.`
+		);
+	}
+
 	if (!findings.length) {
-		findings.push('No problems found: a bridge is serving, its registration matches, and the session checks passed.');
+		const verified = report.auth.filter((a) => a.ok).length;
+		findings.push(
+			report.auth.length
+				? `No problems found: a bridge is serving, its registration matches, and all ${verified} instance session${verified === 1 ? '' : 's'} verified.`
+				: 'No problems found: a bridge is serving and its registration matches. No instance sessions were checked.'
+		);
 	}
 	return findings;
 }
