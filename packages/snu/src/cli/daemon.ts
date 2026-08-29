@@ -209,3 +209,48 @@ export async function waitForBridgeReachable(port: number, timeoutMs = 20_000): 
     'E_RESTART_FAILED'
   );
 }
+
+/**
+ * Wait for a bridge to come back up after a restart.
+ *
+ * Waiting for it to go *unreachable* first looks natural and is wrong: the
+ * down-state is transient, and a stop/start that completes between two polls is
+ * never observed. `snu restart --json` then reported E_STOP_TIMEOUT for a
+ * restart that had already succeeded — a false negative on the happy path,
+ * which is worse than no check at all.
+ *
+ * So wait for positive evidence of a NEW bridge instead. `startedAt` changes on
+ * every transport start, and the PID changes when the host itself was replaced;
+ * either one proves the cycle happened, whether or not we saw the gap.
+ */
+export async function waitForBridgeRestarted(
+  port: number,
+  previous: { startedAt?: number; pid?: number },
+  timeoutMs = 25_000
+): Promise<HealthResponse> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const health = await checkHealth(port);
+      const restarted =
+        (typeof health.startedAt === 'number' &&
+          typeof previous.startedAt === 'number' &&
+          health.startedAt !== previous.startedAt) ||
+        (typeof health.pid === 'number' &&
+          typeof previous.pid === 'number' &&
+          health.pid !== previous.pid);
+      if (restarted) return health;
+      // Reachable but still the old instance: the restart has not landed yet.
+    } catch (err) {
+      lastError = err; // mid-cycle, the endpoint is briefly down
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new ScriptSyncClientError(
+    `The bridge on port ${port} did not report a restart within ${timeoutMs / 1000}s${
+      lastError ? `: ${(lastError as any)?.message || lastError}` : ''
+    }.`,
+    'E_RESTART_FAILED'
+  );
+}

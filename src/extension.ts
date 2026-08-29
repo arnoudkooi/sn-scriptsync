@@ -44,6 +44,7 @@ import {
 	LifecycleState,
 	evaluateLease,
 	probeBridgeHealth,
+	resolveBridgeOwnership,
 	readLease,
 	writeLease,
 	releaseLease,
@@ -2426,10 +2427,42 @@ async function startBridgeTransports(): Promise<void> {
 	if (holder) {
 		const kind = classifyListener(holder.command);
 		if (kind === 'vscode') {
-			throw new BridgeStartAborted(
-				`Port 1978 is in use by another VS Code/Cursor window (PID ${holder.pid}). Stop ScriptSync in that window first, then click sn-scriptsync to start.`
+			// An editor window holding the port is normally someone else's healthy
+			// bridge: point the user at that window rather than fighting over it.
+			//
+			// But "holds the port" is not "is serving". A wedged extension host
+			// keeps the socket bound while answering nothing, and refusing here
+			// unconditionally left the only escape as finding and killing a PID by
+			// hand — the exact manual step this release removes. Ask the one
+			// authority on the question before refusing.
+			const ownership = await resolveBridgeOwnership();
+			if (ownership.state === 'live') {
+				throw new BridgeStartAborted(
+					`Port 1978 is in use by another VS Code/Cursor window (PID ${holder.pid}) running a healthy bridge. Stop ScriptSync in that window first, then click sn-scriptsync to start.`
+				);
+			}
+			const pick = await vscode.window.showWarningMessage(
+				`The editor window holding port 1978 (PID ${holder.pid}) is not answering — its bridge looks wedged.`,
+				{
+					modal: true,
+					detail:
+						'Reloading or closing that window is the clean fix. If it is unresponsive, ScriptSync can force-stop that extension host to free the port. ' +
+						'That ends ScriptSync in that window; unsaved editor changes are not affected.',
+				},
+				'Force stop and take over'
 			);
-		}
+			if (pick !== 'Force stop and take over') {
+				throw new BridgeStartAborted(
+					`Start cancelled: port 1978 is still held by PID ${holder.pid}.`,
+					true
+				);
+			}
+			const editorFreed = await terminateListener(holder.pid, 1978);
+			if (!editorFreed) {
+				throw new BridgeStartAborted(`Could not free port 1978 — PID ${holder.pid} did not stop.`);
+			}
+			debugLog(`took port 1978 from unresponsive editor host PID ${holder.pid} (${ownership.state})`);
+		} else {
 		const shortCmd = (holder.command || '').length > 80 ? `${holder.command.slice(0, 77)}...` : holder.command;
 		const desc = kind === 'snu'
 			? `a standalone SN Utils bridge (PID ${holder.pid}, typically started by an AI client like Claude Desktop via "snu --mcp")`
@@ -2447,6 +2480,7 @@ async function startBridgeTransports(): Promise<void> {
 			throw new BridgeStartAborted(`Could not free port 1978 — PID ${holder.pid} did not stop.`);
 		}
 		debugLog(`Took over port 1978 from PID ${holder.pid} (${kind}: ${holder.command || 'unknown command'})`);
+		}
 	}
 
 	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});

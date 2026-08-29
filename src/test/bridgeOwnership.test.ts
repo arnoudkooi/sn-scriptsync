@@ -192,3 +192,35 @@ test('claimable results explain themselves', async () => {
 	const result = await resolveBridgeOwnership(probes());
 	assert.ok(result.state === 'claimable' && result.reason.length > 0);
 });
+
+// ---------------------------------------------------------------------------
+// The takeover gap found in manual testing: the resolver correctly called a
+// paused, unreachable editor-hosted owner claimable, but the port-conflict
+// guard refused to displace ANY editor process, so the second window could
+// never start. Two answers to one question, a third time. These pin the
+// resolver's side of the contract the guard now consults.
+// ---------------------------------------------------------------------------
+
+test('an editor-hosted owner that stopped renewing and does not answer is claimable', async () => {
+	// PID alive (paused process), lease well past expiry, endpoint silent.
+	const result = await resolveBridgeOwnership(probes({
+		readLease: () => lease({ lastHeartbeatAt: NOW - 112_000 }),
+		readDescriptor: () => descriptor(),
+		isAlive: () => true,
+		isReachable: async () => false,
+	}));
+	assert.strictEqual(result.state, 'claimable');
+});
+
+test('an editor-hosted owner that is merely slow to beat but still answers is NOT claimable', async () => {
+	// A missed heartbeat must not hand the ports away while the bridge serves:
+	// the descriptor probe is what keeps a briefly-stalled owner protected.
+	const result = await resolveBridgeOwnership(probes({
+		readLease: () => lease({ lastHeartbeatAt: NOW - 112_000 }),
+		readDescriptor: () => descriptor(),
+		isAlive: () => true,
+		isReachable: async () => true,
+	}));
+	assert.strictEqual(result.state, 'live');
+	assert.strictEqual(result.state === 'live' && result.source, 'descriptor');
+});

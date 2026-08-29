@@ -15,7 +15,7 @@ import {
   waitForBridgeExit,
   requestEditorBridgeLifecycle,
   waitForBridgeUnreachable,
-  waitForBridgeReachable,
+  waitForBridgeRestarted,
 } from './daemon.js';
 import { findPortListener, reclaimPort, terminateListener, classifyListener, ReclaimResult, PortListener } from './portReclaim.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
@@ -399,9 +399,15 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
           return;
         }
         const previousPid = status.health.pid;
+        const previousStartedAt = status.health.startedAt;
         await requestEditorBridgeLifecycle(status, 'restart');
-        await waitForBridgeUnreachable(status.discovery.port);
-        const health = await waitForBridgeReachable(status.discovery.port);
+        // Wait for evidence the bridge came back NEW, not for it to go down:
+        // the down-state is transient and a fast cycle is never sampled, which
+        // reported E_STOP_TIMEOUT for restarts that had actually succeeded.
+        const health = await waitForBridgeRestarted(status.discovery.port, {
+          startedAt: previousStartedAt,
+          pid: previousPid,
+        });
         if (isJsonMode) {
           outputJson({
             restarted: true,

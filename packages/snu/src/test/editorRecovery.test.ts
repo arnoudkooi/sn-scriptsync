@@ -75,3 +75,78 @@ test('a bridge that answers 200 but not success is still a failure', async () =>
     (err: any) => err.code === 'E_RESTART_FAILED'
   );
 });
+
+// ---------------------------------------------------------------------------
+// Restart detection. Waiting for the bridge to go *unreachable* first was a
+// false-negative machine: the down-state is transient, so a stop/start that
+// completed between two polls was never observed and `snu restart --json`
+// reported E_STOP_TIMEOUT for a restart that had already succeeded.
+// ---------------------------------------------------------------------------
+
+import { waitForBridgeRestarted } from '../cli/daemon.js';
+
+function healthServer(sequence: Array<{ startedAt?: number; pid?: number } | null>) {
+  let i = 0;
+  const server = require('http').createServer((req: any, res: any) => {
+    const step = sequence[Math.min(i, sequence.length - 1)];
+    i++;
+    if (step === null) {
+      req.socket.destroy(); // mid-cycle: endpoint briefly down
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ status: 'success', apiVersion: 9, commands: [], ...step }));
+  });
+  return server;
+}
+
+function listen(server: any): Promise<number> {
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+}
+
+test('a restart is detected when startedAt changes, even with no observed downtime', async () => {
+  // The exact false negative: the bridge never appears unreachable.
+  const server = healthServer([{ startedAt: 1000, pid: 42 }, { startedAt: 2000, pid: 42 }]);
+  const port = await listen(server);
+  try {
+    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 5_000);
+    assert.strictEqual(health.startedAt, 2000);
+  } finally {
+    server.close();
+  }
+});
+
+test('a restart is detected when the PID changes', async () => {
+  const server = healthServer([{ startedAt: 1000, pid: 42 }, { startedAt: 1000, pid: 77 }]);
+  const port = await listen(server);
+  try {
+    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 5_000);
+    assert.strictEqual(health.pid, 77);
+  } finally {
+    server.close();
+  }
+});
+
+test('a brief unreachable window during the cycle is tolerated', async () => {
+  const server = healthServer([{ startedAt: 1000, pid: 42 }, null, null, { startedAt: 3000, pid: 43 }]);
+  const port = await listen(server);
+  try {
+    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 8_000);
+    assert.strictEqual(health.startedAt, 3000);
+  } finally {
+    server.close();
+  }
+});
+
+test('a bridge that never cycles is reported as a restart failure, not a stop timeout', async () => {
+  const server = healthServer([{ startedAt: 1000, pid: 42 }]);
+  const port = await listen(server);
+  try {
+    await assert.rejects(
+      () => waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 1_000),
+      (err: any) => err.code === 'E_RESTART_FAILED'
+    );
+  } finally {
+    server.close();
+  }
+});
