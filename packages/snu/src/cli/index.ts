@@ -20,6 +20,7 @@ import {
 import { findPortListener, reclaimPort, terminateListener, classifyListener, ReclaimResult, PortListener } from './portReclaim.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 import { runSetup } from './setup.js';
+import { collectDoctorSources, buildDoctorReport, formatDoctorReport } from './doctor.js';
 
 const packageMetadata = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
@@ -79,6 +80,7 @@ export function printHelp(): void {
   snu --mcp                           Start Model Context Protocol (MCP) server on stdio
   snu serve [--port <p>] [--ws <p>]   Start persistent standalone bridge daemon
   snu status                          Show the active local bridge process
+  snu doctor                          Diagnose bridge, ownership and session problems (redacted)
   snu auth status                     Verify ServiceNow still accepts the session (read-only probe)
   snu auth refresh                    How to hand the bridge a fresh session
   snu restart [--force]               Replace a standalone bridge (reclaims a stuck port)
@@ -469,6 +471,20 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       if (blocked) throw explainBlocked(blocked.port, blocked.result);
 
       await startStandalone();
+    } catch (err: any) {
+      outputError(err, isJsonMode);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (lifecycleCommand === 'doctor') {
+    try {
+      const sources = await collectDoctorSources({ cliVersion: VERSION, cwd: process.cwd() });
+      const report = buildDoctorReport(sources, Date.now());
+      if (isJsonMode) outputJson(report);
+      else process.stdout.write(formatDoctorReport(report));
+      await printUpdateNotice(updateNotice);
     } catch (err: any) {
       outputError(err, isJsonMode);
       process.exit(1);
