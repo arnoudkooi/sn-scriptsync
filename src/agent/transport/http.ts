@@ -8,7 +8,7 @@ import { httpStatusForCode } from '../errors';
 import { AgentRequest, AgentResponse } from '../types';
 import { commandNames } from '../commands';
 import * as pendingRegistry from '../pendingRegistry';
-import { writePortFile, deletePortFile, getPortFilePath, globalPortFilePath, AGENT_API_VERSION, AGENT_API_FIXED_PORT } from '../portFile';
+import { writePortFile, deletePortFile, reassertPortFiles, getPortFilePath, globalPortFilePath, AGENT_API_VERSION, AGENT_API_FIXED_PORT } from '../portFile';
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB – attachments push this up
 
@@ -29,7 +29,11 @@ export interface HttpServerState {
 	port: number;
 	token: string;
 	portFilePath?: string;
+	portFileHeartbeat?: NodeJS.Timeout;
 }
+
+/** How often the bridge re-asserts its port files (cheap stat + small read). */
+const PORT_FILE_HEARTBEAT_MS = 60_000;
 
 function readJsonBody(req: http.IncomingMessage): Promise<any> {
 	return new Promise((resolve, reject) => {
@@ -279,11 +283,21 @@ export async function startAgentHttpServer(opts: {
 	});
 
 	log(`[agent-http] listening on 127.0.0.1:${port}, port file: ${portFilePath || 'n/a'}`);
-	return { server, port, token, portFilePath };
+
+	// Self-heal: another process (notably an older ScriptSync build in a second
+	// editor window) can delete or clobber the port files while this bridge is
+	// alive, making it undiscoverable. Re-assert them on a slow heartbeat.
+	const portFileHeartbeat = setInterval(() => {
+		try { reassertPortFiles(); } catch { /* best effort */ }
+	}, PORT_FILE_HEARTBEAT_MS);
+	portFileHeartbeat.unref?.();
+
+	return { server, port, token, portFilePath, portFileHeartbeat };
 }
 
 export function stopAgentHttpServer(state: HttpServerState | undefined): Promise<void> {
 	return new Promise((resolve) => {
+		if (state?.portFileHeartbeat) clearInterval(state.portFileHeartbeat);
 		deletePortFile();
 		if (!state) return resolve();
 		try {

@@ -20,6 +20,8 @@ export class StandaloneBridge {
   private token: string;
   private cwd: string;
   private writtenPortFiles: string[] = [];
+  private portFilePayload?: string;
+  private portFileHeartbeat?: NodeJS.Timeout;
   private signalHandler?: () => void;
   private exitHandler?: () => void;
 
@@ -60,6 +62,12 @@ export class StandaloneBridge {
 
     // 4. Write Port Files
     this.writePortFiles(httpPort);
+
+    // Self-heal: older ScriptSync builds in an editor window blindly delete
+    // the global port file on their own start/stop, leaving this healthy
+    // bridge undiscoverable. Re-assert the files on a slow heartbeat.
+    this.portFileHeartbeat = setInterval(() => this.reassertPortFiles(), 60_000);
+    this.portFileHeartbeat.unref?.();
 
     // 5. Clean up on exit
     this.signalHandler = () => {
@@ -114,6 +122,42 @@ export class StandaloneBridge {
         this.writtenPortFiles.push(globalPortFile);
       } catch {}
     }
+
+    this.portFilePayload = payload;
+  }
+
+  /** Re-write any of our port files that went missing or lost their contents
+   * to another process, leaving a file owned by another live bridge alone. */
+  private reassertPortFiles(): void {
+    if (!this.portFilePayload) return;
+    const expected = JSON.parse(this.portFilePayload) as { port: number; token: string };
+    for (const target of this.writtenPortFiles) {
+      let rewrite = true;
+      try {
+        const data = JSON.parse(fs.readFileSync(target, 'utf8'));
+        if (data?.pid === process.pid) {
+          // Ours — repair only if the contents drifted.
+          rewrite = data.port !== expected.port || data.token !== expected.token;
+        } else if (typeof data?.pid === 'number' && this.pidAlive(data.pid)) {
+          rewrite = false; // a live foreign bridge owns this file — leave it
+        }
+      } catch {
+        // Missing, unreadable or corrupt — rewrite.
+      }
+      if (rewrite) {
+        try { fs.writeFileSync(target, this.portFilePayload); } catch {}
+      }
+    }
+  }
+
+  private pidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err: any) {
+      // EPERM: the process exists but belongs to another user.
+      return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+    }
   }
 
   cleanPortFiles(): void {
@@ -133,6 +177,10 @@ export class StandaloneBridge {
   }
 
   async stop(): Promise<void> {
+    if (this.portFileHeartbeat) {
+      clearInterval(this.portFileHeartbeat);
+      this.portFileHeartbeat = undefined;
+    }
     if (this.signalHandler) {
       process.off('SIGINT', this.signalHandler);
       process.off('SIGTERM', this.signalHandler);

@@ -2,14 +2,15 @@ import { parseArgs } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { TOOLS, getToolByCliCommand } from '../registry.js';
-import { ScriptSyncClient, ScriptSyncClientError } from '../client.js';
+import { ScriptSyncClient, ScriptSyncClientError, checkHealth } from '../client.js';
+import { HealthResponse } from '../types.js';
 import { resolveContentInput } from './stdin.js';
 import { formatHumanOutput, outputJson, outputError } from './format.js';
 import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { getUpdateNotice, shouldCheckForUpdates } from './updateCheck.js';
 import { inspectBridge, requestStandaloneYield, waitForBridgeExit } from './daemon.js';
-import { findPortListener, reclaimPort, terminateListener, ReclaimResult, PortListener } from './portReclaim.js';
+import { findPortListener, reclaimPort, terminateListener, classifyListener, ReclaimResult, PortListener } from './portReclaim.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 import { runSetup } from './setup.js';
 
@@ -237,10 +238,25 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
 
       if (lifecycleCommand === 'status') {
         let orphan: PortListener | null = null;
+        let orphanKind: ReturnType<typeof classifyListener> | undefined;
+        let orphanHealth: HealthResponse | null = null;
         if (!status.running) {
           for (const port of bridgePorts) {
             orphan = await findPortListener(port);
             if (orphan) break;
+          }
+          if (orphan) {
+            orphanKind = classifyListener(orphan.command);
+            // A VS Code-hosted bridge can be perfectly healthy while its
+            // discovery file is missing (an older ScriptSync build in another
+            // editor window deletes it). /api/health needs no token — probe
+            // the fixed HTTP port so the advice matches reality.
+            const httpPort = bridgePorts[1];
+            try {
+              orphanHealth = await checkHealth(httpPort);
+            } catch {
+              orphanHealth = null;
+            }
           }
         }
         const result = status.running
@@ -252,7 +268,12 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
               apiVersion: status.health.apiVersion,
             }
           : orphan
-          ? { running: false, orphanListener: { pid: orphan.pid, command: orphan.command } }
+          ? {
+              running: false,
+              orphanListener: { pid: orphan.pid, command: orphan.command },
+              orphanKind,
+              bridgeHealthy: orphanHealth !== null,
+            }
           : { running: false };
         if (isJsonMode) outputJson(result);
         else if (status.running) {
@@ -260,6 +281,19 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
           console.log(`  Host:      ${status.health.hostKind || 'unknown'}`);
           console.log(`  PID:       ${status.health.pid}`);
           console.log(`  HTTP API:  http://127.0.0.1:${status.discovery.port}/api\n`);
+        } else if (orphan && orphanKind === 'vscode' && orphanHealth) {
+          console.log('\nSN Utils Bridge: healthy, but not discoverable (its port file is missing).');
+          console.log('A ScriptSync bridge is running inside a VS Code-family editor:');
+          console.log(`  ${describeListener(orphan)}`);
+          console.log('To re-register it, reload the SN Utils helper tab in the browser, or toggle');
+          console.log('ScriptSync off and on in that editor window. If a second editor window also');
+          console.log('runs ScriptSync, update the extension there — older builds delete this file.\n');
+        } else if (orphan && orphanKind === 'vscode') {
+          console.log('\nSN Utils Bridge: not discoverable. A VS Code-family editor holds the bridge');
+          console.log('port but is not answering:');
+          console.log(`  ${describeListener(orphan)}`);
+          console.log('Toggle ScriptSync off and on in that editor window (`snu stop` will not');
+          console.log('touch an editor-hosted bridge).\n');
         } else if (orphan) {
           console.log('\nSN Utils Bridge: not discoverable, but a bridge port is still held by');
           console.log(`  ${describeListener(orphan)}`);

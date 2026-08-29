@@ -26,6 +26,7 @@ import {
 	setSyncStateProvider,
 	startAgentHttpServer,
 	setGlobalPortFileEnabled,
+	reassertPortFiles,
 	AGENT_CONNECT_SNIPPET,
 	stopAgentHttpServer,
 	dispatchAgentCommand,
@@ -2165,6 +2166,10 @@ async function startServers() {
 
 		if (!serverRunning) return;
 
+		// A (re)connect is a natural moment to heal port files another process
+		// may have deleted while this bridge stayed alive.
+		reassertPortFiles();
+
 		if (typeof req.headers.origin === 'string' && req.headers.origin.startsWith('http')) { // only allow via extension pages like chrome-extension://;
 			ws.close(1008, 'Not allowed');
 			return;
@@ -2189,30 +2194,31 @@ async function startServers() {
 		const sendCapabilityMessage = () => {
 			if (capabilityMessageSent) return;
 
-			let message: string;
+			let message: string | undefined;
 			capabilityMessageSent = true;
-			const feedbackInvite = `<a href="https://snutils.com/contact?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_experience" target="_blank" class="promo-link">Share your experience →</a>`;
 			if (helperBuildInfo?.debuggerAvailable && helperBuildInfo?.proFeatures) {
 				const tierLabel = helperBuildInfo.tier === 'enterprise'
 					? 'Enterprise'
 					: helperBuildInfo.tier === 'trial'
 						? 'Trial'
 						: 'Pro';
-				message = `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} connected.</b> Full agent debugging is active: full-page capture, console errors, network responses, native dialogs. ${feedbackInvite}`;
+				message = `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug + ${tierLabel} connected.</b> Full agent debugging is active: full-page capture, console errors, network responses, native dialogs.`;
 			} else if (helperBuildInfo?.debuggerAvailable) {
 				message = helperBuildInfo.licenseResolved
-					? `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug.</b> Debugger build recognized. Activate Pro or start a free trial to unlock full-page capture, console, network and dialogs. <a href="https://snutils.com/trial?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_edition_connected" target="_blank" class="promo-link">Start free trial →</a>`
-					: `<span class="promo-star">★</span> <b class="promo-accent">Thanks for trying SN Utils Debug.</b> Debugger build recognized. Confirm Pro, Trial or Enterprise in the extension popup, then enable the browser debugger in ScriptSync.`;
-			} else {
-				message = `<span class="promo-star">★</span> <b class="promo-accent">New in ScriptSync:</b> AI agents can build &amp; edit artifacts, drive live forms, and capture network, console and full-page screenshots via the <b>Pro browser debugger</b>. <a href="https://chromewebstore.google.com/detail/sn-utils-debug/imjkemgdgfakdbobaoagilnoanibajeb" target="_blank" class="promo-link">Get the SN Utils Debug edition →</a>`;
+					? `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug recognized.</b> Activate Pro or start a free trial to unlock full-page capture, console, network and dialogs. <a href="https://snutils.com/trial?utm_source=scriptsync&amp;utm_medium=referral&amp;utm_campaign=browser_debugger&amp;utm_content=debug_edition_connected" target="_blank" class="promo-link">Start free trial →</a>`
+					: `<span class="promo-star">★</span> <b class="promo-accent">SN Utils Debug recognized.</b> Confirm Pro, Trial or Enterprise in the extension popup, then enable the browser debugger in ScriptSync.`;
 			}
+			// Regular builds get no promo row here: the debugger pointer only
+			// appears contextually when an agent actually needs it (cdp.ts).
 
-			ws.send(JSON.stringify({
-				action: 'logMessage',
-				source: 'Team SN Utils',
-				promo: true,
-				message,
-			}), function () { });
+			if (message) {
+				ws.send(JSON.stringify({
+					action: 'logMessage',
+					source: 'Team SN Utils',
+					promo: true,
+					message,
+				}), function () { });
+			}
 
 			// Follow with the agent connect instructions so they're right in the
 			// log at connect time. Agent connectivity is a Pro feature: show the
@@ -2460,7 +2466,7 @@ async function startServers() {
 		ws.send('["Connected to VS Code ScriptSync WebSocket"]', function () { });
 		ws.send(JSON.stringify({
 			action: 'bannerMessage',
-			message: `v4.8: AI Agent Bridge & Review Queue: interactive two-phase human review for high-risk commands, per-instance security permissions, automatic Debug edition detection, and standalone @snutils/snu CLI / MCP tools. HTTP API on 127.0.0.1 (port 1977).`,
+			message: `AI Agent Bridge active: connect agents via the @snutils/snu CLI or MCP tools; high-risk commands go through the review queue. HTTP API on 127.0.0.1 (port 1977).`,
 			class: 'alert alert-primary',
 		}), function () { });
 

@@ -1,8 +1,12 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.8.7 (2026-08-28)
 
-- **Standalone creates can target an application scope:** `snu artifact create --scope` now works without VS Code (scope name or sys_id; names are resolved on the instance, and an unknown name errors instead of silently creating in global), and `snu record create` gains the same `--scope` option for inserting rows into scoped tables. The insert runs in that scope (`sysparm_transaction_scope`), so it no longer trips the cross-scope security constraint.
+**Self-healing bridge discovery and a quieter helper tab (`@snutils/snu` 0.2.3).**
+- **`snu artifact create --scope` now works without VS Code, and `snu record create` gains the same option:** pass a scope name or sys_id (names are resolved on the instance, and an unknown name errors instead of silently creating in global) and the insert runs in that application scope.
+- **A bridge whose port registration is deleted now heals itself:** ScriptSync re-asserts `~/.sn-scriptsync/agent-port.json` and the workspace port file on every helper (re)connect and on a once-a-minute heartbeat. Older ScriptSync builds in a second editor window blindly delete the global file on their own start/stop, which left a perfectly healthy bridge undiscoverable (`E_BRIDGE_NOT_FOUND`) from any other directory; a port file owned by another live bridge is still left alone.
+- **Quieter helper tab on connect:** the "New in ScriptSync ... Get the SN Utils Debug edition" promo row is gone (the debugger pointer now only appears when an agent actually needs it), and the version banner is a single concise line about the active Agent Bridge. Debug edition users keep their short connection confirmation.
+- **`snu status` gives accurate advice for an editor-hosted bridge:** when ScriptSync inside VS Code/Cursor holds the bridge ports but the port file is missing, status now probes the token-free health endpoint and reports "healthy, but not discoverable" with the real fix (reload the SN Utils helper tab or toggle ScriptSync in that window, and update the extension in other windows) instead of suggesting `snu stop`, which by design never touches an editor-hosted bridge. JSON mode gains `orphanKind` and `bridgeHealthy` fields.
 
 ## 4.8.6 (2026-08-27)
 

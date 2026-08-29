@@ -53,6 +53,7 @@ function writeOne(target: string, payload: AgentPortFile): boolean {
 }
 
 let lastPayload: AgentPortFile | undefined;
+let globalPortFileEnabled = false;
 
 export function writePortFile(data: Omit<AgentPortFile, 'apiVersion' | 'startedAt'>): string | undefined {
 	const payload: AgentPortFile = {
@@ -75,16 +76,54 @@ export function writePortFile(data: Omit<AgentPortFile, 'apiVersion' | 'startedA
 
 /** Toggle the well-known global port file based on the connected license. */
 export function setGlobalPortFileEnabled(enabled: boolean): void {
+	globalPortFileEnabled = enabled;
 	if (enabled && lastPayload) writeOne(globalPortFilePath(), lastPayload);
 	else removeGlobalPortFile();
+}
+
+/**
+ * Re-write any port file of the live bridge that has gone missing or stale.
+ * Older ScriptSync builds in a second editor window blindly delete the global
+ * port file on their own start/stop, leaving this healthy bridge undiscoverable
+ * from outside its workspace. Called on helper (re)connects and on a slow
+ * heartbeat so such deletions heal automatically. A file owned by another live
+ * bridge process is left alone, matching removeIfOwnedOrDead.
+ */
+export function reassertPortFiles(): void {
+	if (!lastPayload) return;
+	const targets: string[] = [];
+	const workspaceTarget = workspacePortFilePath();
+	if (workspaceTarget) targets.push(workspaceTarget);
+	if (globalPortFileEnabled) targets.push(globalPortFilePath());
+	for (const target of targets) {
+		if (needsReassert(target)) writeOne(target, lastPayload);
+	}
+}
+
+function needsReassert(target: string): boolean {
+	try {
+		if (!fs.existsSync(target)) return true;
+		const data = JSON.parse(fs.readFileSync(target, 'utf8'));
+		if (data?.pid === lastPayload!.pid) {
+			// Our own file — repair it only if the contents drifted.
+			return data.port !== lastPayload!.port || data.token !== lastPayload!.token;
+		}
+		if (typeof data?.pid === 'number' && pidAlive(data.pid)) {
+			return false; // a live foreign bridge owns this file — leave it
+		}
+		return true; // dead owner or invalid structure
+	} catch {
+		return true; // unreadable or corrupt
+	}
 }
 
 function pidAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch {
-		return false;
+	} catch (err: any) {
+		// EPERM: the process exists but belongs to another user.
+		return err?.code === 'EPERM';
 	}
 }
 
@@ -113,6 +152,9 @@ function removeGlobalPortFile(): void {
 }
 
 export function deletePortFile(): void {
+	// The bridge is going down — make sure a late reassert can't resurrect
+	// the files it is about to remove.
+	lastPayload = undefined;
 	[workspacePortFilePath(), globalPortFilePath()].forEach((target) => {
 		if (!target) return;
 		removeIfOwnedOrDead(target);
