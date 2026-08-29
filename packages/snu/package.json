@@ -1,6 +1,6 @@
 {
   "name": "@snutils/snu",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Unified CLI and Model Context Protocol (MCP) server for SN Utils and ScriptSync",
   "author": "Arnoud Kooi <arnoud@snutils.com>",
   "license": "SEE LICENSE IN LICENSE.md",
