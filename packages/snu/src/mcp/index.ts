@@ -2,9 +2,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { TOOLS, getToolByName } from '../registry.js';
-import { ScriptSyncClient, discoverBridge } from '../client.js';
+import { ScriptSyncClient, discoverBridge, checkHealth } from '../client.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { reclaimPort } from '../cli/portReclaim.js';
+import { resolveBridgeAttachment } from '../cli/attachment.js';
 
 // Surfaced verbatim by MCP clients. This is the only guidance an agent that
 // reaches the bridge over MCP ever sees: it has no access to the ScriptSync
@@ -339,31 +340,46 @@ export async function startMcpServer(): Promise<void> {
   // Ensure all logging goes strictly to stderr
   console.error('[snu-mcp] Starting SN Utils MCP Server on stdio...');
 
-  // Auto-start in-process standalone bridge if no bridge is currently reachable
-  try {
-    await discoverBridge();
-  } catch (err: any) {
-    if (
-      err?.code === 'E_BRIDGE_NOT_FOUND' ||
-      err?.code === 'E_BRIDGE_UNREACHABLE' ||
-      err?.code === 'E_STALE_PORT_FILE'
-    ) {
-      console.error('[snu-mcp] No active VS Code bridge found. Starting in-process standalone bridge on WS 1978 & HTTP 1977...');
-      // Discovery saw no bridge, yet the WS port may still be held by an
-      // orphaned snu instance (stale/clobbered port file). Reclaim it so this
-      // server takes over instead of crashing on EADDRINUSE. VS Code hosts and
-      // foreign processes are left alone.
+  // Obtain a bridge WITHOUT displacing one that is already serving.
+  //
+  // This used to reclaim port 1978 and start its own bridge whenever discovery
+  // failed. Discovery fails when the descriptor is missing or stale, which says
+  // nothing about whether a bridge is running — so a healthy standalone bridge
+  // belonging to another MCP client was stopped and replaced. A running bridge
+  // is proven by its health endpoint, not by a file.
+  const attachment = await resolveBridgeAttachment({
+    discover: async () => {
+      const d = await discoverBridge();
+      return { port: d.port, pid: d.pid };
+    },
+    probeHealth: async (port: number) => {
       try {
-        const reclaimed = await reclaimPort(1978, {});
-        if (reclaimed.status === 'reclaimed' && reclaimed.listener) {
-          console.error(`[snu-mcp] Stopped orphaned bridge PID ${reclaimed.listener.pid} to free port 1978.`);
-        }
-        const standalone = new StandaloneBridge();
-        await standalone.start();
-        console.error('[snu-mcp] In-process standalone bridge active.');
-      } catch (startErr: any) {
-        console.error(`[snu-mcp] Could not start in-process bridge: ${startErr?.message || startErr}. Continuing as MCP server only; ServiceNow commands will fail until a bridge is available.`);
+        return await checkHealth(port);
+      } catch {
+        return undefined;
       }
+    },
+  });
+
+  console.error(`[snu-mcp] ${attachment.reason}`);
+
+  if (attachment.mode === 'create-standalone') {
+    try {
+      // Only now, with nothing answering, may a held port be reclaimed: it is
+      // bound by something that is not serving. Editor hosts and foreign
+      // processes are still refused by reclaimPort itself.
+      const reclaimed = await reclaimPort(1978, {});
+      if (reclaimed.status === 'reclaimed' && reclaimed.listener) {
+        console.error(`[snu-mcp] Stopped a non-responding bridge (PID ${reclaimed.listener.pid}) to free port 1978.`);
+      }
+      const standalone = new StandaloneBridge();
+      const { httpPort, wsPort } = await standalone.start();
+      console.error(`[snu-mcp] In-process standalone bridge active on HTTP ${httpPort} / WS ${wsPort}.`);
+    } catch (startErr: any) {
+      console.error(
+        `[snu-mcp] Could not start in-process bridge: ${startErr?.message || startErr}. ` +
+          'Continuing as MCP server only; ServiceNow commands will fail until a bridge is available.'
+      );
     }
   }
 
