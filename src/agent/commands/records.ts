@@ -7,6 +7,12 @@ import { ExtensionUtils } from '../../ExtensionUtils';
 import { Constants } from '../../constants';
 import { safeJoinUnderRoot, sanitizePathComponent } from '../../pathSafety';
 import { mustGetInstanceSettings, getSetting, restRequest, readBackRecord } from './_shared';
+import {
+	resolveCreateScope,
+	applyScopeToFields,
+	ScopeResolution,
+	ScopeRow,
+} from '../scopeResolver';
 
 const eu = new ExtensionUtils();
 
@@ -222,33 +228,29 @@ const create_artifact: CommandHandler = {
 	},
 	async handle(ctx, params) {
 		const { table, fields } = params || {};
-		const scope = params?.scope || 'global';
 		if (!table) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: table');
 		if (!fields || typeof fields !== 'object') {
 			throw new AgentError('E_INVALID_PARAMS', 'Missing required param: fields (object)');
 		}
 		if (!fields.name) throw new AgentError('E_INVALID_PARAMS', 'Missing required field: name');
 
+		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
+		// Resolve BEFORE staging for review, so the review card names the scope
+		// the write will actually use rather than the one that was asked for.
+		const resolution = await resolveScopeForCreate(ctx, instanceSettings, params?.scope, fields);
+		// Undefined when the caller stated nothing: the instance will apply the
+		// session's current application, and only the created record can say
+		// which one that was.
+		const scope = resolution.effectiveScope;
+
 		if (ctx.reviewWritesEnabled() && !isReviewBypass(params)) {
 			return ctx.stageWrite({
 				label: `create ${table} · ${fields.name}`,
-				description: `${table} in ${scope}`,
+				description: `${table} in ${scope || 'the active application'}`,
 				preview: JSON.stringify(fields, null, 2),
 				previewLanguage: 'json',
 				fileName: `${String(fields.name).replace(/[^a-z0-9._\-+]+/gi, '_')}.json`,
 			});
-		}
-
-		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
-
-		// Resolve scope sys_id via scopes.json
-		let scopeSysId: string = scope;
-		const scopesPath = path.join(ctx.instanceFolder, 'scopes.json');
-		if (scope !== 'global' && fs.existsSync(scopesPath)) {
-			try {
-				const scopes = JSON.parse(fs.readFileSync(scopesPath, 'utf8'));
-				if (scopes[scope]) scopeSysId = scopes[scope];
-			} catch { /* ignore */ }
 		}
 
 		const correlationId = `agent_${ctx.request.id}`;
@@ -259,8 +261,11 @@ const create_artifact: CommandHandler = {
 			agentRequestId: correlationId,
 			tableName: table,
 			instance: instanceSettings,
-			scope: scopeSysId,
-			payload: { ...fields, sys_scope: scopeSysId },
+			// Only send a scope when the caller actually chose one. Passing
+			// 'global' by default is what stamped artifacts into Global
+			// regardless of the application that was active.
+			...(resolution.specified ? { scope: resolution.sysScopeId || 'global' } : {}),
+			payload: applyScopeToFields(fields, resolution),
 		});
 
 		ctx.log(`Agent API: Sent create request for ${fields.name} in ${table}`);
@@ -270,10 +275,13 @@ const create_artifact: CommandHandler = {
 		}
 
 		const newSysId = response?.newRecord?.sys_id;
+		// Where the record actually landed. With no scope requested this is the
+		// session's application, which we only learn from the created record.
+		const landedScope: string = response?.newRecord?.scope || scope || 'global';
 
 		// Update the local _map.json so later queries can resolve by name.
 		if (newSysId) {
-			const mapPath = path.join(ctx.instanceFolder, scope, table, '_map.json');
+			const mapPath = path.join(ctx.instanceFolder, landedScope, table, '_map.json');
 			try {
 				const nameToSysId = eu.writeOrReadNameToSysIdMapping(mapPath);
 				const cleanName = fields.name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-');
@@ -287,7 +295,22 @@ const create_artifact: CommandHandler = {
 			sys_id: newSysId,
 			name: response?.newRecord?.name,
 			table: response?.newRecord?.tableName,
-			scope: response?.newRecord?.scope,
+			scope: landedScope,
+			// Surfaced so a caller can verify placement immediately instead of
+			// discovering it at Store-commit time. With no scope requested,
+			// effectiveScope is whatever application the session was in.
+			requestedScope: resolution.requestedScope ?? null,
+			effectiveScope: resolution.effectiveScope ?? landedScope,
+			scopeWasSpecified: resolution.specified,
+			sysScopeId: resolution.sysScopeId,
+			...(resolution.specified
+				? {}
+				: {
+					warnings: [
+						`No scope was specified, so this ${table} was created in '${landedScope}' — ` +
+							`the application the ServiceNow session was in. Pass scope explicitly to pin it.`,
+					],
+				}),
 		};
 
 		if (params?.await && newSysId) {
@@ -300,6 +323,65 @@ const create_artifact: CommandHandler = {
 		return base;
 	},
 };
+
+/**
+ * Resolve a create's application scope against the live instance.
+ *
+ * The lookup is always a real query, never served from the local scopes.json
+ * cache: that cache is written opportunistically, is empty in a fresh
+ * workspace, and cannot tell that an instance was cloned or rebuilt with new
+ * sys_ids. Reading it is exactly how a scope NAME used to reach the instance in
+ * the sys_scope field with no error.
+ */
+async function resolveScopeForCreate(
+	ctx: any,
+	instanceSettings: any,
+	scope: unknown,
+	fields: Record<string, any>
+): Promise<ScopeResolution> {
+	const lookup = async (scopeName: string): Promise<ScopeRow | undefined> => {
+		const { data } = await restRequest(ctx, instanceSettings, {
+			endpoint: '/api/now/table/sys_scope',
+			method: 'GET',
+			queryParams: {
+				sysparm_query: `scope=${scopeName}`,
+				sysparm_fields: 'sys_id,scope',
+				sysparm_limit: '1',
+				sysparm_exclude_reference_link: 'true',
+			},
+		});
+		const row = Array.isArray(data?.result) ? data.result[0] : undefined;
+		if (!row) return undefined;
+		const sysId = typeof row.sys_id === 'object' ? row.sys_id?.value : row.sys_id;
+		const name = typeof row.scope === 'object' ? row.scope?.value : row.scope;
+		return typeof sysId === 'string' && sysId ? { sys_id: sysId, scope: name || scopeName } : undefined;
+	};
+
+	try {
+		return await resolveCreateScope({ scope, fields, lookup });
+	} catch (err: any) {
+		if (err?.code === 'E_INVALID_PARAMS') {
+			throw new AgentError(err.code, err.message);
+		}
+		throw err;
+	}
+}
+
+/**
+ * Heuristic: does this table hold records that become part of an application?
+ *
+ * Deliberately a warning and not a gate. There is no reliable client-side test
+ * for "is an application artifact" — the honest one is whether the table is
+ * tracked in customer updates, which we cannot check from here — and
+ * rest_request can insert anything with no scope logic at all, so a hard block
+ * here would be enforcement theatre. The intended path (create_artifact) is
+ * strict; this only catches the accident of reaching for the wrong tool.
+ */
+function looksLikeArtifactTable(table: string): boolean {
+	const t = table.trim().toLowerCase();
+	if (t.startsWith('x_')) return true; // scoped application table
+	return /^(sys_script|sys_ui_|sys_ws_|sys_processor|sys_rest_|sys_transform|sys_web_service|sp_|sysauto|sys_atf_|sys_hub_|sys_report|sys_security_acl)/.test(t);
+}
 
 const create_record: CommandHandler = {
 	name: 'create_record',
@@ -332,16 +414,43 @@ const create_record: CommandHandler = {
 		}
 
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
+
+		// Scope here is the TRANSACTION scope, not a field on the row.
+		//
+		// `sys_scope` is a column on sys_metadata descendants — application
+		// files. A plain data row (incident, task, sys_user) has no such column,
+		// so injecting one would at best be ignored. What a scoped write
+		// actually needs is a matching transaction scope, or the instance
+		// refuses the insert with a cross-scope security constraint. Only
+		// demanded when the caller shows they care about a scope; an explicit
+		// fields.sys_scope is left exactly as the caller wrote it.
+		const wantsScope = params?.scope !== undefined || typeof fields?.sys_scope === 'string';
+		const resolution = wantsScope
+			? await resolveScopeForCreate(ctx, instanceSettings, params?.scope, fields)
+			: undefined;
+
 		const { data } = await restRequest(ctx, instanceSettings, {
 			endpoint: `/api/now/table/${table.trim()}`,
 			method: 'POST',
 			body: fields,
-			queryParams: { sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true' },
+			queryParams: {
+				sysparm_display_value: 'false',
+				sysparm_exclude_reference_link: 'true',
+				...(resolution?.sysScopeId ? { sysparm_transaction_scope: resolution.sysScopeId } : {}),
+			},
 		});
 
 		// POST /api/now/table returns the inserted row, so the write is already
 		// verified: no follow-up get_record needed.
 		const record = data?.result ?? null;
+		const scopeWarnings: string[] = [];
+		if (!resolution && looksLikeArtifactTable(table)) {
+			scopeWarnings.push(
+				`'${table.trim()}' looks like an application artifact table, and this create was sent with no scope, ` +
+					`so the instance decided where it lands. Use create_artifact (snu artifact create) with an explicit ` +
+					`scope for artifacts — it resolves and reports the scope instead of leaving it implicit.`
+			);
+		}
 		const readField = (name: string): string => {
 			const value = record?.[name];
 			if (value && typeof value === 'object') return String(value.value ?? value.display_value ?? '');
@@ -356,6 +465,14 @@ const create_record: CommandHandler = {
 			sys_id,
 			name: readField('number') || readField('name') || readField('sys_name') || readField('short_description'),
 			record,
+			...(resolution
+				? {
+					requestedScope: resolution.requestedScope,
+					effectiveScope: resolution.effectiveScope,
+					sysScopeId: resolution.sysScopeId,
+				}
+				: {}),
+			...(scopeWarnings.length ? { warnings: scopeWarnings } : {}),
 		};
 	},
 };

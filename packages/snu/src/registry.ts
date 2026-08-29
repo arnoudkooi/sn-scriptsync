@@ -219,12 +219,12 @@ export const TOOLS: ToolDefinition[] = [
     name: 'snu_create_artifact',
     agentCommand: 'create_artifact',
     description:
-      'Create a new scriptable artifact (Script Include, Business Rule, UI Action, etc.) in ServiceNow and track it locally. Requires fields.name and the createArtifacts gate. NOT for plain data rows: to create an incident, task, sys_user, catalog request or any record whose display field is not "name", use snu_create_record instead. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
+      'Create a new scriptable artifact (Script Include, Business Rule, UI Action, etc.) in ServiceNow and track it locally. Requires fields.name, an explicit scope, and the createArtifacts gate. The scope is mandatory and is NOT inferred from the application picker: pass the application name (e.g. x_acme_app) to create inside an application, or "global" to create a global artifact deliberately. An artifact filed into the wrong application is invisible until commit time, so this never guesses. NOT for plain data rows: to create an incident, task, sys_user, catalog request or any record whose display field is not "name", use snu_create_record instead. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
     cliCommand: 'artifact create',
     cliUsage: 'snu artifact create <table> <name> [--fields <json>] [--scope <scope>] [--instance <i>] [--json]',
     cliOptions: {
       fields: { type: 'string', short: 'f', description: 'JSON payload dictionary' },
-      scope: { type: 'string', short: 's', description: 'Application scope' },
+      scope: { type: 'string', short: 's', description: 'Application scope name or sys_id, or "global". Omit to use the session\'s current application.' },
     },
     inputSchema: {
       type: 'object',
@@ -232,7 +232,7 @@ export const TOOLS: ToolDefinition[] = [
         table: { type: 'string', description: 'Target ServiceNow artifact table (e.g. sys_script_include)' },
         name: { type: 'string', description: 'Artifact name (will be mapped into fields.name)' },
         fields: { type: 'object', description: 'Additional field-value dictionary' },
-        scope: { type: 'string', description: 'Application scope (optional)' },
+        scope: { type: 'string', description: 'Application scope name or sys_id, or "global". Optional: omit to create in the session\'s current application. The result reports effectiveScope.' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['table', 'name'],
@@ -590,7 +590,7 @@ export const TOOLS: ToolDefinition[] = [
     cliUsage: 'snu record create <table> [field=value ...] [--fields <json>] [--scope <scope>] [--instance <i>] [--json]',
     cliOptions: {
       fields: { type: 'string', short: 'f', description: 'JSON object of field values' },
-      scope: { type: 'string', short: 's', description: 'Application scope (name or sys_id) to insert in; needed for rows of scoped tables' },
+      scope: { type: 'string', short: 's', description: 'Transaction scope (application name or sys_id) to run the insert in; needed for rows of a scoped app table' },
     },
     inputSchema: {
       type: 'object',
@@ -600,7 +600,7 @@ export const TOOLS: ToolDefinition[] = [
           type: 'object',
           description: 'Field-value dictionary for the new record. Use raw values (sys_id for reference fields, choice value for choice fields), not display labels.',
         },
-        scope: { type: 'string', description: 'Application scope (name or sys_id) to run the insert in; needed for rows of scoped tables (optional)' },
+        scope: { type: 'string', description: 'Transaction scope (application name or sys_id) to run the insert in. Needed for rows of a scoped app table; this sets sysparm_transaction_scope and does not write a sys_scope field, which plain data rows do not have. Optional.' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['table', 'fields'],

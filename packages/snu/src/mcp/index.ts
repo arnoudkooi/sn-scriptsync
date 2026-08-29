@@ -21,7 +21,9 @@ const SERVER_INSTRUCTIONS = [
   'Choosing a write tool:',
   '- Plain data row (incident, task, sys_user, sys_user_group, cmdb_ci, sc_request, ...) -> snu_create_record.',
   '- Scriptable artifact (Script Include, Business Rule, Client Script, UI Action, widget) -> snu_create_artifact,',
-  '  which also tracks the record in the local workspace.',
+  '  which also tracks the record in the local workspace. Pass scope when the user has said which',
+  '  application they are working in — you cannot see their application picker. Omitting it creates the',
+  '  record in whatever application their session is in; the result reports effectiveScope, so check it.',
   '- Changing a field on an existing record -> snu_update_record.',
   '- Anything the typed tools do not cover (Attachment API, Aggregate API, scripted REST) -> snu_rest_request.',
   '',
@@ -173,12 +175,15 @@ export async function createMcpServer(): Promise<McpServer> {
   // 6. Create Artifact
   server.tool(
     'snu_create_artifact',
-    'Create a new scriptable artifact (Script Include, Business Rule, etc.) in ServiceNow and track it locally. Requires fields.name and createArtifacts.enabled gate. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
+    'Create a new scriptable artifact (Script Include, Business Rule, etc.) in ServiceNow and track it locally. Requires fields.name and the createArtifacts.enabled gate. Pass scope to pin the application (its name, e.g. x_acme_app, or "global"); omit it and the record is created in whichever application the user\'s ServiceNow session is currently in. Prefer passing it when the user has told you which application they are working in — you cannot see their application picker. The result reports effectiveScope and warns when no scope was given: check it, because an artifact filed into the wrong application is invisible until commit time and then has to be deleted and recreated. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
     {
       table: z.string().describe('Target ServiceNow artifact table (e.g. sys_script_include)'),
       name: z.string().describe('Artifact name (will be mapped into fields.name)'),
       fields: z.record(z.any()).optional().describe('Additional field-value dictionary (e.g. script, description)'),
-      scope: z.string().optional().describe('Application scope (optional)'),
+      scope: z
+        .string()
+        .optional()
+        .describe('Application scope name (e.g. x_acme_app) or sys_id, or "global". Omit to use the session\'s current application; the result reports where it landed.'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_create_artifact', args)
