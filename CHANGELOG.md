@@ -1,5 +1,20 @@
 # CHANGELOG.md
 
+## 4.8.8 (2026-08-30)
+
+**Six broken CLI commands fixed, one bridge owner per machine, and creates that never guess an application scope (`@snutils/snu` 0.2.4).**
+- **Fixed: six `snu` commands failed on every invocation in 0.2.3.** `record delete`, `browser form`, `browser set`, `browser action`, `browser nav` and `screenshot` all exited with `The "options.<name>.short" property must be of type string` before reading a single argument, whether or not you passed the flag. Any command whose options have no short form was affected.
+- **Fixed: ScriptSync could throw `command 'extension.syncNow' already exists` and half-start.** Editor commands and views are now registered once when the extension activates rather than on every server start, so a status-bar double-click, the Enable command, a window reload, or a second editor window activating on the same workspace no longer aborts the start with listeners already bound while the status bar says "Running".
+- **A start that cannot bind now reports failure instead of claiming success.** The WebSocket bind is awaited, so a port conflict or a partial startup where only one of the two ports comes up ends in a clear message rather than a bridge that looks running and is not.
+- **Only one editor window hosts the bridge.** A window that finds a healthy bridge elsewhere stays a client and says so, with a "Take over here" action that asks the current owner to release the ports first. Ownership is pinned to the process identity and a heartbeat, so a stale registration left by a crashed or rebooted host no longer looks live — and a live one is never taken by accident.
+- **`snu stop` and `snu restart` can now recover an editor-hosted bridge.** Previously they refused and left you to find and kill the extension-host process by hand. They now ask the owning window to release or cycle the bridge; no signal is ever sent to an editor process.
+- **A wedged bridge no longer holds its registration forever.** Ownership is proven by the bridge answering its health endpoint, not by its process still existing, so a host whose listener has hung can be taken over instead of leaving the bridge unreachable but "owned".
+- **Fixed: `snu artifact create` filed artifacts into Global regardless of the active application.** The create wrote `sys_scope: global` into the record, overriding whichever application was active. Omitting `--scope` now leaves the field alone so the instance applies your current application, exactly as creating the record in the UI does.
+- **Fixed: an unknown `--scope` created the record anyway instead of failing.** A scope name that does not exist on the instance is now refused; it is resolved against `sys_scope` on the instance rather than from a local cache that is empty in a fresh workspace and cannot tell that an instance was cloned.
+- **Creates now report where the record landed.** `requestedScope`, `effectiveScope` and the resolved scope sys_id come back with the result, plus a warning when no scope was given, so placement is verifiable at the call site instead of at commit time.
+- **`snu status` reports the host again.** An editor-hosted bridge showed `Host: unknown`; health now carries `hostKind`, the extension version and the workspace root.
+- **Standalone bridge port files are written owner-only (0600).** They carry the bridge auth token and were previously left at the default permissions.
+
 ## 4.8.7 (2026-08-28)
 
 **Self-healing bridge discovery and a quieter helper tab (`@snutils/snu` 0.2.3).**
