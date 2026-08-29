@@ -16,6 +16,7 @@ import {
   requestEditorBridgeLifecycle,
   waitForBridgeUnreachable,
   waitForBridgeRestarted,
+  waitForDiscovery,
 } from './daemon.js';
 import { findPortListener, reclaimPort, terminateListener, classifyListener, ReclaimResult, PortListener } from './portReclaim.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
@@ -424,20 +425,37 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
             },
           }
         );
+        // Serving and discoverable are different states: the global descriptor
+        // is rewritten only after the browser helper reconnects, so reporting
+        // plain success here made an immediate `snu status` look like a
+        // healthy orphan.
+        const discoverable = await waitForDiscovery({ portFile, cwd: process.cwd() });
         if (isJsonMode) {
           outputJson({
             restarted: true,
+            discoverable,
             hostKind: 'vscode',
             previousPid,
             pid: health.pid,
             workspaceRoot: health.workspaceRoot,
             extensionVersion: health.extensionVersion,
+            ...(discoverable
+              ? {}
+              : {
+                note:
+                  'The bridge is serving but not yet registered. Its discovery file is rewritten when the SN Utils helper tab reconnects; until then commands run from outside this workspace may not find it.',
+              }),
           });
         } else {
           console.log(`\nRestarted ${editorLabel}.`);
           console.log(`  Host:      ${health.hostKind || 'vscode'}`);
           console.log(`  PID:       ${health.pid}${health.pid === previousPid ? ' (same extension host)' : ''}`);
-          console.log(`  HTTP API:  http://127.0.0.1:${status.discovery.port}/api\n`);
+          console.log(`  HTTP API:  http://127.0.0.1:${status.discovery.port}/api`);
+          if (!discoverable) {
+            console.log('  Discovery: not registered yet — the discovery file is rewritten when the');
+            console.log('             SN Utils helper tab reconnects in the browser.');
+          }
+          console.log('');
         }
         return;
       }

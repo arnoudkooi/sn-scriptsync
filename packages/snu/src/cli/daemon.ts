@@ -282,3 +282,36 @@ export async function waitForBridgeRestarted(
     'E_RESTART_FAILED'
   );
 }
+
+/**
+ * Wait, briefly and optimistically, for a restarted bridge to become
+ * discoverable again.
+ *
+ * Serving and discoverable are not the same state. The global descriptor
+ * (~/.sn-scriptsync/agent-port.json) is removed on every start and only
+ * re-written once the browser helper reconnects and reports a Pro licence, so
+ * for roughly a second after a restart the bridge answers health while no
+ * descriptor names it. `snu restart` reported success in that window and an
+ * immediate `snu status` then described a healthy orphan.
+ *
+ * This never fails the restart. A workspace-external caller without a Pro
+ * licence has no global descriptor at all, and blocking on one that is never
+ * coming would turn a working restart into a hang. The caller reports what is
+ * true instead: restarted yes, discoverable not yet.
+ */
+export async function waitForDiscovery(
+  options: DiscoveryOptions,
+  timeoutMs = 5_000
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const status = await inspectBridge(options);
+      if (status.running) return true;
+    } catch {
+      /* discovery is allowed to fail while the descriptor is being rewritten */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}

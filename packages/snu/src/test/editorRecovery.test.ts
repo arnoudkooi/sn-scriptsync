@@ -204,3 +204,50 @@ test('the failure message names every port that was tried', async () => {
     server.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Serving and discoverable are different states. The global descriptor is
+// removed on every start and rewritten only after the browser helper reconnects
+// and reports a Pro licence, so a restart can be complete while nothing names
+// the bridge yet. Reporting plain success there made an immediate `snu status`
+// describe a healthy orphan.
+// ---------------------------------------------------------------------------
+
+import { waitForDiscovery } from '../cli/daemon.js';
+import * as fsx from 'fs';
+import * as osx from 'os';
+import * as pathx from 'path';
+
+function workspaceWithDescriptor(port: number, pid: number): string {
+  const root = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'snu-disc-'));
+  const dir = pathx.join(root, '.vscode');
+  fsx.mkdirSync(dir, { recursive: true });
+  fsx.writeFileSync(
+    pathx.join(dir, 'sn-agent-port.json'),
+    JSON.stringify({ port, pid, token: 'tok', apiVersion: 9 })
+  );
+  return root;
+}
+
+test('discovery is reported false rather than hanging when no descriptor appears', async () => {
+  // A workspace-external caller without a Pro licence never gets a global
+  // descriptor. Blocking on one that is not coming would turn a working
+  // restart into a hang.
+  const empty = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'snu-empty-'));
+  const started = Date.now();
+  const found = await waitForDiscovery({ cwd: empty, portFile: pathx.join(empty, 'nope.json') }, 400);
+  assert.strictEqual(found, false);
+  assert.ok(Date.now() - started < 3_000, 'it must give up quickly, not block');
+});
+
+test('discovery is reported true once a descriptor names a serving bridge', async () => {
+  const server = healthServer([{ startedAt: 1, pid: process.pid }]);
+  const port = await listen(server);
+  const root = workspaceWithDescriptor(port, process.pid);
+  try {
+    assert.strictEqual(await waitForDiscovery({ cwd: root }, 3_000), true);
+  } finally {
+    server.close();
+    fsx.rmSync(root, { recursive: true, force: true });
+  }
+});
