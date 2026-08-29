@@ -20,6 +20,14 @@ export interface Runtime {
 	/** Build/license handshake of the connected helper tab, if any. */
 	getHelperBuildInfo?(): HelperBuildInfo | null;
 	getInstanceGates?(origin: string): Record<string, any> | null;
+	/** Stop the bridge from a remote request (`snu stop`/`snu restart` against an
+	 * editor-hosted bridge). Resolves once the ports are released. */
+	stopBridge?(): Promise<void>;
+	/** Stop and start again in one lifecycle-serialised operation. This is what
+	 * removes the manual `kill` from editor-host recovery. */
+	restartBridge?(): Promise<void>;
+	/** Current lifecycle state, for health and diagnostics. */
+	bridgeState?(): string;
 }
 
 let runtime: Runtime | undefined;

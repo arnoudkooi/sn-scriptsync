@@ -11,6 +11,7 @@ tslint.json
 
 # Build artifacts
 out/.tsbuildinfo
+out/test/**
 **/*.map
 *.vsix
 **/*.vsix

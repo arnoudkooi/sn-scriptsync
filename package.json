@@ -384,6 +384,7 @@
 		"postinstall": "node scripts/nosync-node-modules.mjs",
 		"build:agent-docs": "tsx scripts/build-agent-docs.ts",
 		"compile": "npm run build:agent-docs && tsc -p ./",
+		"test": "tsc -p ./ && node --test out/test/*.test.js",
 		"package": "vsce package",
 		"publish:marketplace": "vsce publish",
 		"release": "node scripts/publish.mjs",

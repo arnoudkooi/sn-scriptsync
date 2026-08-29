@@ -122,3 +122,90 @@ export async function waitForBridgeExit(
     'E_STOP_TIMEOUT'
   );
 }
+
+/**
+ * Send a lifecycle command to an editor-hosted bridge.
+ *
+ * The standalone bridge exposes /api/yield; the editor host routes everything
+ * through POST /api. Recovering an editor-hosted bridge used to be impossible
+ * from here — the CLI refused, and the user had to find and kill an extension
+ * host PID by hand. Asking the owning window to stand down is the safe
+ * equivalent: no signals are ever sent to an editor process.
+ */
+export async function requestEditorBridgeLifecycle(
+  status: ActiveBridgeStatus,
+  command: 'yield' | 'restart',
+  fetchImpl: YieldFetch = fetch as unknown as YieldFetch
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetchImpl(`http://127.0.0.1:${status.discovery.port}/api`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Agent-Token': status.discovery.token,
+      },
+      body: JSON.stringify({ id: `snu_lifecycle_${command}`, command, params: {} }),
+      signal: controller.signal,
+    });
+    const payload = (await response.json().catch(() => ({}))) as { status?: string; error?: string };
+    if (!response.ok || payload.status !== 'success') {
+      throw new ScriptSyncClientError(
+        payload.error || `The editor-hosted bridge refused to ${command} (HTTP ${response.status}).`,
+        command === 'yield' ? 'E_STOP_FAILED' : 'E_RESTART_FAILED',
+        response.status
+      );
+    }
+  } catch (err: any) {
+    if (err instanceof ScriptSyncClientError) throw err;
+    throw new ScriptSyncClientError(
+      `Could not ${command} the editor-hosted bridge: ${err?.message || err}`,
+      command === 'yield' ? 'E_STOP_FAILED' : 'E_RESTART_FAILED'
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Wait for an editor-hosted bridge to go quiet.
+ *
+ * The extension-host process itself stays alive, so PID liveness proves
+ * nothing here — the health endpoint is the only honest signal.
+ */
+export async function waitForBridgeUnreachable(port: number, timeoutMs = 8_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await checkHealth(port);
+    } catch {
+      return; // no longer answering: the transports are down
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new ScriptSyncClientError(
+    `The bridge on port ${port} was still answering after ${timeoutMs / 1000}s.`,
+    'E_STOP_TIMEOUT'
+  );
+}
+
+/** Wait for a bridge to answer again after a restart. */
+export async function waitForBridgeReachable(port: number, timeoutMs = 20_000): Promise<HealthResponse> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      return await checkHealth(port);
+    } catch (err) {
+      lastError = err;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  throw new ScriptSyncClientError(
+    `The bridge did not come back on port ${port} within ${timeoutMs / 1000}s: ${
+      (lastError as any)?.message || lastError
+    }`,
+    'E_RESTART_FAILED'
+  );
+}

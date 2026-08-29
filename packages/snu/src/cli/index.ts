@@ -9,7 +9,14 @@ import { formatHumanOutput, outputJson, outputError } from './format.js';
 import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { getUpdateNotice, shouldCheckForUpdates } from './updateCheck.js';
-import { inspectBridge, requestStandaloneYield, waitForBridgeExit } from './daemon.js';
+import {
+  inspectBridge,
+  requestStandaloneYield,
+  waitForBridgeExit,
+  requestEditorBridgeLifecycle,
+  waitForBridgeUnreachable,
+  waitForBridgeReachable,
+} from './daemon.js';
 import { findPortListener, reclaimPort, terminateListener, classifyListener, ReclaimResult, PortListener } from './portReclaim.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 import { runSetup } from './setup.js';
@@ -372,6 +379,46 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         }
         return pid;
       };
+
+      // An editor-hosted bridge is no longer a dead end: ask the owning window
+      // to stand down or cycle itself. No signal is ever sent to an editor
+      // process — that was the manual step this replaces.
+      if ((lifecycleCommand === 'stop' || lifecycleCommand === 'restart') && status.running && status.health.hostKind === 'vscode') {
+        const editorLabel = status.health.extensionVersion
+          ? `sn-scriptsync ${status.health.extensionVersion}`
+          : 'the editor-hosted bridge';
+        if (lifecycleCommand === 'stop') {
+          await requestEditorBridgeLifecycle(status, 'yield');
+          await waitForBridgeUnreachable(status.discovery.port);
+          if (isJsonMode) {
+            outputJson({ stopped: true, hostKind: 'vscode', pid: status.health.pid });
+          } else {
+            console.log(`\nAsked ${editorLabel} (PID ${status.health.pid}) to release the bridge ports.`);
+            console.log('Click sn-scriptsync in that editor window to start it again.\n');
+          }
+          return;
+        }
+        const previousPid = status.health.pid;
+        await requestEditorBridgeLifecycle(status, 'restart');
+        await waitForBridgeUnreachable(status.discovery.port);
+        const health = await waitForBridgeReachable(status.discovery.port);
+        if (isJsonMode) {
+          outputJson({
+            restarted: true,
+            hostKind: 'vscode',
+            previousPid,
+            pid: health.pid,
+            workspaceRoot: health.workspaceRoot,
+            extensionVersion: health.extensionVersion,
+          });
+        } else {
+          console.log(`\nRestarted ${editorLabel}.`);
+          console.log(`  Host:      ${health.hostKind || 'vscode'}`);
+          console.log(`  PID:       ${health.pid}${health.pid === previousPid ? ' (same extension host)' : ''}`);
+          console.log(`  HTTP API:  http://127.0.0.1:${status.discovery.port}/api\n`);
+        }
+        return;
+      }
 
       if (lifecycleCommand === 'stop') {
         if (!status.running) {

@@ -9,4 +9,16 @@ export { findPortListener, classifyListener, terminateListener, isPortFree } fro
 export * as pendingRegistry from './pendingRegistry';
 export { AgentError, AgentErrorCode, httpStatusForCode, inferCodeFromMessage } from './errors';
 export { listCommands, commandNames } from './commands';
+export { BridgeLifecycle } from './lifecycle';
+export type { LifecycleState, LifecycleTransports, StartOutcome } from './lifecycle';
+export {
+	evaluateLease,
+	readLease,
+	writeLease,
+	releaseLease,
+	leaseFilePath,
+	processStartTime,
+	LEASE_HEARTBEAT_MS,
+} from './ownerLease';
+export type { OwnerLease, LeaseVerdict } from './ownerLease';
 export type { AgentRequest } from './types';

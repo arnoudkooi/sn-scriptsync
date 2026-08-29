@@ -9,6 +9,7 @@ import { cdpCommands } from './cdp';
 import { scopedAppCommands } from './scopedapp';
 import { restCommands } from './rest';
 import { backgroundCommands } from './background';
+import { lifecycleCommands } from './lifecycle';
 
 const allHandlers: CommandHandler[] = [
 	...connectionCommands,
@@ -21,6 +22,7 @@ const allHandlers: CommandHandler[] = [
 	...scopedAppCommands,
 	...restCommands,
 	...backgroundCommands,
+	...lifecycleCommands,
 ];
 
 const registry = new Map<string, CommandHandler>();

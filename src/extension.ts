@@ -21,6 +21,7 @@ import {
 import * as path from "path";
 import nodePath = require('path');
 import * as fs from 'fs';
+import * as os from 'os';
 import {
 	setRuntime as setAgentRuntime,
 	setSyncStateProvider,
@@ -38,6 +39,16 @@ import {
 	findPortListener,
 	classifyListener,
 	terminateListener,
+	isPortFree,
+	BridgeLifecycle,
+	LifecycleState,
+	evaluateLease,
+	readLease,
+	writeLease,
+	releaseLease,
+	processStartTime,
+	OwnerLease,
+	LEASE_HEARTBEAT_MS,
 } from './agent';
 
 
@@ -50,6 +61,13 @@ let scopeJson : any = {};
 let wss;
 let serverRunning = false;
 let agentHttpState: HttpServerState | undefined;
+/** Editor commands/views are registered once per activation, never per start. */
+let queueViewsRegistered = false;
+/** Inputs the transport start needs, published by startServers() just before it
+ * asks the lifecycle to bind. The lifecycle is a singleton, so the hook cannot
+ * close over startServers()' locals. */
+let bridgeStartContext: { docsDir: string; workspaceRoot: string } | undefined;
+let leaseHeartbeat: NodeJS.Timeout | undefined;
 //let openFiles = {};
 
 let scriptSyncStatusBarItem: vscode.StatusBarItem;
@@ -1197,6 +1215,14 @@ export function activate(context: vscode.ExtensionContext) {
 		stageAgentWrite: (input) => stageAgentWrite(input),
 		getHelperBuildInfo: () => connectedHelperInfo,
 		getInstanceGates: (origin: string) => helperInstanceGates.get(origin.toLowerCase()) || null,
+		// Remote lifecycle control, so `snu stop`/`snu restart` can recover an
+		// editor-hosted bridge instead of the user hunting for a PID to kill.
+		stopBridge: () => bridgeLifecycle.stop(),
+		restartBridge: async () => {
+			await bridgeLifecycle.stop();
+			await startServers();
+		},
+		bridgeState: () => bridgeLifecycle.state,
 	});
 	setSyncStateProvider(() => ({
 		pendingFiles: Array.from(pendingFiles),
@@ -1264,6 +1290,11 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeWorkspaceFolders(() => resetWorkspaceRoot())
 	);
+
+	// Commands and views first: they must exist regardless of whether the bridge
+	// starts, and registering them exactly once is what stops a second start
+	// (or a second window) from throwing "command already exists".
+	registerQueueViewsAndCommands(context);
 
 	const resolvedRoot = getWorkspaceRoot();
 	if (!resolvedRoot) {
@@ -1488,6 +1519,9 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+	// Release the lease BEFORE the ports close: a window that takes over next
+	// should find no claim at all, rather than having to prove ours is stale.
+	releaseOwnerLease();
 	stopAgentHttpServer(agentHttpState).catch(() => { /* ignore */ });
 	agentHttpState = undefined;
 }
@@ -2081,6 +2115,246 @@ async function startServers() {
 		}
 	});
 
+	bridgeStartContext = { docsDir: agentRulesSourceDir, workspaceRoot: syncRoot };
+
+	// A healthy bridge in another window keeps the fixed ports; this window
+	// becomes a client instead of starting a competing server. Ownership can
+	// still be moved deliberately — but never taken by accident, which is what
+	// two windows racing for 1977/1978 amounted to.
+	const owner = findLiveForeignOwner();
+	if (owner) {
+		const where = owner.workspaceRoot ? ` (${owner.workspaceRoot})` : '';
+		updateScriptSyncStatusBarItem('hosted by another window');
+		debugLog(`bridge owned by pid ${owner.pid} (${owner.editorKind}) — standing down`);
+		const pick = await vscode.window.showInformationMessage(
+			`SN ScriptSync is already hosted by another ${owner.editorKind || 'editor'} window${where}. ` +
+			`Agents and the browser helper are connected to that bridge.`,
+			'Take over here'
+		);
+		if (pick !== 'Take over here') return;
+
+		if (!(await requestOwnerStandDown(owner))) {
+			vscode.window.showWarningMessage(
+				`SN ScriptSync: the window hosting the bridge (PID ${owner.pid}) did not release it. ` +
+				`Stop ScriptSync there, then start it here.`
+			);
+			updateScriptSyncStatusBarItem('click to start.');
+			return;
+		}
+		debugLog(`took bridge ownership from pid ${owner.pid}`);
+	}
+
+	try {
+		await bridgeLifecycle.start();
+	} catch (err: any) {
+		if (err instanceof BridgeStartAborted) {
+			// The user already saw why (or chose it) — no error dialog.
+			debugLog(`bridge start aborted: ${err.message}`);
+			if (!err.userCancelled) vscode.window.showWarningMessage(`SN ScriptSync: ${err.message}`);
+			return;
+		}
+		vscode.window.showErrorMessage(`SN ScriptSync: bridge failed to start — ${err?.message || err}`);
+		return;
+	}
+
+	setScopeTree();
+	// Views and commands are registered once at activation (see
+	// registerQueueViewsAndCommands). Re-registering them here is what made
+	// a second start throw "command already exists".
+
+}
+
+function handleCreateRecordResponse(responseJson) {
+	auditLog('remote_create_response', {
+		success: !!responseJson.success,
+		tableName: responseJson?.newRecord?.tableName,
+		name: responseJson?.newRecord?.name,
+		error: responseJson?.error || null
+	});
+	// Agent API requests use pendingRegistry for async round-trips.
+	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) {
+		return;
+	}
+	
+	// Original logic for file-based creation flow
+	if (responseJson.success) {
+		vscode.window.showInformationMessage(`Successfully created artifact: ${responseJson.newRecord.name}`);
+		
+		// Adapt the response to the structure expected by saveFieldAsFile
+		const artifactToSave = {
+			instance: responseJson.instance,
+			table: responseJson.newRecord.tableName,
+			sys_id: responseJson.newRecord.sys_id,
+			name: responseJson.newRecord.name,
+			scope: responseJson.newRecord.scope,
+			field: responseJson.newRecord.field || 'script', // Default to script if not provided
+			fieldType: responseJson.newRecord.fieldType || 'script', 
+			content: responseJson.newRecord.content
+		};
+
+		saveFieldAsFile(artifactToSave);
+
+	} else {
+		vscode.window.showErrorMessage(`Failed to create artifact: ${responseJson.error}`);
+	}
+}
+
+/**
+ * Ask the current owner to release the bridge, then wait for the ports to go
+ * quiet. Purely cooperative: we send a request over the owner's own HTTP API
+ * and never signal its process. If it declines or does not answer, ownership
+ * stays where it is.
+ */
+async function requestOwnerStandDown(owner: OwnerLease, timeoutMs = 8_000): Promise<boolean> {
+	try {
+		const portFile = path.join(os.homedir(), '.sn-scriptsync', 'agent-port.json');
+		const descriptor = JSON.parse(fs.readFileSync(portFile, 'utf8'));
+		if (descriptor?.pid !== owner.pid || typeof descriptor?.token !== 'string') {
+			debugLog('take over: port descriptor does not match the lease holder');
+			return false;
+		}
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 3_000);
+		try {
+			await fetch(`http://127.0.0.1:${descriptor.port}/api`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'X-Agent-Token': descriptor.token },
+				body: JSON.stringify({ id: 'vscode_takeover', command: 'yield' }),
+				signal: controller.signal,
+			});
+		} finally {
+			clearTimeout(timer);
+		}
+	} catch (err: any) {
+		debugLog(`take over request failed: ${err?.message || err}`);
+		return false;
+	}
+
+	// Wait for the ports to actually free up before we try to bind them.
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (await isPortFree(1978)) return true;
+		await new Promise((resolve) => setTimeout(resolve, 150));
+	}
+	return isPortFree(1978);
+}
+
+/**
+ * The single authority on whether this window's bridge is running.
+ *
+ * Every start/stop path — status bar, enable/disable commands, activation,
+ * deactivation, the CLI's yield request — goes through this machine, which is
+ * what makes repeated or concurrent calls idempotent instead of racing.
+ */
+const bridgeLifecycle = new BridgeLifecycle({
+	transports: {
+		start: () => startBridgeTransports(),
+		stop: () => stopBridgeTransports(),
+	},
+	log: (message) => debugLog(message),
+	onStateChange: (next) => onBridgeStateChange(next),
+});
+
+function onBridgeStateChange(next: LifecycleState): void {
+	const running = next === 'running';
+	setServerRunningContext(running);
+	if (running) {
+		updateScriptSyncStatusBarItem('Running');
+		return;
+	}
+	if (next === 'starting') {
+		updateScriptSyncStatusBarItem('starting...');
+		return;
+	}
+	if (next === 'stopping') {
+		updateScriptSyncStatusBarItem('stopping...');
+		return;
+	}
+	updateScriptSyncStatusBarItem(next === 'failed' ? 'start failed - click to retry.' : 'click to start.');
+}
+
+/** Identify the host editor for diagnostics: code, cursor, windsurf, ... */
+function currentEditorKind(): string {
+	return (vscode.env.appName || 'unknown').toLowerCase().replace(/\s+/g, '-');
+}
+
+function buildOwnerLease(): OwnerLease {
+	const now = Date.now();
+	return {
+		pid: process.pid,
+		processStartedAt: processStartTime(process.pid, now) ?? now,
+		hostKind: 'vscode',
+		editorKind: currentEditorKind(),
+		workspaceRoot: getWorkspaceRoot() || undefined,
+		extensionVersion: extensionContext?.extension?.packageJSON?.version,
+		transportApiVersion: AGENT_API_VERSION,
+		lastHeartbeatAt: now,
+	};
+}
+
+/**
+ * Claim ownership and keep proving we are alive. The heartbeat is what lets
+ * another window distinguish "someone owns this" from "someone crashed holding
+ * it" without killing a healthy bridge to find out.
+ */
+function acquireOwnerLease(): void {
+	writeLease(buildOwnerLease());
+	if (leaseHeartbeat) clearInterval(leaseHeartbeat);
+	leaseHeartbeat = setInterval(() => {
+		try {
+			if (bridgeLifecycle.isRunning) writeLease(buildOwnerLease());
+		} catch { /* best effort */ }
+	}, LEASE_HEARTBEAT_MS);
+	leaseHeartbeat.unref?.();
+}
+
+function releaseOwnerLease(): void {
+	if (leaseHeartbeat) {
+		clearInterval(leaseHeartbeat);
+		leaseHeartbeat = undefined;
+	}
+	releaseLease();
+}
+
+/**
+ * Decide whether this window may claim the bridge.
+ *
+ * A healthy owner keeps the fixed ports; this window becomes a client rather
+ * than starting a competing server. Returns the live lease when we must stand
+ * down, or undefined when the ports are ours to take.
+ */
+function findLiveForeignOwner(): OwnerLease | undefined {
+	const verdict = evaluateLease(readLease());
+	if (verdict.status === 'live') return verdict.lease;
+	if (verdict.status === 'stale') {
+		debugLog(`ignoring stale bridge lease (pid ${verdict.lease.pid}, ${verdict.reason})`);
+	}
+	return undefined;
+}
+
+/**
+ * Raised when a start cannot proceed for a reason the user already knows about
+ * (a port held by another window, a takeover they declined). Distinct from a
+ * crash: startServers() reports it quietly instead of as an internal error.
+ */
+class BridgeStartAborted extends Error {
+	constructor(message: string, readonly userCancelled = false) {
+		super(message);
+		this.name = 'BridgeStartAborted';
+	}
+}
+
+/**
+ * Bind the transports. Called ONLY by the lifecycle state machine, never
+ * directly — the machine is what guarantees two of these cannot overlap.
+ *
+ * Must reject on any failure: a resolved promise is taken as proof the bridge
+ * is fully up, and anything short of that used to leave listeners bound while
+ * the status bar claimed "Running".
+ */
+async function startBridgeTransports(): Promise<void> {
+	const { docsDir: agentRulesSourceDir, workspaceRoot: syncRoot } = bridgeStartContext
+		?? { docsDir: '', workspaceRoot: getWorkspaceRoot() || '' };
 	// Start the HTTP Agent API (preferred, event-driven) and optionally the
 	// legacy file-based transport. Both sit on top of the same dispatcher.
 	// This startup also asks a standalone `snu` bridge to yield ports 1977/1978.
@@ -2088,7 +2362,15 @@ async function startServers() {
 	// otherwise the first WebSocket bind races the graceful shutdown and the
 	// save icons remain connected to the standalone process instead of VS Code.
 	try {
-		const state = await startAgentHttpServer({ onLog: (m) => debugLog(m), docsDir: agentRulesSourceDir });
+		const state = await startAgentHttpServer({
+			onLog: (m) => debugLog(m),
+			docsDir: agentRulesSourceDir,
+			// Without this the port descriptor and /api/health both report an
+			// undefined extensionVersion, so `snu status`/`snu doctor` cannot tell
+			// which build owns the bridge.
+			extensionVersion: extensionContext?.extension?.packageJSON?.version || undefined,
+			workspaceRoot: syncRoot,
+		});
 		agentHttpState = state;
 		debugLog(`Agent HTTP API listening on 127.0.0.1:${state.port}`);
 		// Surface the live endpoint so users can confirm the HTTP Agent API is up.
@@ -2117,17 +2399,11 @@ async function startServers() {
 	// failing with "port 1978 is still in use".
 	const holder = await findPortListener(1978);
 	if (holder) {
-		const abortStart = () => {
-			updateScriptSyncStatusBarItem('click to start.');
-			setServerRunningContext(false);
-		};
 		const kind = classifyListener(holder.command);
 		if (kind === 'vscode') {
-			vscode.window.showWarningMessage(
-				`SN ScriptSync: port 1978 is in use by another VS Code/Cursor window (PID ${holder.pid}). Stop ScriptSync in that window first, then click sn-scriptsync to start.`
+			throw new BridgeStartAborted(
+				`Port 1978 is in use by another VS Code/Cursor window (PID ${holder.pid}). Stop ScriptSync in that window first, then click sn-scriptsync to start.`
 			);
-			abortStart();
-			return;
 		}
 		const shortCmd = (holder.command || '').length > 80 ? `${holder.command.slice(0, 77)}...` : holder.command;
 		const desc = kind === 'snu'
@@ -2139,19 +2415,28 @@ async function startServers() {
 			'Stop and Take Over'
 		);
 		if (pick !== 'Stop and Take Over') {
-			abortStart();
-			return;
+			throw new BridgeStartAborted('Start cancelled: port 1978 is still held by another process.', true);
 		}
 		const freed = await terminateListener(holder.pid, 1978);
 		if (!freed) {
-			vscode.window.showErrorMessage(`SN ScriptSync: could not free port 1978 — PID ${holder.pid} did not stop.`);
-			abortStart();
-			return;
+			throw new BridgeStartAborted(`Could not free port 1978 — PID ${holder.pid} did not stop.`);
 		}
 		debugLog(`Took over port 1978 from PID ${holder.pid} (${kind}: ${holder.command || 'unknown command'})`);
 	}
 
 	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});
+
+	// The constructor binds asynchronously. Without awaiting the outcome the
+	// start resolved before 1978 was known to be listening, so an EADDRINUSE
+	// surfaced only as a stray warning while the status bar already said
+	// "Running" — the partial-listener case in the reliability matrix.
+	const wsBindResult = new Promise<void>((resolve, reject) => {
+		const server = wss;
+		const onListening = () => { server.off('error', onError); resolve(); };
+		const onError = (err: any) => { server.off('listening', onListening); reject(err); };
+		server.once('listening', onListening);
+		server.once('error', onError);
+	});
 	// Without an error handler an EADDRINUSE (port not yet released) is thrown as
 	// an uncaught exception and the server silently never starts. Surface it.
 	wss.on('error', (err: any) => {
@@ -2164,7 +2449,11 @@ async function startServers() {
 	});
 	wss.on('connection', (ws: WebSocket, req) => {
 
-		if (!serverRunning) return;
+		// `serverRunning` only flips once the lifecycle reaches 'running', which
+		// is a few microtasks after the socket starts accepting connections.
+		// Accept during 'starting' too, so a helper that reconnects the instant
+		// the port opens is not dropped.
+		if (!serverRunning && bridgeLifecycle.state !== 'starting') return;
 
 		// A (re)connect is a natural moment to heal port files another process
 		// may have deleted while this bridge stayed alive.
@@ -2471,12 +2760,35 @@ async function startServers() {
 		}), function () { });
 
 	});
-	updateScriptSyncStatusBarItem('Running');
-	setServerRunningContext(true);
 
-	setScopeTree();
+	// Only now is the bridge genuinely up on both ports.
+	await wsBindResult;
+	acquireOwnerLease();
+}
+
+/**
+ * Editor commands and tree views are registered ONCE, at activation.
+ *
+ * They used to live inside startServers(), so a second start — a status-bar
+ * double-click, an enable command, a reload, or simply a second editor window
+ * activating against the same workspace — threw
+ * `command 'extension.syncNow' already exists` and aborted the start half-way,
+ * leaving listeners bound to a bridge that never finished coming up. That is
+ * the 2026-08-29 incident.
+ *
+ * Nothing here touches a socket: these handlers act on the pending-save queue,
+ * which exists whether or not the bridge is running.
+ */
+function registerQueueViewsAndCommands(context: vscode.ExtensionContext): void {
+	if (queueViewsRegistered) return;
+	queueViewsRegistered = true;
+
+	const reg = (id: string, handler: (...args: any[]) => any) => {
+		context.subscriptions.push(vscode.commands.registerCommand(id, handler));
+	};
+
 	const infoTreeViewProvider = new InfoTreeViewProvider();
-	vscode.window.registerTreeDataProvider("infoTreeView", infoTreeViewProvider);
+	context.subscriptions.push(vscode.window.registerTreeDataProvider("infoTreeView", infoTreeViewProvider));
 
 	queueProvider = new QueueTreeViewProvider();
 	const queueView = vscode.window.createTreeView("queueTreeView", {
@@ -2494,7 +2806,7 @@ async function startServers() {
 	});
 
 	// Register Sync Now command
-	vscode.commands.registerCommand('extension.syncNow', () => {
+	reg('extension.syncNow', () => {
 		if (pendingFiles.size > 0 || agentStagedCreates.size > 0) {
 			queueProvider.syncNow();
 		} else {
@@ -2503,7 +2815,7 @@ async function startServers() {
 	});
 
 	// Register Pause command
-	vscode.commands.registerCommand('extension.pauseQueue', () => {
+	reg('extension.pauseQueue', () => {
 		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
 		const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
 		const monitorFileChanges = (settings.get('externalChanges.monitorFileChanges') as boolean) ?? true;
@@ -2528,7 +2840,7 @@ async function startServers() {
 	});
 
 	// Register Resume command
-	vscode.commands.registerCommand('extension.resumeQueue', () => {
+	reg('extension.resumeQueue', () => {
 		const settings = vscode.workspace.getConfiguration('sn-scriptsync');
 		const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
 		const monitorFileChanges = (settings.get('externalChanges.monitorFileChanges') as boolean) ?? true;
@@ -2556,7 +2868,7 @@ async function startServers() {
 	});
 
 	// Register Remove from Queue command
-	vscode.commands.registerCommand('extension.removeFromQueue', (item: any) => {
+	reg('extension.removeFromQueue', (item: any) => {
 		if (item && item.filePath) {
 			// Reject: drop from the queue + staged-create bookkeeping AND undo the
 			// materialised file (delete a create we wrote; restore an update we
@@ -2572,14 +2884,14 @@ async function startServers() {
 	});
 
 	// Sync (approve) a single pending file
-	vscode.commands.registerCommand('extension.syncQueuedFile', (item: any) => {
+	reg('extension.syncQueuedFile', (item: any) => {
 		if (item && item.filePath) {
 			syncQueuedFile(item.filePath);
 		}
 	});
 
 	// Open/activate a pending file in the editor
-	vscode.commands.registerCommand('extension.openQueuedFile', async (item: any) => {
+	reg('extension.openQueuedFile', async (item: any) => {
 		try {
 			const filePath: string | undefined = item?.filePath;
 			if (!filePath) {
@@ -2596,7 +2908,7 @@ async function startServers() {
 	});
 
 	// Clear all pending files from the queue (with confirmation)
-	vscode.commands.registerCommand('extension.clearQueue', async () => {
+	reg('extension.clearQueue', async () => {
 		const total = pendingFiles.size;
 		if (total === 0) {
 			vscode.window.showInformationMessage('No pending files to clear.');
@@ -2628,45 +2940,19 @@ async function startServers() {
 			globalDebounceTimer = undefined;
 		}
 	});
-
 }
 
-function handleCreateRecordResponse(responseJson) {
-	auditLog('remote_create_response', {
-		success: !!responseJson.success,
-		tableName: responseJson?.newRecord?.tableName,
-		name: responseJson?.newRecord?.name,
-		error: responseJson?.error || null
-	});
-	// Agent API requests use pendingRegistry for async round-trips.
-	if (responseJson?.agentRequestId && resolvePending(responseJson.agentRequestId, responseJson)) {
-		return;
-	}
-	
-	// Original logic for file-based creation flow
-	if (responseJson.success) {
-		vscode.window.showInformationMessage(`Successfully created artifact: ${responseJson.newRecord.name}`);
-		
-		// Adapt the response to the structure expected by saveFieldAsFile
-		const artifactToSave = {
-			instance: responseJson.instance,
-			table: responseJson.newRecord.tableName,
-			sys_id: responseJson.newRecord.sys_id,
-			name: responseJson.newRecord.name,
-			scope: responseJson.newRecord.scope,
-			field: responseJson.newRecord.field || 'script', // Default to script if not provided
-			fieldType: responseJson.newRecord.fieldType || 'script', 
-			content: responseJson.newRecord.content
-		};
-
-		saveFieldAsFile(artifactToSave);
-
-	} else {
-		vscode.window.showErrorMessage(`Failed to create artifact: ${responseJson.error}`);
-	}
+/**
+ * Release the transports. Called ONLY by the lifecycle state machine.
+ *
+ * Must tolerate a partial start: a failed bind calls straight into here to
+ * release whatever did come up.
+ */
+function stopServers(): Promise<void> {
+	return bridgeLifecycle.stop();
 }
 
-function stopServers() {
+async function stopBridgeTransports(): Promise<void> {
 	// `wss.close()` only stops accepting NEW connections — it leaves existing
 	// sockets (the connected helper tab) open, which keeps port 1978 bound and
 	// makes the next startServers() fail with EADDRINUSE. Terminate the clients
@@ -2676,7 +2962,7 @@ function stopServers() {
 			wss.clients.forEach((client) => { try { client.terminate(); } catch { /* ignore */ } });
 			wss.close();
 		} catch (e) {
-			debugLog(`stopServers: error closing WebSocket server: ${e}`);
+			debugLog(`stopBridgeTransports: error closing WebSocket server: ${e}`);
 		}
 		wss = undefined;
 	}
@@ -2691,9 +2977,8 @@ function stopServers() {
 	helperInstanceGates.clear();
 	helperInstanceGateRevisions.clear();
 	pendingRegistry.rejectAll('E_SERVER_NOT_RUNNING', 'ScriptSync server stopped.');
-	scriptSyncStatusBarItem.tooltip = undefined;
-	updateScriptSyncStatusBarItem('Stopped');
-	setServerRunningContext(false);
+	if (scriptSyncStatusBarItem) scriptSyncStatusBarItem.tooltip = undefined;
+	releaseOwnerLease();
 }
 
 // Where saves land when their scope sys_id can't be turned into a scope name:
