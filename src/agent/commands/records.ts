@@ -291,32 +291,44 @@ const create_artifact: CommandHandler = {
 			} catch { /* best-effort */ }
 		}
 
+		// The instance answers with the scope's sys_id. A caller checking where
+		// their artifact landed needs the application NAME — '8dd17d54...' tells
+		// them nothing. Only worth a lookup when they did not choose the scope
+		// themselves, which is exactly when they need to be told.
+		let landedScopeName = resolution.effectiveScope ?? landedScope;
+		if (!resolution.specified && landedScope && landedScope !== 'global') {
+			landedScopeName = (await lookupScopeName(ctx, instanceSettings, landedScope)) || landedScope;
+		}
+
+		const scopeWarnings = resolution.specified
+			? []
+			: [
+				`No scope was specified, so this ${table} was created in '${landedScopeName}' — ` +
+					`the application the ServiceNow session was in. Pass scope explicitly to pin it.`,
+			];
+
 		const base = {
 			sys_id: newSysId,
 			name: response?.newRecord?.name,
 			table: response?.newRecord?.tableName,
-			scope: landedScope,
+			scope: landedScopeName,
 			// Surfaced so a caller can verify placement immediately instead of
 			// discovering it at Store-commit time. With no scope requested,
 			// effectiveScope is whatever application the session was in.
 			requestedScope: resolution.requestedScope ?? null,
-			effectiveScope: resolution.effectiveScope ?? landedScope,
+			effectiveScope: landedScopeName,
 			scopeWasSpecified: resolution.specified,
-			sysScopeId: resolution.sysScopeId,
-			...(resolution.specified
-				? {}
-				: {
-					warnings: [
-						`No scope was specified, so this ${table} was created in '${landedScope}' — ` +
-							`the application the ServiceNow session was in. Pass scope explicitly to pin it.`,
-					],
-				}),
+			sysScopeId: resolution.sysScopeId ?? (landedScope !== landedScopeName ? landedScope : undefined),
+			warnings: scopeWarnings,
 		};
 
 		if (params?.await && newSysId) {
 			const requestedFieldNames = Object.keys(fields).join(',');
 			const persisted = await readBackRecord(ctx, instanceSettings, table, newSysId, `sys_id,${requestedFieldNames}`);
-			const warnings = buildDropWarnings(fields, persisted);
+			// Concatenate, never replace: the awaited path used to overwrite the
+			// scope warning with the dropped-field warnings, so the one warning
+			// that matters disappeared on the path the CLI always takes.
+			const warnings = [...scopeWarnings, ...buildDropWarnings(fields, persisted)];
 			return { ...base, awaited: true, persisted: pick(persisted, Object.keys(fields)), warnings };
 		}
 
@@ -381,6 +393,22 @@ function looksLikeArtifactTable(table: string): boolean {
 	const t = table.trim().toLowerCase();
 	if (t.startsWith('x_')) return true; // scoped application table
 	return /^(sys_script|sys_ui_|sys_ws_|sys_processor|sys_rest_|sys_transform|sys_web_service|sp_|sysauto|sys_atf_|sys_hub_|sys_report|sys_security_acl)/.test(t);
+}
+
+/** Resolve a scope sys_id back to its application name, best effort. */
+async function lookupScopeName(ctx: any, instanceSettings: any, sysId: string): Promise<string | undefined> {
+	try {
+		const { data } = await restRequest(ctx, instanceSettings, {
+			endpoint: `/api/now/table/sys_scope/${sysId}`,
+			method: 'GET',
+			queryParams: { sysparm_fields: 'scope', sysparm_exclude_reference_link: 'true' },
+		});
+		const row = data?.result;
+		const scope = row && typeof row.scope === 'object' ? row.scope?.value : row?.scope;
+		return typeof scope === 'string' && scope ? scope : undefined;
+	} catch {
+		return undefined; // a name is a nicety; never fail a create over it
+	}
 }
 
 const create_record: CommandHandler = {

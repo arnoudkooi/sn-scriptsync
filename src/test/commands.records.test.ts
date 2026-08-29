@@ -163,3 +163,55 @@ test('create_record leaves an explicitly pinned sys_scope alone', async () => {
 	assert.strictEqual(insert!.body.sys_scope, APP_SYS_ID, 'a caller-pinned value is theirs to keep');
 	assert.strictEqual(insert!.queryParams.sysparm_transaction_scope, APP_SYS_ID);
 });
+
+
+// ---------------------------------------------------------------------------
+// Found by running a real no-scope create against a live instance: the record
+// landed correctly in the active application, but the result reported the
+// scope as a bare sys_id and the warning had vanished entirely on the awaited
+// path — which is the path the CLI always takes.
+// ---------------------------------------------------------------------------
+
+test('the scope warning survives the awaited read-back', async () => {
+	harness.reply({ success: true, newRecord: { sys_id: 'abc', name: 'MyUtils', tableName: 'sys_script_include', scope: APP_SYS_ID } });
+	harness.reply({ success: true, status: 200, data: { result: { scope: 'x_acme_app' } } }); // scope name lookup
+	harness.reply({ success: true, status: 200, data: { result: { sys_id: 'abc', name: 'MyUtils' } } }); // read-back
+
+	const result = await command('create_artifact').handle(harness.context(), {
+		table: 'sys_script_include',
+		fields: { name: 'MyUtils' },
+		await: true,
+	});
+
+	assert.strictEqual(result.awaited, true);
+	assert.ok(
+		result.warnings.some((w: string) => /No scope was specified/.test(w)),
+		'the awaited path must not drop the scope warning'
+	);
+});
+
+test('an unspecified scope is reported by application name, not a bare sys_id', async () => {
+	harness.reply({ success: true, newRecord: { sys_id: 'abc', name: 'MyUtils', tableName: 'sys_script_include', scope: APP_SYS_ID } });
+	harness.reply({ success: true, status: 200, data: { result: { scope: 'x_acme_app' } } });
+
+	const result = await command('create_artifact').handle(harness.context(), {
+		table: 'sys_script_include',
+		fields: { name: 'MyUtils' },
+	});
+
+	assert.strictEqual(result.effectiveScope, 'x_acme_app', "'8dd17d54...' tells a caller nothing");
+	assert.strictEqual(result.sysScopeId, APP_SYS_ID, 'the id is still reported alongside');
+	assert.match(result.warnings[0], /created in 'x_acme_app'/);
+});
+
+test('a failed scope-name lookup falls back to the sys_id rather than failing the create', async () => {
+	harness.reply({ success: true, newRecord: { sys_id: 'abc', name: 'MyUtils', tableName: 'sys_script_include', scope: APP_SYS_ID } });
+	harness.replyWithError(Object.assign(new Error('nope'), { code: 'E_ACL' }));
+
+	const result = await command('create_artifact').handle(harness.context(), {
+		table: 'sys_script_include',
+		fields: { name: 'MyUtils' },
+	});
+
+	assert.strictEqual(result.effectiveScope, APP_SYS_ID, 'a name is a nicety, never a reason to fail');
+});
