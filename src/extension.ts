@@ -40,6 +40,7 @@ import {
 	classifyListener,
 	terminateListener,
 	isPortFree,
+	AGENT_API_FIXED_PORT,
 	BridgeLifecycle,
 	LifecycleState,
 	evaluateLease,
@@ -2378,45 +2379,17 @@ class BridgeStartAborted extends Error {
  * is fully up, and anything short of that used to leave listeners bound while
  * the status bar claimed "Running".
  */
-async function startBridgeTransports(): Promise<void> {
-	const { docsDir: agentRulesSourceDir, workspaceRoot: syncRoot } = bridgeStartContext
-		?? { docsDir: '', workspaceRoot: getWorkspaceRoot() || '' };
-	// Start the HTTP Agent API (preferred, event-driven) and optionally the
-	// legacy file-based transport. Both sit on top of the same dispatcher.
-	// This startup also asks a standalone `snu` bridge to yield ports 1977/1978.
-	// Wait for that handoff before binding the browser save channel below;
-	// otherwise the first WebSocket bind races the graceful shutdown and the
-	// save icons remain connected to the standalone process instead of VS Code.
-	try {
-		const state = await startAgentHttpServer({
-			onLog: (m) => debugLog(m),
-			docsDir: agentRulesSourceDir,
-			// Without this the port descriptor and /api/health both report an
-			// undefined extensionVersion, so `snu status`/`snu doctor` cannot tell
-			// which build owns the bridge.
-			extensionVersion: extensionContext?.extension?.packageJSON?.version || undefined,
-			workspaceRoot: syncRoot,
-		});
-		agentHttpState = state;
-		debugLog(`Agent HTTP API listening on 127.0.0.1:${state.port}`);
-		// Surface the live endpoint so users can confirm the HTTP Agent API is up.
-		scriptSyncStatusBarItem.tooltip = `sn-scriptsync running\nAgent HTTP API: 127.0.0.1:${state.port}\nToken: ~/.sn-scriptsync/agent-port.json\nDocs: http://127.0.0.1:${state.port}/api/instructions`;
-	} catch (err: any) {
-		debugLog(`Agent HTTP API failed to start: ${err?.message || err}`);
-		vscode.window.showWarningMessage(`SN ScriptSync: Agent HTTP API failed to start: ${err?.message || err}`);
-	}
-
-	//Start WebSocket Server
-	// Defensive: if a previous instance is somehow still around (e.g. a rapid
-	// stop→start), tear it down so we don't try to bind port 1978 twice.
-	if (wss) {
-		try {
-			wss.clients.forEach((client) => { try { client.terminate(); } catch { /* ignore */ } });
-			wss.close();
-		} catch { /* ignore */ }
-		wss = undefined;
-	}
-
+/**
+ * Make the bridge ports available before anything binds them.
+ *
+ * This used to run AFTER the HTTP server started, which was fine for the
+ * common case and wrong for a takeover: a wedged host holds 1977 and 1978, so
+ * the HTTP bind lost 1977 and fell back to an ephemeral port, and freeing 1978
+ * a moment later came too late to help. The bridge then served on a port the
+ * static connect instructions do not mention until the next restart moved it
+ * back.
+ */
+async function ensureBridgePortsAvailable(): Promise<void> {
 	// Port 1978 must be free for the browser save channel. The graceful yield
 	// during the Agent API start above handles a healthy standalone bridge; an
 	// orphaned one (stale/clobbered port file — e.g. an `snu --mcp` bridge
@@ -2481,6 +2454,57 @@ async function startBridgeTransports(): Promise<void> {
 		}
 		debugLog(`Took over port 1978 from PID ${holder.pid} (${kind}: ${holder.command || 'unknown command'})`);
 		}
+	}
+
+
+	// The holder owned both ports. Give 1977 a moment to be released too, so the
+	// HTTP server can take the fixed port instead of falling back.
+	for (let i = 0; i < 20 && !(await isPortFree(AGENT_API_FIXED_PORT)); i++) {
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+}
+
+async function startBridgeTransports(): Promise<void> {
+	const { docsDir: agentRulesSourceDir, workspaceRoot: syncRoot } = bridgeStartContext
+		?? { docsDir: '', workspaceRoot: getWorkspaceRoot() || '' };
+	// Start the HTTP Agent API (preferred, event-driven) and optionally the
+	// legacy file-based transport. Both sit on top of the same dispatcher.
+	// This startup also asks a standalone `snu` bridge to yield ports 1977/1978.
+	// Wait for that handoff before binding the browser save channel below;
+	// otherwise the first WebSocket bind races the graceful shutdown and the
+	// save icons remain connected to the standalone process instead of VS Code.
+	// Free the ports first: the HTTP server prefers 1977 and silently falls back
+	// to an ephemeral port if something still holds it.
+	await ensureBridgePortsAvailable();
+
+	try {
+		const state = await startAgentHttpServer({
+			onLog: (m) => debugLog(m),
+			docsDir: agentRulesSourceDir,
+			// Without this the port descriptor and /api/health both report an
+			// undefined extensionVersion, so `snu status`/`snu doctor` cannot tell
+			// which build owns the bridge.
+			extensionVersion: extensionContext?.extension?.packageJSON?.version || undefined,
+			workspaceRoot: syncRoot,
+		});
+		agentHttpState = state;
+		debugLog(`Agent HTTP API listening on 127.0.0.1:${state.port}`);
+		// Surface the live endpoint so users can confirm the HTTP Agent API is up.
+		scriptSyncStatusBarItem.tooltip = `sn-scriptsync running\nAgent HTTP API: 127.0.0.1:${state.port}\nToken: ~/.sn-scriptsync/agent-port.json\nDocs: http://127.0.0.1:${state.port}/api/instructions`;
+	} catch (err: any) {
+		debugLog(`Agent HTTP API failed to start: ${err?.message || err}`);
+		vscode.window.showWarningMessage(`SN ScriptSync: Agent HTTP API failed to start: ${err?.message || err}`);
+	}
+
+	//Start WebSocket Server
+	// Defensive: if a previous instance is somehow still around (e.g. a rapid
+	// stop→start), tear it down so we don't try to bind port 1978 twice.
+	if (wss) {
+		try {
+			wss.clients.forEach((client) => { try { client.terminate(); } catch { /* ignore */ } });
+			wss.close();
+		} catch { /* ignore */ }
+		wss = undefined;
 	}
 
 	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});

@@ -109,7 +109,7 @@ test('a restart is detected when startedAt changes, even with no observed downti
   const server = healthServer([{ startedAt: 1000, pid: 42 }, { startedAt: 2000, pid: 42 }]);
   const port = await listen(server);
   try {
-    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 5_000);
+    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, { timeoutMs: 5_000 });
     assert.strictEqual(health.startedAt, 2000);
   } finally {
     server.close();
@@ -120,7 +120,7 @@ test('a restart is detected when the PID changes', async () => {
   const server = healthServer([{ startedAt: 1000, pid: 42 }, { startedAt: 1000, pid: 77 }]);
   const port = await listen(server);
   try {
-    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 5_000);
+    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, { timeoutMs: 5_000 });
     assert.strictEqual(health.pid, 77);
   } finally {
     server.close();
@@ -131,7 +131,7 @@ test('a brief unreachable window during the cycle is tolerated', async () => {
   const server = healthServer([{ startedAt: 1000, pid: 42 }, null, null, { startedAt: 3000, pid: 43 }]);
   const port = await listen(server);
   try {
-    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 8_000);
+    const health = await waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, { timeoutMs: 8_000 });
     assert.strictEqual(health.startedAt, 3000);
   } finally {
     server.close();
@@ -143,8 +143,62 @@ test('a bridge that never cycles is reported as a restart failure, not a stop ti
   const port = await listen(server);
   try {
     await assert.rejects(
-      () => waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, 1_000),
+      () => waitForBridgeRestarted(port, { startedAt: 1000, pid: 42 }, { timeoutMs: 1_000 }),
       (err: any) => err.code === 'E_RESTART_FAILED'
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test('a bridge that comes back on a DIFFERENT port is still detected', async () => {
+  // After a force takeover the bridge falls back to an ephemeral port because
+  // the displaced process still holds 1977; the restart then moves it back.
+  // Polling only the pre-restart port waited out the timeout against an
+  // address nothing was serving any more.
+  const oldServer = healthServer([{ startedAt: 1000, pid: 42 }]);
+  const oldPort = await listen(oldServer);
+  const newServer = healthServer([{ startedAt: 9000, pid: 43 }]);
+  const newPort = await listen(newServer);
+  try {
+    const health = await waitForBridgeRestarted(
+      [oldPort],
+      { startedAt: 1000, pid: 42 },
+      { timeoutMs: 5_000, rediscover: async () => newPort }
+    );
+    assert.strictEqual(health.startedAt, 9000);
+    assert.strictEqual(health.pid, 43);
+  } finally {
+    oldServer.close();
+    newServer.close();
+  }
+});
+
+test('an explicitly listed alternative port is probed without rediscovery', async () => {
+  const stale = healthServer([{ startedAt: 1000, pid: 42 }]);
+  const stalePort = await listen(stale);
+  const fresh = healthServer([{ startedAt: 7000, pid: 44 }]);
+  const freshPort = await listen(fresh);
+  try {
+    const health = await waitForBridgeRestarted(
+      [stalePort, freshPort],
+      { startedAt: 1000, pid: 42 },
+      { timeoutMs: 5_000 }
+    );
+    assert.strictEqual(health.pid, 44);
+  } finally {
+    stale.close();
+    fresh.close();
+  }
+});
+
+test('the failure message names every port that was tried', async () => {
+  const server = healthServer([{ startedAt: 1000, pid: 42 }]);
+  const port = await listen(server);
+  try {
+    await assert.rejects(
+      () => waitForBridgeRestarted([port, 65123], { startedAt: 1000, pid: 42 }, { timeoutMs: 800 }),
+      (err: any) => err.code === 'E_RESTART_FAILED' && err.message.includes(String(port)) && err.message.includes('65123')
     );
   } finally {
     server.close();

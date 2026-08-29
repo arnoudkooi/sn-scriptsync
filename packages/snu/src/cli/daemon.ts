@@ -213,42 +213,70 @@ export async function waitForBridgeReachable(port: number, timeoutMs = 20_000): 
 /**
  * Wait for a bridge to come back up after a restart.
  *
+ * Two assumptions had to go.
+ *
  * Waiting for it to go *unreachable* first looks natural and is wrong: the
  * down-state is transient, and a stop/start that completes between two polls is
- * never observed. `snu restart --json` then reported E_STOP_TIMEOUT for a
- * restart that had already succeeded — a false negative on the happy path,
- * which is worse than no check at all.
+ * never observed, so `snu restart --json` reported E_STOP_TIMEOUT for restarts
+ * that had already succeeded.
  *
- * So wait for positive evidence of a NEW bridge instead. `startedAt` changes on
- * every transport start, and the PID changes when the host itself was replaced;
- * either one proves the cycle happened, whether or not we saw the gap.
+ * Assuming the port is stable is also wrong. The bridge prefers 1977 and falls
+ * back to an ephemeral port when it is taken — which is exactly what happens
+ * right after a force takeover, while the displaced process still holds 1977.
+ * The restart then moves it back, and polling only the pre-restart port waited
+ * out the timeout against an address nothing was serving any more.
+ *
+ * So: poll every plausible port, and re-read discovery each round to pick up a
+ * port that only the descriptor knows about.
  */
 export async function waitForBridgeRestarted(
-  port: number,
+  ports: number | number[],
   previous: { startedAt?: number; pid?: number },
-  timeoutMs = 25_000
+  options: {
+    timeoutMs?: number;
+    /** Re-read the port descriptor, to catch a bridge that moved. */
+    rediscover?: () => Promise<number | undefined>;
+  } = {}
 ): Promise<HealthResponse> {
+  const timeoutMs = options.timeoutMs ?? 25_000;
+  // Only the ports the caller nominated, plus whatever rediscovery turns up.
+  // Adding the fixed port here unconditionally would be wrong: an unrelated
+  // bridge on 1977 would satisfy the "different pid" test and be reported as
+  // this bridge's restart. Which ports are plausible is the caller's knowledge.
+  const candidates = new Set<number>(Array.isArray(ports) ? ports : [ports]);
+
+  const isRestarted = (health: HealthResponse) =>
+    (typeof health.startedAt === 'number' &&
+      typeof previous.startedAt === 'number' &&
+      health.startedAt !== previous.startedAt) ||
+    (typeof health.pid === 'number' && typeof previous.pid === 'number' && health.pid !== previous.pid);
+
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
-    try {
-      const health = await checkHealth(port);
-      const restarted =
-        (typeof health.startedAt === 'number' &&
-          typeof previous.startedAt === 'number' &&
-          health.startedAt !== previous.startedAt) ||
-        (typeof health.pid === 'number' &&
-          typeof previous.pid === 'number' &&
-          health.pid !== previous.pid);
-      if (restarted) return health;
-      // Reachable but still the old instance: the restart has not landed yet.
-    } catch (err) {
-      lastError = err; // mid-cycle, the endpoint is briefly down
+    for (const port of Array.from(candidates)) {
+      try {
+        const health = await checkHealth(port);
+        if (isRestarted(health)) return health;
+      } catch (err) {
+        lastError = err; // mid-cycle, or nothing on this port
+      }
     }
+
+    if (options.rediscover) {
+      try {
+        const moved = await options.rediscover();
+        if (typeof moved === 'number') candidates.add(moved);
+      } catch {
+        /* the descriptor may be mid-rewrite */
+      }
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
+
   throw new ScriptSyncClientError(
-    `The bridge on port ${port} did not report a restart within ${timeoutMs / 1000}s${
+    `The bridge did not report a restart within ${timeoutMs / 1000}s on ports ${Array.from(candidates).join(', ')}${
       lastError ? `: ${(lastError as any)?.message || lastError}` : ''
     }.`,
     'E_RESTART_FAILED'

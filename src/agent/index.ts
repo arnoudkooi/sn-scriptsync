@@ -3,7 +3,7 @@
 export { setRuntime, Runtime } from './runtime';
 export { setSyncStateProvider, SyncState } from './commands/connection';
 export { dispatchAgentCommand } from './dispatcher';
-export { AGENT_API_VERSION, getPortFilePath, setGlobalPortFileEnabled, reassertPortFiles } from './portFile';
+export { AGENT_API_VERSION, AGENT_API_FIXED_PORT, getPortFilePath, setGlobalPortFileEnabled, reassertPortFiles } from './portFile';
 export { startAgentHttpServer, stopAgentHttpServer, HttpServerState, AGENT_CONNECT_SNIPPET } from './transport/http';
 export { findPortListener, classifyListener, terminateListener, isPortFree } from './portReclaim';
 export * as pendingRegistry from './pendingRegistry';

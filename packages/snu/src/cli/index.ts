@@ -408,10 +408,22 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         // Wait for evidence the bridge came back NEW, not for it to go down:
         // the down-state is transient and a fast cycle is never sampled, which
         // reported E_STOP_TIMEOUT for restarts that had actually succeeded.
-        const health = await waitForBridgeRestarted(status.discovery.port, {
-          startedAt: previousStartedAt,
-          pid: previousPid,
-        });
+        const health = await waitForBridgeRestarted(
+          [status.discovery.port, ports.http],
+          { startedAt: previousStartedAt, pid: previousPid },
+          {
+            // A bridge that came back on a different port is only findable
+            // through its freshly written descriptor.
+            rediscover: async () => {
+              try {
+                const found = await inspectBridge({ portFile, cwd: process.cwd() });
+                return found.running ? found.discovery.port : undefined;
+              } catch {
+                return undefined;
+              }
+            },
+          }
+        );
         if (isJsonMode) {
           outputJson({
             restarted: true,
