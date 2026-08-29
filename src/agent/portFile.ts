@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { getWorkspaceRoot } from '../workspaceRoot';
 import { AgentPortFile } from './types';
+import { resolveBridgeOwnership, PortDescriptor } from './bridgeOwnership';
 
 // v2 -> v3: added get_record, delete_record, create_application, add_column,
 // get_served_url, navigate_and_screenshot, rest_request; await:true write
@@ -86,45 +87,44 @@ export function setGlobalPortFileEnabled(enabled: boolean): void {
  * Older ScriptSync builds in a second editor window blindly delete the global
  * port file on their own start/stop, leaving this healthy bridge undiscoverable
  * from outside its workspace. Called on helper (re)connects and on a slow
- * heartbeat so such deletions heal automatically. A file owned by another live
- * bridge process is left alone, matching removeIfOwnedOrDead.
+ * heartbeat so such deletions heal automatically.
+ *
+ * Whether a foreign file may be overwritten is NOT decided here: that question
+ * is bridge ownership, and it now has exactly one answer, in bridgeOwnership.ts.
+ * This function used to ask `pidAlive()` directly, which treated a wedged host
+ * with a dead listener as a live owner and left the bridge undiscoverable
+ * anyway.
  */
-export function reassertPortFiles(): void {
+export async function reassertPortFiles(): Promise<void> {
 	if (!lastPayload) return;
 	const targets: string[] = [];
 	const workspaceTarget = workspacePortFilePath();
 	if (workspaceTarget) targets.push(workspaceTarget);
 	if (globalPortFileEnabled) targets.push(globalPortFilePath());
 	for (const target of targets) {
-		if (needsReassert(target)) writeOne(target, lastPayload);
+		if (await needsReassert(target)) writeOne(target, lastPayload);
 	}
 }
 
-function needsReassert(target: string): boolean {
+async function needsReassert(target: string): Promise<boolean> {
+	let data: PortDescriptor | undefined;
 	try {
 		if (!fs.existsSync(target)) return true;
-		const data = JSON.parse(fs.readFileSync(target, 'utf8'));
-		if (data?.pid === lastPayload!.pid) {
-			// Our own file — repair it only if the contents drifted.
-			return data.port !== lastPayload!.port || data.token !== lastPayload!.token;
-		}
-		if (typeof data?.pid === 'number' && pidAlive(data.pid)) {
-			return false; // a live foreign bridge owns this file — leave it
-		}
-		return true; // dead owner or invalid structure
+		data = JSON.parse(fs.readFileSync(target, 'utf8'));
 	} catch {
 		return true; // unreadable or corrupt
 	}
-}
 
-function pidAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err: any) {
-		// EPERM: the process exists but belongs to another user.
-		return err?.code === 'EPERM';
+	if (data?.pid === lastPayload!.pid) {
+		// Our own file — repair it only if the contents drifted.
+		return data.port !== lastPayload!.port || data.token !== lastPayload!.token;
 	}
+
+	// Someone else's file. One question, one answer: is that owner actually
+	// serving? A live owner keeps its registration; anything else is ours to
+	// reclaim.
+	const ownership = await resolveBridgeOwnership({ readDescriptor: () => data });
+	return ownership.state !== 'live';
 }
 
 /**
@@ -134,13 +134,16 @@ function pidAlive(pid: number): boolean {
  * that bridge undiscoverable — still holding ports 1977/1978 with no way for
  * `snu stop` or the next ScriptSync start to find it.
  */
-function removeIfOwnedOrDead(target: string): void {
+async function removeIfOwnedOrDead(target: string): Promise<void> {
 	try {
 		if (!fs.existsSync(target)) return;
 		try {
-			const data = JSON.parse(fs.readFileSync(target, 'utf8'));
-			if (typeof data?.pid === 'number' && data.pid !== process.pid && pidAlive(data.pid)) {
-				return; // a live foreign bridge owns this file — leave it discoverable
+			const data: PortDescriptor = JSON.parse(fs.readFileSync(target, 'utf8'));
+			if (typeof data?.pid === 'number' && data.pid !== process.pid) {
+				const ownership = await resolveBridgeOwnership({ readDescriptor: () => data });
+				if (ownership.state === 'live') {
+					return; // a serving foreign bridge owns this file — leave it discoverable
+				}
 			}
 		} catch { /* corrupt file — safe to delete */ }
 		fs.unlinkSync(target);
@@ -148,7 +151,7 @@ function removeIfOwnedOrDead(target: string): void {
 }
 
 function removeGlobalPortFile(): void {
-	removeIfOwnedOrDead(globalPortFilePath());
+	void removeIfOwnedOrDead(globalPortFilePath());
 }
 
 export function deletePortFile(): void {
@@ -157,7 +160,7 @@ export function deletePortFile(): void {
 	lastPayload = undefined;
 	[workspacePortFilePath(), globalPortFilePath()].forEach((target) => {
 		if (!target) return;
-		removeIfOwnedOrDead(target);
+		void removeIfOwnedOrDead(target);
 	});
 }
 

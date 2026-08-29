@@ -303,7 +303,7 @@ export async function startAgentHttpServer(opts: {
 	// editor window) can delete or clobber the port files while this bridge is
 	// alive, making it undiscoverable. Re-assert them on a slow heartbeat.
 	const portFileHeartbeat = setInterval(() => {
-		try { reassertPortFiles(); } catch { /* best effort */ }
+		void reassertPortFiles().catch(() => { /* best effort */ });
 	}, PORT_FILE_HEARTBEAT_MS);
 	portFileHeartbeat.unref?.();
 

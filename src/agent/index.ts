@@ -21,4 +21,10 @@ export {
 	LEASE_HEARTBEAT_MS,
 } from './ownerLease';
 export type { OwnerLease, LeaseVerdict } from './ownerLease';
+export {
+	resolveBridgeOwnership,
+	bridgeIsClaimable,
+	probeBridgeHealth,
+} from './bridgeOwnership';
+export type { BridgeOwnership, OwnershipProbes, PortDescriptor } from './bridgeOwnership';
 export type { AgentRequest } from './types';

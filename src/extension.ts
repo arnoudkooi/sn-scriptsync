@@ -43,6 +43,7 @@ import {
 	BridgeLifecycle,
 	LifecycleState,
 	evaluateLease,
+	probeBridgeHealth,
 	readLease,
 	writeLease,
 	releaseLease,
@@ -2300,12 +2301,36 @@ function buildOwnerLease(): OwnerLease {
 function acquireOwnerLease(): void {
 	writeLease(buildOwnerLease());
 	if (leaseHeartbeat) clearInterval(leaseHeartbeat);
-	leaseHeartbeat = setInterval(() => {
-		try {
-			if (bridgeLifecycle.isRunning) writeLease(buildOwnerLease());
-		} catch { /* best effort */ }
-	}, LEASE_HEARTBEAT_MS);
+	leaseHeartbeat = setInterval(() => { void renewOwnerLease(); }, LEASE_HEARTBEAT_MS);
 	leaseHeartbeat.unref?.();
+}
+
+/**
+ * Renew the lease only while the bridge actually serves.
+ *
+ * A bare `setInterval(writeLease)` proves one thing: JavaScript still runs in
+ * this process. That is not the property anyone depends on. A host whose event
+ * loop is healthy while its HTTP listener is wedged would renew forever, and
+ * another window would politely refuse to take over a bridge that answers
+ * nothing — process liveness standing in for bridge liveness, which is the
+ * failure this whole module exists to remove.
+ *
+ * So the heartbeat probes the same endpoint an external consumer would use. A
+ * failed probe does not expire the lease; it just stops renewing it. Ownership
+ * then lapses on the existing ~3-missed-beat timeout rather than flapping on a
+ * single slow response.
+ */
+async function renewOwnerLease(): Promise<void> {
+	try {
+		if (!bridgeLifecycle.isRunning) return;
+		const port = agentHttpState?.port;
+		if (!port) return;
+		if (!(await probeBridgeHealth(port))) {
+			debugLog('lease not renewed: our own bridge did not answer /api/health');
+			return;
+		}
+		writeLease(buildOwnerLease());
+	} catch { /* best effort */ }
 }
 
 function releaseOwnerLease(): void {
@@ -2456,8 +2481,9 @@ async function startBridgeTransports(): Promise<void> {
 		if (!serverRunning && bridgeLifecycle.state !== 'starting') return;
 
 		// A (re)connect is a natural moment to heal port files another process
-		// may have deleted while this bridge stayed alive.
-		reassertPortFiles();
+		// may have deleted while this bridge stayed alive. Fire-and-forget: the
+		// ownership check behind it may probe a foreign bridge over HTTP.
+		void reassertPortFiles();
 
 		if (typeof req.headers.origin === 'string' && req.headers.origin.startsWith('http')) { // only allow via extension pages like chrome-extension://;
 			ws.close(1008, 'Not allowed');
