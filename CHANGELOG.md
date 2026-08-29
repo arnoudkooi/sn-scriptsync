@@ -1,6 +1,11 @@
 # CHANGELOG.md
 
-## 4.8.9 (2026-08-30)
+## `@snutils/snu` 0.2.6 (2026-08-29)
+
+**CLI-only release; the sn-scriptsync extension stays at 4.8.9.**
+- **Fixed: `snu doctor` asked the browser about instances it was not connected to.** It listed every instance folder in the workspace and ran a session check against each, so instances you had synced in the past but were not currently connected to were probed anyway — each one making the SN Utils helper tab log "Unknown source ... please run /token from the instance to approve or block". The diagnostic produced the noise it was meant to report. It now checks only the instances the helper is actually connected to, lists the remaining folders as what they are, and no longer counts them as problems.
+
+## 4.8.9 (2026-08-29)
 
 **Six broken CLI commands fixed, one bridge owner per machine, honest session health, and creates that never guess an application scope (`@snutils/snu` 0.2.5).**
 - **Fixed: six `snu` commands failed on every invocation in 0.2.3.** `record delete`, `browser form`, `browser set`, `browser action`, `browser nav` and `screenshot` all exited with `The "options.<name>.short" property must be of type string` before reading a single argument, whether or not you passed the flag. Any command whose options have no short form was affected.
