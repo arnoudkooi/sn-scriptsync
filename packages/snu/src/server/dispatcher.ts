@@ -8,6 +8,7 @@ import { AgentRequest, AgentResponse } from '../types.js';
 import { getCommandPolicy, SecurityGates } from './policy.js';
 import { resolveStandaloneConfig, StandaloneConfig } from './config.js';
 import { computePayloadHash } from './canonical.js';
+import { AGENT_API_VERSION } from '../types.js';
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
 
@@ -640,7 +641,7 @@ export class StandaloneDispatcher {
           status: 'success',
           timestamp: Date.now(),
           result: {
-            apiVersion: 9,
+            apiVersion: AGENT_API_VERSION,
             tier: state.tier,
             proFeatures: state.proFeatures,
             cdp: state.cdp,

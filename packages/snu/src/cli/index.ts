@@ -30,6 +30,39 @@ async function printUpdateNotice(noticePromise: Promise<string | undefined>): Pr
   if (notice) process.stderr.write(notice);
 }
 
+export type ParseArgsOptions = Record<string, { type: 'string' | 'boolean'; short?: string }>;
+
+/**
+ * Build the `parseArgs` option map for a tool: the global options every command
+ * accepts, plus the tool's own `cliOptions`.
+ *
+ * `short` must be OMITTED for an option that has no short form, never set to
+ * `undefined`. parseArgs validates the property whenever the key is present
+ * (it checks with ObjectHasOwn), so `short: undefined` throws
+ * ERR_INVALID_ARG_TYPE before a single argument is read — which took out every
+ * invocation of `record delete`, `browser form`, `browser set`, `browser
+ * action`, `browser nav` and `screenshot` in 0.2.3, whether or not the flag was
+ * passed. Exported so the regression test exercises this builder rather than a
+ * copy of it.
+ */
+export function buildParseArgsOptions(tool: { cliOptions?: Record<string, { type: 'string' | 'boolean'; short?: string }> }): ParseArgsOptions {
+  const optionsConfig: ParseArgsOptions = {
+    json: { type: 'boolean', short: 'j' },
+    instance: { type: 'string', short: 'i' },
+    'port-file': { type: 'string' },
+  };
+
+  if (tool.cliOptions) {
+    for (const [optName, optDef] of Object.entries(tool.cliOptions)) {
+      optionsConfig[optName] = optDef.short
+        ? { type: optDef.type, short: optDef.short }
+        : { type: optDef.type };
+    }
+  }
+
+  return optionsConfig;
+}
+
 export function printHelp(): void {
   console.log(`
 \x1b[1mSN Utils CLI (snu)\x1b[0m — Unified CLI and MCP Bridge for ServiceNow
@@ -181,7 +214,11 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   // Standalone bridge lifecycle commands.
   if (['serve', 'status', 'stop', 'restart'].includes(lifecycleCommand)) {
     const forceReclaim = lifecycleValues.force === true;
-    let bridgePorts: number[] = [1978, 1977];
+    // Named rather than positional: the orphan probe below needs the HTTP port
+    // specifically, and reading it as bridgePorts[1] silently probed the wrong
+    // port if the array literal was ever reordered.
+    let ports = { ws: 1978, http: 1977 };
+    let bridgePorts: number[] = [ports.ws, ports.http];
 
     const describeListener = (l: PortListener): string => {
       const cmd = (l.command || '').trim();
@@ -233,7 +270,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     };
 
     try {
-      bridgePorts = [parsePort('ws', 1978), parsePort('port', 1977)];
+      ports = { ws: parsePort('ws', 1978), http: parsePort('port', 1977) };
+      bridgePorts = [ports.ws, ports.http];
       const status = await inspectBridge({ portFile, cwd: process.cwd() });
 
       if (lifecycleCommand === 'status') {
@@ -251,7 +289,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
             // discovery file is missing (an older ScriptSync build in another
             // editor window deletes it). /api/health needs no token — probe
             // the fixed HTTP port so the advice matches reality.
-            const httpPort = bridgePorts[1];
+            const httpPort = ports.http;
             try {
               orphanHealth = await checkHealth(httpPort);
             } catch {
@@ -465,21 +503,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
 
     const commandArgs = nonGlobalTokens.slice(commandArgOffset);
 
-    // Prepare parseArgs options schema from tool definition
-    const optionsConfig: Record<string, { type: 'string' | 'boolean'; short?: string }> = {
-      json: { type: 'boolean', short: 'j' },
-      instance: { type: 'string', short: 'i' },
-      'port-file': { type: 'string' },
-    };
-
-    if (tool.cliOptions) {
-      for (const [optName, optDef] of Object.entries(tool.cliOptions)) {
-        optionsConfig[optName] = {
-          type: optDef.type,
-          short: optDef.short,
-        };
-      }
-    }
+    const optionsConfig = buildParseArgsOptions(tool);
 
     const parsed = parseArgs({
       args: commandArgs,
@@ -611,8 +635,18 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         inputData.sys_id = positionals[1];
         break;
 
-      case 'run':
+      case 'run': {
         const positionalScript = positionals.length > 0 ? positionals.join(' ') : undefined;
+        // A positional script containing a literal backslash-n never reaches the
+        // instance as a newline — it is sent verbatim and fails to compile there,
+        // with an error that points at the script rather than at the quoting.
+        if (positionalScript && /\\[nrt]/.test(positionalScript)) {
+          throw new ScriptSyncClientError(
+            'The script contains literal \\n escape sequences, which ServiceNow receives verbatim and fails to compile. ' +
+              'Pass multiline scripts with --file <path> or pipe them via stdin, which preserve real newlines.',
+            'E_INVALID_PARAMS'
+          );
+        }
         inputData.script = await resolveContentInput({
           value: positionalScript,
           filePath: values.file as string | undefined,
@@ -621,6 +655,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
           throw new ScriptSyncClientError('Usage: snu run [script] [--file <path>] or pipe via stdin', 'E_INVALID_PARAMS');
         }
         break;
+      }
 
       case 'browser form':
         if (values.fields) {

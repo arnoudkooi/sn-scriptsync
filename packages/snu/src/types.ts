@@ -69,13 +69,23 @@ export interface StagedWriteResult {
   message: string;
 }
 
+/**
+ * Transport/API version this CLI build speaks. Single source of truth: it was
+ * previously hardcoded as a literal `9` in standalone.ts, httpBridge.ts and as
+ * the client.ts discovery fallback, which would drift silently from the
+ * extension's AGENT_API_VERSION.
+ */
+export const AGENT_API_VERSION = 9;
+
 export interface AgentPortFile {
   port: number;
   token: string;
   pid: number;
   apiVersion: number;
   startedAt: number;
+  hostKind?: 'vscode' | 'standalone';
   extensionVersion?: string;
+  workspaceRoot?: string;
 }
 
 export interface HealthResponse {
@@ -84,6 +94,9 @@ export interface HealthResponse {
   hostKind?: 'vscode' | 'standalone';
   commands: string[];
   pid: number;
+  startedAt?: number;
+  extensionVersion?: string;
+  workspaceRoot?: string;
 }
 
 export interface DiscoveryOptions {

@@ -1,6 +1,7 @@
 import * as http from 'http';
 import { StandaloneDispatcher } from './dispatcher.js';
 import { AgentRequest, AgentResponse } from '../types.js';
+import { AGENT_API_VERSION } from '../types.js';
 
 export interface StandaloneHttpBridgeOptions {
   port?: number;
@@ -94,7 +95,7 @@ export class StandaloneHttpBridge {
           res.end(
             JSON.stringify({
               status: 'success',
-              apiVersion: 9,
+              apiVersion: AGENT_API_VERSION,
               hostKind: 'standalone',
               pid: process.pid,
               commands: [

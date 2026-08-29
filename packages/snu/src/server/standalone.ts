@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { AGENT_API_VERSION } from '../types.js';
 import { StandaloneWsBridge } from './wsBridge.js';
 import { StandaloneHttpBridge } from './httpBridge.js';
 import { StandaloneDispatcher } from './dispatcher.js';
@@ -81,13 +82,28 @@ export class StandaloneBridge {
     return { httpPort, wsPort, token: this.token };
   }
 
+  /**
+   * Write a port descriptor. The file carries the bridge auth token, so it must
+   * be owner-only — the extension has always written 0600 and the standalone
+   * bridge used to fall back to the umask default (0644), leaving the token
+   * readable by every account on the machine.
+   */
+  private writeDescriptor(target: string, payload: string): void {
+    fs.writeFileSync(target, payload, { mode: 0o600 });
+    try {
+      fs.chmodSync(target, 0o600); // pre-existing file keeps its old mode otherwise
+    } catch {
+      /* best effort (Windows) */
+    }
+  }
+
   private writePortFiles(httpPort: number): void {
     const payload = JSON.stringify(
       {
         port: httpPort,
         token: this.token,
         pid: process.pid,
-        apiVersion: 9,
+        apiVersion: AGENT_API_VERSION,
         startedAt: Date.now(),
         hostKind: 'standalone',
       },
@@ -105,7 +121,7 @@ export class StandaloneBridge {
           fs.mkdirSync(vscodeDir, { recursive: true });
         }
         const wsPortFile = path.join(vscodeDir, 'sn-agent-port.json');
-        fs.writeFileSync(wsPortFile, payload);
+        this.writeDescriptor(wsPortFile, payload);
         this.writtenPortFiles.push(wsPortFile);
       } catch {}
     }
@@ -118,7 +134,7 @@ export class StandaloneBridge {
           fs.mkdirSync(globalDir, { recursive: true });
         }
         const globalPortFile = path.join(globalDir, 'agent-port.json');
-        fs.writeFileSync(globalPortFile, payload);
+        this.writeDescriptor(globalPortFile, payload);
         this.writtenPortFiles.push(globalPortFile);
       } catch {}
     }
@@ -145,7 +161,7 @@ export class StandaloneBridge {
         // Missing, unreadable or corrupt — rewrite.
       }
       if (rewrite) {
-        try { fs.writeFileSync(target, this.portFilePayload); } catch {}
+        try { this.writeDescriptor(target, this.portFilePayload); } catch {}
       }
     }
   }

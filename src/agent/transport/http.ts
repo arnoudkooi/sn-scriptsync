@@ -149,9 +149,13 @@ export async function startAgentHttpServer(opts: {
 	/** Absolute path to the packaged agentrules/ folder (instructions + skills).
 	 * When set, the server serves its own always-current docs. */
 	docsDir?: string;
+	/** The resolved ScriptSync sync folder. Reported in health and the port
+	 * descriptor so a second window can name which workspace owns the bridge. */
+	workspaceRoot?: string;
 }): Promise<HttpServerState> {
 	const token = crypto.randomBytes(16).toString('hex');
 	const log = opts.onLog || (() => { /* noop */ });
+	const startedAt = Date.now();
 
 	const server = http.createServer(async (req, res) => {
 		try {
@@ -161,12 +165,21 @@ export async function startAgentHttpServer(opts: {
 
 			// Health endpoint – no auth, used by agents to discover whether the
 			// extension is up and to read feature flags.
+			//
+			// hostKind is what lets a caller tell an editor-hosted bridge from a
+			// standalone one. Omitting it is why `snu status` reported
+			// `hostKind: unknown` for a perfectly healthy editor bridge, and why a
+			// second window's yield probe could not identify the current owner.
 			if (req.method === 'GET' && url.pathname === '/api/health') {
 				return sendJson(res, 200, {
 					status: 'success',
 					apiVersion: AGENT_API_VERSION,
+					hostKind: 'vscode',
 					commands: commandNames(),
 					pid: process.pid,
+					startedAt: startedAt,
+					extensionVersion: opts.extensionVersion,
+					workspaceRoot: opts.workspaceRoot,
 				});
 			}
 
@@ -279,7 +292,9 @@ export async function startAgentHttpServer(opts: {
 		port,
 		token,
 		pid: process.pid,
+		hostKind: 'vscode',
 		extensionVersion: opts.extensionVersion,
+		workspaceRoot: opts.workspaceRoot,
 	});
 
 	log(`[agent-http] listening on 127.0.0.1:${port}, port file: ${portFilePath || 'n/a'}`);

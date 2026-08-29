@@ -10,6 +10,7 @@ import {
   DiscoveryResult,
   HealthResponse,
   MappedCommand,
+  AGENT_API_VERSION,
 } from './types.js';
 import { getCommandPolicy } from './server/policy.js';
 
@@ -273,7 +274,7 @@ async function validatePortFile(filePath: string, isGlobal: boolean): Promise<Di
     port: data.port,
     token: data.token,
     pid: data.pid,
-    apiVersion: data.apiVersion || 9,
+    apiVersion: data.apiVersion || AGENT_API_VERSION,
     portFilePath: filePath,
     isGlobal,
   };

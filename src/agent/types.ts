@@ -164,5 +164,10 @@ export interface AgentPortFile {
 	pid: number;
 	apiVersion: number;
 	startedAt: number;
+	/** Which kind of process owns the bridge. Lets a reader tell an
+	 * editor-hosted bridge from a standalone one without probing. */
+	hostKind?: 'vscode' | 'standalone';
 	extensionVersion?: string;
+	/** The resolved ScriptSync sync folder of the owning window. */
+	workspaceRoot?: string;
 }
