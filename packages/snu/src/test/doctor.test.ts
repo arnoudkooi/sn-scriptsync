@@ -169,3 +169,45 @@ test('an all-clear with no sessions checked says so rather than implying they pa
   const report = buildDoctorReport(sources({ auth: [] }));
   assert.match(report.findings.join(' '), /No instance sessions were checked/);
 });
+
+// ---------------------------------------------------------------------------
+// Reported from real use: doctor listed six instances when only one was
+// connected. It enumerated workspace FOLDERS and probed each one, so it asked
+// the browser about instances the helper had never approved — and the helper
+// logged "Unknown source ... run /token to approve or block" once per instance.
+// A diagnostic was generating the noise it claimed to report.
+// ---------------------------------------------------------------------------
+
+test('folders for unconnected instances are not reported as problems', () => {
+  const report = buildDoctorReport(sources({
+    auth: [
+      { instance: 'ven08329', state: 'AUTH_OK', ok: true },
+      { instance: 'ven08331', state: 'NOT_CONNECTED', ok: false },
+      { instance: 'snutils', state: 'NOT_CONNECTED', ok: false },
+    ],
+  }));
+  const text = report.findings.join(' ');
+  assert.match(text, /2 workspace folders \(ven08331, snutils\)/);
+  assert.match(text, /not a problem/);
+  // The one connected instance must not be buried under five that are not.
+  assert.ok(!/could not be verified/.test(text), 'an unconnected folder is not an unverified session');
+});
+
+test('the human summary separates connected instances from mere folders', () => {
+  const text = formatDoctorReport(buildDoctorReport(sources({
+    auth: [
+      { instance: 'ven08329', state: 'AUTH_OK', ok: true },
+      { instance: 'empakooi', state: 'NOT_CONNECTED', ok: false },
+    ],
+  })));
+  assert.match(text, /Instance sessions \(connected\)/);
+  assert.match(text, /Workspace folders, not connected: empakooi/);
+});
+
+test('an all-clear is still possible with unconnected folders present', () => {
+  // Having old folders around must not permanently prevent a clean bill.
+  const report = buildDoctorReport(sources({
+    auth: [{ instance: 'ven08329', state: 'AUTH_OK', ok: true }],
+  }));
+  assert.match(report.findings.join(' '), /No problems found/);
+});

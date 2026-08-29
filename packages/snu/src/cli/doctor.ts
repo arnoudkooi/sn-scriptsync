@@ -291,6 +291,17 @@ export function deriveFindings(report: DoctorReport): string[] {
 		);
 	}
 
+	// Workspace folders for instances the helper has not connected are history,
+	// not state. Say how many exist and stop there — listing them as problems
+	// buried the one instance that is actually connected.
+	const offline = report.auth.filter((a) => a.state === 'NOT_CONNECTED');
+	if (offline.length) {
+		findings.push(
+			`${offline.length} workspace folder${offline.length === 1 ? '' : 's'} (${offline.map((a) => a.instance).join(', ')}) ` +
+				`belong to instances the browser helper is not connected to. Not checked, and not a problem — open one and run /token if you need it.`
+		);
+	}
+
 	if (!findings.length) {
 		const verified = report.auth.filter((a) => a.ok).length;
 		findings.push(
@@ -339,12 +350,18 @@ export function formatDoctorReport(report: DoctorReport): string {
 		}
 	}
 
-	if (report.auth.length) {
+	const checked = report.auth.filter((a) => a.state !== 'NOT_CONNECTED');
+	const notConnected = report.auth.filter((a) => a.state === 'NOT_CONNECTED');
+	if (checked.length) {
 		lines.push('');
-		lines.push('  Instance sessions');
-		for (const a of report.auth) {
+		lines.push('  Instance sessions (connected)');
+		for (const a of checked) {
 			lines.push(`    ${a.ok ? '✓' : '✗'} ${a.instance}  ${a.state}`);
 		}
+	}
+	if (notConnected.length) {
+		lines.push('');
+		lines.push(`  Workspace folders, not connected: ${notConnected.map((a) => a.instance).join(', ')}`);
 	}
 
 	lines.push('');
@@ -419,10 +436,26 @@ export async function collectDoctorSources(options: {
   // Instances and per-instance session state need a working bridge; without
   // one these stay empty rather than failing the whole diagnostic.
   let instances: DoctorSources['instances'] = [];
-  let auth: DoctorSources['auth'] = [];
+  const auth: DoctorSources['auth'] = [];
   let capabilities: any;
   if (health) {
     const client = new ScriptSyncClient({ cwd: options.cwd });
+
+    // Capabilities FIRST: its instanceGates are the only honest list of
+    // instances the helper has actually connected and approved.
+    try {
+      const caps = await client.execute({ command: 'get_capabilities', params: {} }, 5_000);
+      capabilities = caps.result;
+    } catch { /* helper tab may be closed */ }
+
+    const approved = new Set(
+      Object.keys(capabilities?.instanceGates || {})
+        .map((origin) => {
+          try { return new URL(origin).origin.toLowerCase(); } catch { return ''; }
+        })
+        .filter(Boolean)
+    );
+
     try {
       const listed = await client.execute({ command: 'list_instances', params: {} }, 5_000);
       instances = (listed.result?.instances || []).map((i: any) => ({
@@ -433,6 +466,19 @@ export async function collectDoctorSources(options: {
     } catch { /* no instances is itself a finding */ }
 
     for (const instance of instances) {
+      const origin = (() => {
+        try { return instance.url ? new URL(instance.url).origin.toLowerCase() : ''; } catch { return ''; }
+      })();
+
+      // A workspace folder is history, not a connection. Probing every folder
+      // asked the browser for instances it had never approved, which made the
+      // helper log an "Unknown source ... run /token to approve or block" line
+      // per instance — a diagnostic generating the noise it claims to report.
+      if (!approved.has(origin)) {
+        auth.push({ instance: instance.name, state: 'NOT_CONNECTED', ok: false });
+        continue;
+      }
+
       try {
         const probe = await client.execute({ command: 'auth_status', instance: instance.name, params: {} }, 15_000);
         auth.push({
@@ -445,11 +491,6 @@ export async function collectDoctorSources(options: {
         auth.push({ instance: instance.name, state: err?.code === 'E_UNKNOWN_COMMAND' ? 'AUTH_UNSUPPORTED' : 'AUTH_UNKNOWN', ok: false });
       }
     }
-
-    try {
-      const caps = await client.execute({ command: 'get_capabilities', params: {} }, 5_000);
-      capabilities = caps.result;
-    } catch { /* helper tab may be closed */ }
   }
 
   return {
