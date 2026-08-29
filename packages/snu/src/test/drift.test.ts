@@ -8,6 +8,7 @@ import { VERSION } from '../cli/index.js';
 // The canonical list of Agent API commands supported by the ScriptSync bridge (v7)
 const BRIDGE_COMMANDS = new Set([
   'check_connection',
+  'auth_status',
   'get_sync_status',
   'get_last_error',
   'clear_last_error',

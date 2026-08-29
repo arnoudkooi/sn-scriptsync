@@ -4,7 +4,14 @@ import { CommandHandler } from '../types';
 import { AgentError } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
 import { listInstanceFolders } from '../instanceResolver';
-import { getSetting } from './_shared';
+import { getSetting, restRequest } from './_shared';
+import {
+	canonicalOrigin,
+	getSession,
+	noteProbeResult,
+	authStateForStatus,
+	AuthState,
+} from '../sessionHealth';
 import { AGENT_API_VERSION } from '../portFile';
 import { hasReview, waitForReview, getReviewCommand } from '../reviewRegistry';
 
@@ -53,7 +60,12 @@ const check_connection: CommandHandler = {
 			ready: true,
 			serverRunning: true,
 			browserConnected: true,
-			message: 'Connected and ready',
+			// Transport-level only. This says the bridge and the helper tab are
+			// up; it does NOT say ServiceNow still accepts the session, which is
+			// what auth_status answers. Conflating the two is how an instance
+			// returning 401 was reported as "Connected and ready".
+			message: 'Bridge and helper connected. Run auth_status to confirm the ServiceNow session.',
+			authChecked: false,
 			// Which SN Utils build is on the other end — lets an agent pick the
 			// right capture strategy up front instead of discovering it via errors.
 			helper: helper
@@ -65,6 +77,106 @@ const check_connection: CommandHandler = {
 				: null,
 		};
 	},
+};
+
+
+/**
+ * Bounded, read-only authentication probe.
+ *
+ * The one question `connected` never answered: does ServiceNow still accept
+ * this session? Everything else the bridge reports is inferred from local
+ * state, which is why the transport, the listener and the helper tab could all
+ * be healthy while every operation returned 401.
+ *
+ * Deliberately the cheapest authenticated read available — one row, one field —
+ * so it can be called on any health check without being a cost.
+ */
+const auth_status: CommandHandler = {
+	name: 'auth_status',
+	docs: {
+		summary: 'Check whether ServiceNow still accepts this instance\'s browser session, using a bounded read-only request.',
+		request: { command: 'auth_status', id: 'auth_1', instance: 'ven08329' },
+		response: {
+			status: 'success',
+			result: {
+				state: 'AUTH_OK',
+				ok: true,
+				instance: 'ven08329',
+				origin: 'https://ven08329.service-now.com',
+				lastValidatedAt: 1788040000000,
+			},
+		},
+		notes: 'Returns a state rather than throwing: AUTH_OK, AUTH_EXPIRED, AUTH_MISSING, HELPER_DISCONNECTED, INSTANCE_NOT_FOUND or AUTH_UNKNOWN. A 403 is AUTH_OK — the session authenticated and an ACL refused the row, which is a different problem from an expired session.',
+	},
+	async handle(ctx) {
+		const instanceName = path.basename(ctx.instanceFolder);
+		const settings = eu.getInstanceSettings(instanceName);
+		const origin = canonicalOrigin(settings?.url);
+
+		const base = { instance: instanceName, origin };
+
+		if (!ctx.isServerRunning()) {
+			return { ...base, ok: false, state: 'HELPER_DISCONNECTED' as const, message: 'The ScriptSync bridge is not running.' };
+		}
+		if (!settings || !settings.url) {
+			return { ...base, ok: false, state: 'INSTANCE_NOT_FOUND' as const, message: `No settings for instance '${instanceName}'.` };
+		}
+		if (!ctx.hasBrowserClient()) {
+			const record = getSession(origin);
+			return {
+				...base,
+				ok: false,
+				state: 'HELPER_DISCONNECTED' as const,
+				message: 'The SN Utils helper tab is not open, so the session cannot be checked.',
+				receivedAt: record?.receivedAt,
+				lastValidatedAt: record?.lastValidatedAt,
+			};
+		}
+
+		let state: AuthState;
+		let detail: string | undefined;
+		try {
+			await restRequest(ctx, settings, {
+				endpoint: '/api/now/table/sys_user',
+				method: 'GET',
+				queryParams: { sysparm_limit: '1', sysparm_fields: 'sys_id', sysparm_no_count: 'true' },
+			});
+			state = 'AUTH_OK';
+		} catch (err: any) {
+			const status: number | undefined = err?.details?.status;
+			state = authStateForStatus(status);
+			detail = err?.message;
+			// No session material ever seen and the request failed outright:
+			// that reads as missing rather than expired.
+			if (state === 'AUTH_UNKNOWN' && !getSession(origin)?.receivedAt) {
+				state = 'AUTH_MISSING';
+			}
+		}
+
+		noteProbeResult(origin, state);
+		const record = getSession(origin);
+
+		return {
+			...base,
+			ok: state === 'AUTH_OK',
+			state,
+			message: AUTH_MESSAGES[state],
+			detail,
+			receivedAt: record?.receivedAt,
+			lastValidatedAt: record?.lastValidatedAt,
+			lastUsedAt: record?.lastUsedAt,
+			quarantinedAt: record?.quarantinedAt,
+		};
+	},
+};
+
+const AUTH_MESSAGES: Record<AuthState, string> = {
+	AUTH_OK: 'ServiceNow accepted the session.',
+	AUTH_EXPIRED: 'ServiceNow rejected the session (401). Open the instance in the browser and run /token to refresh it.',
+	AUTH_MISSING: 'No session material for this instance yet. Open the instance in the browser and run /token.',
+	HELPER_DISCONNECTED: 'The SN Utils helper tab is not connected.',
+	INSTANCE_NOT_FOUND: 'This instance is not known to the bridge.',
+	AUTH_UNKNOWN: 'The session check could not complete. This is not a verdict — retry before acting on it.',
 };
 
 const get_sync_status: CommandHandler = {
@@ -347,6 +459,7 @@ const get_review_result: CommandHandler = {
 
 export const connectionCommands: CommandHandler[] = [
 	check_connection,
+	auth_status,
 	get_sync_status,
 	get_last_error,
 	clear_last_error,

@@ -79,6 +79,8 @@ export function printHelp(): void {
   snu --mcp                           Start Model Context Protocol (MCP) server on stdio
   snu serve [--port <p>] [--ws <p>]   Start persistent standalone bridge daemon
   snu status                          Show the active local bridge process
+  snu auth status                     Verify ServiceNow still accepts the session (read-only probe)
+  snu auth refresh                    How to hand the bridge a fresh session
   snu restart [--force]               Replace a standalone bridge (reclaims a stuck port)
   snu stop [--force]                  Stop a standalone bridge, even an orphaned one holding port 1978
   snu update [--check]                Check for or install the latest CLI release
@@ -471,6 +473,31 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       outputError(err, isJsonMode);
       process.exit(1);
     }
+    return;
+  }
+
+  if (lifecycleCommand === 'auth' && nonGlobalTokens[1] === 'refresh') {
+    // Refreshing a session is something only the user can do — the credential
+    // lives in their browser, never in the bridge. Say exactly that instead of
+    // pretending to a capability the CLI does not have.
+    const target = instance ? ` for ${instance}` : '';
+    if (isJsonMode) {
+      outputJson({
+        refreshed: false,
+        actionRequired: 'user',
+        steps: [
+          'Open the ServiceNow instance in your browser.',
+          'Run /token in the SN Utils slash palette to hand a fresh session to the bridge.',
+          'Keep the helper tab open, then re-run `snu auth status`.',
+        ],
+      });
+    } else {
+      console.log(`\nA ServiceNow session can only be refreshed from the browser${target}:`);
+      console.log('  1. Open the instance in your browser.');
+      console.log('  2. Run /token in the SN Utils slash palette.');
+      console.log('  3. Keep the helper tab open, then re-run `snu auth status`.\n');
+    }
+    await printUpdateNotice(updateNotice);
     return;
   }
 

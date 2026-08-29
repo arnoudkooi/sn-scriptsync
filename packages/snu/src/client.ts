@@ -470,18 +470,59 @@ export class ScriptSyncClient {
     }
 
     const bridgeReady = conn.serverRunning === true;
-    const serviceNowReady = bridgeReady && browserConnected;
     const security = resolveContextSecurity(capabilities, instancesData, instance, specificInstanceInfo);
+
+    // The one question local state cannot answer: does ServiceNow still accept
+    // the session? Everything above is inferred from the bridge's own view, and
+    // during the 2026-08-29 incident all of it was true while every operation
+    // returned 401. Ask, rather than assume.
+    let auth: Record<string, any> | null = null;
+    if (bridgeReady && browserConnected) {
+      try {
+        const authResp = await this.execute({ command: 'auth_status', instance, params: {} }, 15_000);
+        auth = authResp.result || null;
+      } catch (err: any) {
+        // An older bridge has no auth_status. Say so rather than silently
+        // falling back to the optimistic answer this replaces.
+        auth = {
+          state: err?.code === 'E_UNKNOWN_COMMAND' ? 'AUTH_UNSUPPORTED' : 'AUTH_UNKNOWN',
+          ok: false,
+          message:
+            err?.code === 'E_UNKNOWN_COMMAND'
+              ? 'This bridge predates the session check; readiness cannot be confirmed. Update the sn-scriptsync extension or @snutils/snu.'
+              : `The session check did not complete: ${err?.message || err}`,
+        };
+      }
+    }
+
+    // Seven independent facts, not one overloaded word. Each is separately
+    // false-able, so a report can name exactly which link is broken.
+    const health = {
+      httpReachable: bridgeReady,
+      wsListening: bridgeReady,
+      helperConnected: browserConnected,
+      instanceKnown: auth ? auth.state !== 'INSTANCE_NOT_FOUND' : !!instancesData.instances?.length,
+      sessionPresent: auth ? auth.state !== 'AUTH_MISSING' : null,
+      authProbe: auth ? { ok: auth.ok === true, state: auth.state, detail: auth.detail ?? null } : null,
+      lastAuthenticatedAt: auth?.lastUsedAt ?? auth?.lastValidatedAt ?? null,
+    };
+
+    // Ready means every link is proven, including the last one.
+    const serviceNowReady = bridgeReady && browserConnected && auth?.ok === true;
 
     return {
       bridgeReady,
       serviceNowReady,
       browserConnected,
+      health,
+      auth,
       message: serviceNowReady
         ? 'Connected and ready'
-        : bridgeReady
+        : !bridgeReady
+        ? 'WebSocket server not running.'
+        : !browserConnected
         ? 'Bridge active. Helper tab disconnected (open via /token in ServiceNow tab).'
-        : 'WebSocket server not running.',
+        : auth?.message || 'Bridge and helper connected; the ServiceNow session could not be confirmed.',
       helper: capabilities
         ? {
             tier: capabilities.tier,

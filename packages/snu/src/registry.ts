@@ -626,6 +626,29 @@ export const TOOLS: ToolDefinition[] = [
     },
   },
 
+  // 18. Auth status (session health)
+  {
+    name: 'snu_auth_status',
+    agentCommand: 'auth_status',
+    description:
+      'Check whether ServiceNow still accepts the browser session for an instance, using a bounded read-only request. This is the only check that proves the session works: bridge and helper-tab state are local inferences and can all be healthy while every operation returns 401. Returns AUTH_OK, AUTH_EXPIRED, AUTH_MISSING, HELPER_DISCONNECTED, INSTANCE_NOT_FOUND or AUTH_UNKNOWN. A 403 is AUTH_OK — the session authenticated and an ACL refused the row, which is a different problem.',
+    cliCommand: 'auth status',
+    cliUsage: 'snu auth status [--instance <i>] [--json]',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instance: { type: 'string', description: 'Target instance name/folder (optional)' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    mapInput: (input) => ({
+      command: 'auth_status',
+      instance: input.instance,
+      params: {},
+    }),
+  },
+
   // 16. REST Request (generic escape hatch)
   {
     name: 'snu_rest_request',

@@ -543,6 +543,82 @@ export class StandaloneDispatcher {
         };
       }
 
+      // The one question local state cannot answer: does ServiceNow still
+      // accept this session? Mirrors the extension's auth_status so the same
+      // CLI command means the same thing on both hosts — the CLI and the
+      // extension diverging on a shared command is how the scope defect hid.
+      if (req.command === 'auth_status') {
+        const inst = this.resolveInstance(req.instance);
+        const origin = (() => {
+          try { return inst.settings?.url ? new URL(inst.settings.url).origin.toLowerCase() : null; }
+          catch { return null; }
+        })();
+        const base = { instance: inst.name, origin };
+        const reply = (result: Record<string, any>) => ({
+          id: req.id,
+          command: req.command,
+          status: 'success' as const,
+          timestamp: Date.now(),
+          result: { ...base, ...result },
+        });
+
+        if (!inst.settings?.url) {
+          return reply({ ok: false, state: 'INSTANCE_NOT_FOUND', message: `No settings for instance '${inst.name}'.` });
+        }
+        if (!this.ws.hasBrowserClient()) {
+          return reply({
+            ok: false,
+            state: 'HELPER_DISCONNECTED',
+            message: 'The SN Utils helper tab is not connected, so the session cannot be checked.',
+          });
+        }
+
+        const correlationId = crypto.randomUUID();
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 15_000 });
+        this.ws.sendToBrowser({
+          action: 'agentRestApi',
+          agentRequestId: correlationId,
+          endpoint: '/api/now/table/sys_user',
+          method: 'GET',
+          queryParams: { sysparm_limit: '1', sysparm_fields: 'sys_id', sysparm_no_count: 'true' },
+          instance: inst.settings,
+          appName: 'SN Utils CLI',
+        });
+
+        try {
+          const res: any = await pendingPromise;
+          const status: number | undefined = res?.status;
+          // 401 and 403 mean opposite things: the session is gone, versus the
+          // session authenticated and an ACL refused the row.
+          const state =
+            res?.success === false
+              ? status === 401
+                ? 'AUTH_EXPIRED'
+                : status === 403
+                ? 'AUTH_OK'
+                : 'AUTH_UNKNOWN'
+              : 'AUTH_OK';
+          return reply({
+            ok: state === 'AUTH_OK',
+            state,
+            message:
+              state === 'AUTH_OK'
+                ? 'ServiceNow accepted the session.'
+                : state === 'AUTH_EXPIRED'
+                ? 'ServiceNow rejected the session (401). Open the instance in the browser and run /token to refresh it.'
+                : 'The session check could not complete. This is not a verdict — retry before acting on it.',
+            detail: res?.error,
+          });
+        } catch (err: any) {
+          return reply({
+            ok: false,
+            state: 'AUTH_UNKNOWN',
+            message: 'The session check could not complete. This is not a verdict — retry before acting on it.',
+            detail: err?.message || String(err),
+          });
+        }
+      }
+
       if (req.command === 'list_instances') {
         const folders = this.listInstanceFolders();
         const now = Date.now();
