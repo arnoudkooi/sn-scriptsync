@@ -286,8 +286,21 @@ export class StandaloneWsBridge {
 
     // 4. Standard correlated agent responses
     if (msg.agentRequestId) {
-      if (msg.success === false && msg.code) {
-        this.pending.reject(msg.agentRequestId, msg.code, msg.error || 'Command failed', msg.details);
+      const approvedReview = [...this.activeReviews.values()].find(
+        (review) => review.correlationId === msg.agentRequestId && review.consumed
+      );
+      if (msg.success === false && (msg.code || approvedReview)) {
+        const remoteError = msg.error;
+        const message = typeof remoteError === 'string'
+          ? remoteError
+          : remoteError?.message || remoteError?.detail || msg.detail || 'Approved command failed during execution';
+        const executionCode = msg.code && msg.code !== 'E_USER_REJECTED' ? msg.code : 'E_COMMAND_FAILED';
+        this.pending.reject(msg.agentRequestId, executionCode, message, {
+          ...(msg.details && typeof msg.details === 'object' ? msg.details : {}),
+          status: msg.status,
+          detail: msg.detail ?? remoteError?.detail ?? null,
+          response: msg.data ?? null,
+        });
       } else {
         this.pending.resolve(msg.agentRequestId, msg);
       }

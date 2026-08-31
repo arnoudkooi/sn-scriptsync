@@ -445,11 +445,21 @@ export class StandaloneDispatcher {
   resolveInstance(requestInstance?: string): { name: string; folder: string; settings: any } {
     const folders = this.listInstanceFolders();
     const liveInstances = this.ws.getLiveInstances();
+    const findLiveMatch = (name: string, url?: string): typeof liveInstances[number] | undefined => {
+      let origin = '';
+      try { origin = url ? new URL(url).origin.toLowerCase() : ''; } catch {}
+      return liveInstances.find((candidate) => {
+        let liveOrigin = '';
+        try { liveOrigin = new URL(candidate.url).origin.toLowerCase(); } catch {}
+        return (origin && liveOrigin === origin) || candidate.name.toLowerCase() === name.toLowerCase();
+      });
+    };
 
     if (requestInstance) {
       const settings = this.getInstanceSettings(requestInstance);
       if (settings) {
-        return { name: requestInstance, folder: path.join(this.cwd, requestInstance), settings };
+        const live = findLiveMatch(requestInstance, settings.url);
+        return { name: requestInstance, folder: path.join(this.cwd, requestInstance), settings: live || settings };
       }
 
       const needle = requestInstance.toLowerCase().replace(/\/$/, '');
@@ -474,7 +484,8 @@ export class StandaloneDispatcher {
 
     if (folders.length === 1) {
       const name = path.basename(folders[0]);
-      return { name, folder: folders[0], settings: this.getInstanceSettings(name) };
+      const settings = this.getInstanceSettings(name);
+      return { name, folder: folders[0], settings: findLiveMatch(name, settings?.url) || settings };
     }
 
     if (folders.length === 0) {
@@ -487,16 +498,27 @@ export class StandaloneDispatcher {
       });
     }
 
-    // Check freshness to find default instance
-    const now = Date.now();
-    const ranked = folders.map((f) => {
-      const name = path.basename(f);
-      let mtime = 0;
-      try { mtime = fs.statSync(path.join(f, '_settings.json')).mtimeMs; } catch {}
-      return { name, folder: f, settings: this.getInstanceSettings(name), age: now - mtime };
-    }).sort((a, b) => a.age - b.age);
+    const known = folders.map((folder) => {
+      const name = path.basename(folder);
+      return { name, folder, settings: this.getInstanceSettings(name) };
+    });
+    const liveMatches = known.map((instance) => {
+      const live = findLiveMatch(instance.name, instance.settings?.url);
+      return live ? { ...instance, settings: live } : null;
+    }).filter((instance): instance is NonNullable<typeof instance> => !!instance);
 
-    return ranked[0];
+    if (liveMatches.length === 1) return liveMatches[0];
+
+    const knownInstances = known.map((instance) => instance.name);
+    const connectedInstances = liveMatches.map((instance) => instance.name);
+    const names = (connectedInstances.length ? connectedInstances : knownInstances).join(', ');
+    const message = connectedInstances.length
+      ? `Multiple helper-connected instances found (${names}). Pass "instance": "<name>" in the request.`
+      : `Multiple known workspace instances found (${names}); this does not mean they have live helper sessions. Pass "instance": "<name>" in the request.`;
+    throw Object.assign(new Error(message), {
+      code: 'E_INSTANCE_REQUIRED',
+      details: { knownInstances, connectedInstances },
+    });
   }
 
   cancel(requestId: string, reason = 'CANCELLED'): void {

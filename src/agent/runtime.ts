@@ -6,6 +6,7 @@
 import { AgentContext, AgentRequest, HelperBuildInfo, StagedWriteMeta, StagedWriteResult } from './types';
 import * as pendingRegistry from './pendingRegistry';
 import { getWorkspaceRoot } from '../workspaceRoot';
+import { LiveInstanceReference } from './instanceSelection';
 
 export interface Runtime {
 	sendToBrowser(payload: any): void;
@@ -20,6 +21,8 @@ export interface Runtime {
 	/** Build/license handshake of the connected helper tab, if any. */
 	getHelperBuildInfo?(): HelperBuildInfo | null;
 	getInstanceGates?(origin: string): Record<string, any> | null;
+	/** Instances observed on the current helper connection, newest first. */
+	getLiveInstances?(): LiveInstanceReference[];
 	/** Stop the bridge from a remote request (`snu stop`/`snu restart` against an
 	 * editor-hosted bridge). Resolves once the ports are released. */
 	stopBridge?(): Promise<void>;

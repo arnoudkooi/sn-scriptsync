@@ -211,6 +211,88 @@ test('TwoPhaseReview: user rejection with feedback returns E_USER_REJECTED and p
   }
 });
 
+test('TwoPhaseReview: approved execution failure is E_COMMAND_FAILED, not E_USER_REJECTED', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-review-execution-test-'));
+  const instDir = path.join(tmpDir, 'ven08329');
+  fs.mkdirSync(instDir, { recursive: true });
+  fs.writeFileSync(path.join(instDir, '_settings.json'), JSON.stringify({ url: 'https://ven08329.service-now.com' }));
+
+  const pending = new PendingRegistry();
+  const wsBridge = new StandaloneWsBridge(0, pending);
+  const wsPort = await wsBridge.start();
+  const dispatcher = new StandaloneDispatcher({
+    cwd: tmpDir,
+    wsBridge,
+    pending,
+    cliFlags: { deleteRecords: true, reviewHighRisk: true },
+  });
+
+  try {
+    const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+    await new Promise<void>((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({
+      action: 'helperBuildInfo',
+      tier: 'pro',
+      proFeatures: true,
+      capabilities: { protocolVersion: 1, commandReview: 1, instanceSecurityGates: 1 },
+    }));
+    ws.send(JSON.stringify({
+      action: 'helperGatesUpdated',
+      instanceOrigin: 'https://ven08329.service-now.com',
+      revision: 1,
+      gates: {
+        backgroundScripts: true,
+        deleteRecords: 'approve',
+        createArtifacts: true,
+        browserDebugger: false,
+        restRequest: true,
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.action === 'reviewRequest') {
+        ws.send(JSON.stringify({
+          action: 'reviewResponse',
+          reviewId: msg.reviewId,
+          nonce: msg.nonce,
+          payloadHash: msg.payloadHash,
+          approved: true,
+        }));
+      } else if (msg.action === 'executeApproved') {
+        ws.send(JSON.stringify({
+          action: 'agentRestApiResponse',
+          agentRequestId: msg.agentRequestId,
+          success: false,
+          code: 'E_USER_REJECTED',
+          error: 'Operation Failed',
+          status: 403,
+          detail: 'Cross-scope access denied by ServiceNow',
+          data: { error: { message: 'Operation Failed' } },
+        }));
+      }
+    });
+
+    const response = await dispatcher.dispatch({
+      id: 'delete_execution_failure',
+      command: 'delete_record',
+      params: { table: 'sys_script_include', sys_id: '0123456789abcdef0123456789abcdef' },
+    });
+
+    assert.strictEqual(response.status, 'error');
+    assert.strictEqual(response.code, 'E_COMMAND_FAILED');
+    assert.strictEqual(response.error, 'Operation Failed');
+    assert.strictEqual(response.details?.status, 403);
+    assert.strictEqual(response.details?.detail, 'Cross-scope access denied by ServiceNow');
+    assert.deepStrictEqual(response.details?.response, { error: { message: 'Operation Failed' } });
+    ws.close();
+  } finally {
+    await wsBridge.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('TwoPhaseReview: timed out review cannot execute later (stale approval is dropped)', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-review-test-'));
   const instDir = path.join(tmpDir, 'ven08329');
@@ -641,4 +723,3 @@ test('TwoPhaseReview: legacy helper without commandReview executes directly via 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
-

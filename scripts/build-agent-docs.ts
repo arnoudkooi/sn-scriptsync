@@ -131,7 +131,10 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               endpoints (GET /api/instructions, /api/skills[/<name>]).
 //   v19 -> v20: added pull_records (and pull_artifacts alias) for bulk and single
 //               artifact pulling to canonical local workspace files.
-const INSTRUCTIONS_VERSION = 21;
+//   v21 -> v22: distinguish helper-observed instances from remembered folders
+//               during auth resolution; document E_COMMAND_FAILED for an
+//               approved review whose execution subsequently fails.
+const INSTRUCTIONS_VERSION = 22;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the

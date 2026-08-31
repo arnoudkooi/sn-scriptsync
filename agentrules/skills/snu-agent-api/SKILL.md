@@ -3,7 +3,7 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=21 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=22 -->
 
 # SN ScriptSync — Agent API
 
@@ -126,6 +126,7 @@ HTTP status codes map to codes:
 | `E_PARTIAL_FAILURE` | 207 | Batch partially succeeded — inspect per-item results |
 | `E_REVIEW_PENDING` | 202 | The command needs human approval in the helper tab Review Queue. **Tell the user to approve it** in the SN Utils ScriptSync helper tab in their browser, then call `get_review_result` with the `reviewId` from `details` to collect the outcome |
 | `E_USER_REJECTED` | 403 | The developer rejected the command in the Review Queue — do not retry without asking the user |
+| `E_COMMAND_FAILED` | 500 | The command was accepted (and, when applicable, approved) but failed during execution. Inspect `details.status`, `details.detail`, and `details.response`; this is not a user rejection |
 | `E_INTERNAL` | 500 | Unexpected error |
 | `E_ACL` / `E_TOKEN_EXPIRED` / `E_SCREENSHOT_PERMISSION` | 502 | ServiceNow rejected the request, or a tab needs a one-time capture grant (click the SN Utils icon on it, then retry) |
 | `E_SERVER_NOT_RUNNING` / `E_BROWSER_DISCONNECTED` | 503 | Can't reach ServiceNow |
@@ -133,11 +134,17 @@ HTTP status codes map to codes:
 
 ### Resolving `E_INSTANCE_REQUIRED` (multiple instances)
 
-When a command returns `E_INSTANCE_REQUIRED`, the workspace has more than one
-instance folder and you didn't pass `"instance"`. **A single helper tab relays
-for every instance the browser has a session for**, so more than one instance
-can answer as "live" — don't treat any single one as exclusive, and don't
-immediately ask the user to pick either.
+When a command returns `E_INSTANCE_REQUIRED`, you didn't pass `"instance"` and
+the bridge could not select a single safe target. `details.knownInstances` lists
+remembered workspace folders; `details.connectedInstances` lists the subset
+observed on the current helper connection. A folder is not proof of a live
+session. `auth_status` automatically selects the target only when exactly one
+known folder matches a helper-observed instance.
+
+If the error says `Multiple known workspace instances found`, do not describe
+those folders as active connections. If it says `Multiple helper-connected
+instances found`, ask for a target (especially for a write) or use the roster
+and freshness guidance below.
 
 Use freshness as a *default pick*, not an exclusivity test. The extension
 rewrites `<instance>/_settings.json` (refreshing `g_ck`) every time it relays for
@@ -304,6 +311,7 @@ Guarded commands (background scripts, deletes, some UI actions) whose per-instan
 **Errors:**
 - `E_REVIEW_PENDING` — still undecided; remind the user and poll again.
 - `E_USER_REJECTED` — the developer rejected it; don't retry without asking.
+- `E_COMMAND_FAILED` — the developer approved it, but execution failed; inspect `details.status`, `details.detail`, and `details.response` instead of treating this as a rejection.
 - `E_TIMEOUT` — the 5-minute review window expired unanswered; re-issue the original command to start a new review.
 - `E_NOT_FOUND` — unknown/expired `reviewId` (settled results are kept ~10 minutes).
 

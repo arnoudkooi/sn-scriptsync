@@ -144,6 +144,11 @@ The helper tab applies permissions per ServiceNow instance:
 - **Approve** sends high-risk operations to the helper's Review Queue for one-time approval.
 - **Auto** allows that operation without a review prompt.
 
+An actual Reject decision returns `E_USER_REJECTED`. If the user approves but
+ServiceNow then refuses or fails the operation, the result is
+`E_COMMAND_FAILED` with the remote status and response details; approval and
+execution outcome are deliberately reported as separate facts.
+
 Standalone mode also has fail-closed host gates. Background Scripts, record deletion, REST writes, and browser debugger access are disabled by default; artifact creation is enabled by default. Both the host gate and the instance gate must allow an operation.
 
 `snu context` shows these sources separately. **Host** is the standalone daemon/MCP process policy, **Instance** is the setting published by the helper tab for the selected ServiceNow origin, and **Effective** is the combined result. In attached VS Code mode the host column is blank because the current helper's per-instance setting is authoritative; older helpers fall back to VS Code settings.

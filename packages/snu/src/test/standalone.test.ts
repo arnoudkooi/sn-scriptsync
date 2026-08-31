@@ -128,6 +128,68 @@ test('Standalone: query uses the most recently authenticated /token instance', a
   }
 });
 
+test('Standalone: auth resolution ignores remembered folders when exactly one is live', async () => {
+  const pending = new PendingRegistry();
+  const wsBridge = new StandaloneWsBridge(0, pending);
+  const wsPort = await wsBridge.start();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-auth-instance-test-'));
+  const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+
+  for (const name of ['dev1', 'dev2', 'dev3']) {
+    const folder = path.join(tmpDir, name);
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, '_settings.json'), JSON.stringify({
+      name,
+      url: `https://${name}.service-now.com`,
+      g_ck: `${name}-remembered-token`,
+    }));
+  }
+
+  const dispatcher = new StandaloneDispatcher({ cwd: tmpDir, wsBridge, pending });
+  try {
+    await new Promise<void>((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({
+      instance: {
+        name: 'dev2',
+        url: 'https://dev2.service-now.com',
+        g_ck: 'dev2-live-token',
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const resolved = dispatcher.resolveInstance();
+    assert.strictEqual(resolved.name, 'dev2');
+    assert.strictEqual(resolved.settings.url, 'https://dev2.service-now.com');
+    assert.strictEqual(resolved.settings.g_ck, 'dev2-live-token');
+  } finally {
+    ws.close();
+    await wsBridge.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Standalone: multiple remembered folders are labelled as known, not connected', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-known-instance-test-'));
+  const wsBridge = new StandaloneWsBridge(0);
+  for (const name of ['dev1', 'dev2']) {
+    const folder = path.join(tmpDir, name);
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, '_settings.json'), JSON.stringify({ url: `https://${name}.service-now.com` }));
+  }
+
+  try {
+    const dispatcher = new StandaloneDispatcher({ cwd: tmpDir, wsBridge });
+    assert.throws(
+      () => dispatcher.resolveInstance(),
+      (error: any) => error.code === 'E_INSTANCE_REQUIRED'
+        && /Multiple known workspace instances found/.test(error.message)
+        && error.details.connectedInstances.length === 0
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('Standalone: HTTP bridge serves health and handles yield command', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-standalone-test-'));
   let yielded = false;

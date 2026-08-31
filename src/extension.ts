@@ -1199,6 +1199,19 @@ let connectedHelperInfo: import('./agent/types').HelperBuildInfo | null = null;
 const helperInstanceGates = new Map<string, Record<string, any>>();
 const helperInstanceGateRevisions = new Map<string, number>();
 const HELPER_GATE_KEYS = ['backgroundScripts', 'deleteRecords', 'createArtifacts', 'browserDebugger', 'restRequest'];
+const helperLiveInstances = new Map<string, { name: string; url: string; lastActiveAt: number }>();
+
+function noteHelperLiveInstance(instance: any): void {
+	if (!instance?.url || typeof instance.url !== 'string') return;
+	try {
+		const parsed = new URL(instance.url);
+		const origin = parsed.origin.toLowerCase();
+		const name = typeof instance.name === 'string' && instance.name.trim()
+			? instance.name.trim()
+			: parsed.hostname.split('.')[0];
+		helperLiveInstances.set(origin, { name, url: origin, lastActiveAt: Date.now() });
+	} catch {}
+}
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -1218,6 +1231,7 @@ export function activate(context: vscode.ExtensionContext) {
 		stageAgentWrite: (input) => stageAgentWrite(input),
 		getHelperBuildInfo: () => connectedHelperInfo,
 		getInstanceGates: (origin: string) => helperInstanceGates.get(origin.toLowerCase()) || null,
+		getLiveInstances: () => [...helperLiveInstances.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt),
 		// Remote lifecycle control, so `snu stop`/`snu restart` can recover an
 		// editor-hosted bridge instead of the user hunting for a PID to kill.
 		stopBridge: () => bridgeLifecycle.stop(),
@@ -2621,6 +2635,7 @@ async function startBridgeTransports(): Promise<void> {
 			connectedHelperInfo = null;
 			helperInstanceGates.clear();
 			helperInstanceGateRevisions.clear();
+			helperLiveInstances.clear();
 			pendingRegistry.rejectAll('E_BROWSER_DISCONNECTED', 'Browser helper disconnected. Open the SN Utils helper tab and try again.');
 		});
 
@@ -2633,6 +2648,7 @@ async function startBridgeTransports(): Promise<void> {
 				return;
 			}
 			try {
+				noteHelperLiveInstance(messageJson?.instance);
 				if (messageJson?.action === 'helperBuildInfo') {
 					helperBuildInfo = {
 						...helperBuildInfo,

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getWorkspaceRoot } from '../workspaceRoot';
 import { AgentError } from './errors';
+import { LiveInstanceReference, selectKnownInstance } from './instanceSelection';
 
 const NON_INSTANCE_FOLDERS = new Set([
 	'.vscode', '.cursor', '.git', 'node_modules',
@@ -40,7 +41,11 @@ export function listInstanceFolders(): string[] {
  * When `noInstance` is true the function returns the workspace root so
  * connection-check style commands still have a context folder to log into.
  */
-export function resolveInstanceFolder(requestInstance: string | undefined, noInstance = false): string {
+export function resolveInstanceFolder(
+	requestInstance: string | undefined,
+	noInstance = false,
+	liveInstances: LiveInstanceReference[] = []
+): string {
 	const root = getWorkspaceRoot() || '';
 	if (!root) {
 		throw new AgentError('E_INSTANCE_REQUIRED', 'No workspace folder open');
@@ -68,10 +73,28 @@ export function resolveInstanceFolder(requestInstance: string | undefined, noIns
 	if (folders.length === 0) {
 		throw new AgentError('E_INSTANCE_NOT_FOUND', 'No instance folder found in workspace');
 	}
-	throw new AgentError(
-		'E_INSTANCE_REQUIRED',
-		`Multiple instances found (${folders.map((f) => path.basename(f)).join(', ')}). Pass "instance": "<name>" in the request.`
-	);
+	const known = folders.map((folder) => {
+		let url: string | null = null;
+		try {
+			const settingsPath = fs.existsSync(path.join(folder, '_settings.json'))
+				? path.join(folder, '_settings.json')
+				: path.join(folder, 'settings.json');
+			url = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))?.url || null;
+		} catch {}
+		return { name: path.basename(folder), folder, url };
+	});
+	const selection = selectKnownInstance(known, liveInstances);
+	if (selection.kind === 'single') return selection.instance.folder;
+
+	const knownInstances = known.map((item) => item.name);
+	const connectedInstances = selection.kind === 'multiple-live'
+		? selection.instances.map((item) => item.name)
+		: [];
+	const names = (connectedInstances.length ? connectedInstances : knownInstances).join(', ');
+	const message = connectedInstances.length
+		? `Multiple helper-connected instances found (${names}). Pass "instance": "<name>" in the request.`
+		: `Multiple known workspace instances found (${names}); this does not mean they have live helper sessions. Pass "instance": "<name>" in the request.`;
+	throw new AgentError('E_INSTANCE_REQUIRED', message, { knownInstances, connectedInstances });
 }
 
 /**

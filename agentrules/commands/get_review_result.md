@@ -17,6 +17,7 @@ Guarded commands (background scripts, deletes, some UI actions) whose per-instan
 **Errors:**
 - `E_REVIEW_PENDING` — still undecided; remind the user and poll again.
 - `E_USER_REJECTED` — the developer rejected it; don't retry without asking.
+- `E_COMMAND_FAILED` — the developer approved it, but execution failed; inspect `details.status`, `details.detail`, and `details.response` instead of treating this as a rejection.
 - `E_TIMEOUT` — the 5-minute review window expired unanswered; re-issue the original command to start a new review.
 - `E_NOT_FOUND` — unknown/expired `reviewId` (settled results are kept ~10 minutes).
 

@@ -6,11 +6,12 @@ import { AgentError } from './errors';
 import { getCommand } from './commands';
 import { getSetting } from './commands/_shared';
 import { resolveInstanceFolder } from './instanceResolver';
-import { buildContext } from './runtime';
+import { buildContext, getRuntime } from './runtime';
 import { getCommandPolicy } from './policy';
 import { computePayloadHash } from './canonical';
 import { registerReview, settleReview } from './reviewRegistry';
 import { ExtensionUtils } from '../ExtensionUtils';
+import { reviewExecutionFailure } from './reviewOutcome';
 
 const VALID_ID = /^[a-zA-Z0-9_-]+$/;
 const eu = new ExtensionUtils();
@@ -57,10 +58,13 @@ export async function dispatchAgentCommand(request: AgentRequest): Promise<Agent
 
 	let instanceFolder: string;
 	try {
-		instanceFolder = resolveInstanceFolder(request.instance, handler.noInstance);
+		const liveInstances = !request.instance && request.command === 'auth_status'
+			? (getRuntime().getLiveInstances?.() || [])
+			: [];
+		instanceFolder = resolveInstanceFolder(request.instance, handler.noInstance, liveInstances);
 	} catch (e: any) {
 		if (e instanceof AgentError) {
-			return errorResponse(request.id, request.command, e.code, e.message);
+			return errorResponse(request.id, request.command, e.code, e.message, e.details);
 		}
 		console.error('[agent] instance resolution failed:', e?.stack || e);
 		return errorResponse(request.id, request.command, 'E_INTERNAL', 'Failed to resolve instance folder');
@@ -166,8 +170,8 @@ export async function dispatchAgentCommand(request: AgentRequest): Promise<Agent
 		// Map the helper tab's review reply onto a final AgentResponse.
 		const finalizeReview = async (revResp: any): Promise<AgentResponse> => {
 			if (revResp?.success === false) {
-				const msg = revResp.error || 'Execution rejected by developer';
-				return errorResponse(request.id, request.command, revResp.code || 'E_USER_REJECTED', msg, revResp.details);
+				const failure = reviewExecutionFailure(revResp);
+				return errorResponse(request.id, request.command, failure.code, failure.message, failure.details);
 			}
 			if (revResp?.approvedNotExecuted === true) {
 				// The helper approved but cannot run this command shape (bulk

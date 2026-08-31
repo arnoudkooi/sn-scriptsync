@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## Unreleased
+
+- **Fixed: `auth_status` confused remembered workspace folders with live helper instances (#156).** With several historical instance folders and one live helper session, the command now selects that single live match. If it still needs a target, `E_INSTANCE_REQUIRED` says whether the ambiguity is between helper-connected instances or merely known workspace folders and returns both lists in `details`. The VS Code and standalone `snu` hosts now use the same distinction.
+- **Fixed: an approved command that failed during execution was reported as rejected by the developer (#157).** `E_USER_REJECTED` is now reserved for an actual Reject decision. A failure after approval returns `E_COMMAND_FAILED` with the available ServiceNow status, detail, and response attached, including for `delete_record` cross-scope failures.
+
 ## `@snutils/snu` 0.2.6 (2026-08-29)
 
 **CLI-only release; the sn-scriptsync extension stays at 4.8.9.**
