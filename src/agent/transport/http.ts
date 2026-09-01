@@ -13,15 +13,34 @@ import { writePortFile, deletePortFile, reassertPortFiles, getPortFilePath, glob
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB – attachments push this up
 
 /**
- * The canonical two-line connect instruction. Static on purpose: the fixed
- * port and the global port file make it paste-anywhere (global CLAUDE.md,
- * AGENTS.md, a Devin playbook, any system prompt).
+ * The canonical short connect instruction for AI agents.
+ *
+ * Points at the CLI rather than the raw HTTP API on purpose: an agent that
+ * shells out to `snu` gets argument validation, review gating and error codes,
+ * where one hand-rolling requests against 127.0.0.1 gets none of it and has to
+ * be told about port files and token headers first.
  */
+const CONNECT_LINES = [
+	'ServiceNow access: use @snutils/snu (CLI or MCP) through SN Utils ScriptSync.',
+	'Setup: npx -y @snutils/snu@latest setup. Docs: https://www.npmjs.com/package/@snutils/snu?activeTab=readme',
+	'Start with snu context --json. Commands: snu --help.',
+];
+
+/** For the clipboard, the helper tab, and anywhere an agent is configured. */
 export const AGENT_CONNECT_SNIPPET = [
-	'ScriptSync Agent API (SN Utils / sn-scriptsync): drive ServiceNow from this machine.',
-	`1. GET http://127.0.0.1:${AGENT_API_FIXED_PORT}/api/instructions for full usage docs (no auth). If that port does not answer, read the actual port from ~/.sn-scriptsync/agent-port.json.`,
-	'2. Auth: read the token from ~/.sn-scriptsync/agent-port.json and send it as the X-Agent-Token header.',
-	'3. Try it: POST http://127.0.0.1:<port>/api with body {"command":"check_connection"}.',
+	...CONNECT_LINES,
+	`Raw API docs: http://127.0.0.1:${AGENT_API_FIXED_PORT}/api/instructions`,
+].join('\n');
+
+/**
+ * The same guidance served AT /api/instructions, without the line pointing back
+ * to that page. A reader who has already fetched the docs does not need to be
+ * sent to the docs, and the full HTTP contract — port files, token header,
+ * every command — is in the body directly below it.
+ */
+export const AGENT_CONNECT_SNIPPET_SERVED = [
+	...CONNECT_LINES,
+	'The raw HTTP API, including port discovery and the auth header, is documented below.',
 ].join('\n');
 
 export interface HttpServerState {
@@ -195,7 +214,7 @@ export async function startAgentHttpServer(opts: {
 			if (req.method === 'GET' && url.pathname === '/api/instructions' && opts.docsDir) {
 				try {
 					const core = fs.readFileSync(path.join(opts.docsDir, 'agentinstructions.md'), 'utf8');
-					return sendMarkdown(res, `${AGENT_CONNECT_SNIPPET}\n\nOn-demand skills: GET /api/skills (index) and /api/skills/<name> (full skill).\n\n---\n\n${core}`);
+					return sendMarkdown(res, `${AGENT_CONNECT_SNIPPET_SERVED}\n\nOn-demand skills: GET /api/skills (index) and /api/skills/<name> (full skill).\n\n---\n\n${core}`);
 				} catch {
 					return sendJson(res, 404, { status: 'error', code: 'E_NOT_FOUND', error: 'Instructions not available in this install' });
 				}
