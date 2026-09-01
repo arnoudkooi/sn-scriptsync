@@ -251,3 +251,37 @@ test('Format: context labels host, instance, and effective policy separately', (
   assert.ok(output.includes('Allowed'));
   assert.ok(!output.includes('Capabilities & Effective Permission Gates'));
 });
+
+// ---------------------------------------------------------------------------
+// Phase 5: the transport version got its real name. A bridge from before the
+// rename reports only `apiVersion`, and refusing those would break every
+// install that has not updated.
+// ---------------------------------------------------------------------------
+
+test('Health: transportApiVersion is preferred but apiVersion still works', async () => {
+  const { checkHealth } = await import('../client.js');
+  const http = await import('http');
+
+  const serve = (body: any) =>
+    new Promise<number>((resolve) => {
+      const s = http.createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(body));
+      });
+      s.listen(0, '127.0.0.1', () => resolve((s.address() as any).port));
+      (serve as any).last = s;
+    });
+
+  // New bridge: both fields, new one authoritative.
+  let port = await serve({ status: 'success', transportApiVersion: 9, apiVersion: 9, commands: [], pid: 1 });
+  let health = await checkHealth(port);
+  assert.strictEqual(health.transportApiVersion, 9);
+  (serve as any).last.close();
+
+  // Old bridge: only the legacy field. Must still be accepted.
+  port = await serve({ status: 'success', apiVersion: 9, commands: [], pid: 1 });
+  health = await checkHealth(port);
+  assert.strictEqual(health.transportApiVersion, undefined);
+  assert.strictEqual(health.apiVersion, 9, 'a pre-rename bridge is still usable');
+  (serve as any).last.close();
+});

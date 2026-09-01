@@ -10,6 +10,7 @@ import { scopedAppCommands } from './scopedapp';
 import { restCommands } from './rest';
 import { backgroundCommands } from './background';
 import { lifecycleCommands } from './lifecycle';
+import { negotiateCommands } from './negotiate';
 
 const allHandlers: CommandHandler[] = [
 	...connectionCommands,
@@ -23,6 +24,7 @@ const allHandlers: CommandHandler[] = [
 	...restCommands,
 	...backgroundCommands,
 	...lifecycleCommands,
+	...negotiateCommands,
 ];
 
 const registry = new Map<string, CommandHandler>();

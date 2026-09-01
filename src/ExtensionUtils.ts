@@ -133,7 +133,15 @@ export class ExtensionUtils {
     // Markers that delimit the block this extension owns inside a user's
     // instruction file. Anything outside the markers is the user's own content
     // and is preserved across refreshes.
-    private static MANAGED_BEGIN_RE = /<!--\s*SN-SCRIPTSYNC:BEGIN\s+apiVersion=(\d+)\s*-->/i;
+    //
+    // BOTH spellings are accepted, permanently. The field was renamed from
+    // `apiVersion` to `instructionsSchemaVersion` because it never described the
+    // transport API and the collision made version questions ambiguous — but
+    // every workspace already in the field carries the old marker. A regex that
+    // only knew the new name would fail to find the existing block and append a
+    // second one, silently doubling the managed section in someone's CLAUDE.md
+    // on the next refresh. This alternation is not a migration step; it stays.
+    private static MANAGED_BEGIN_RE = /<!--\s*SN-SCRIPTSYNC:BEGIN\s+(?:instructionsSchemaVersion|apiVersion)=(\d+)\s*-->/i;
     private static MANAGED_END_RE = /<!--\s*SN-SCRIPTSYNC:END\s*-->/i;
 
     private static extractManagedBlock(text: string): { begin: number; end: number; version: number } | null {

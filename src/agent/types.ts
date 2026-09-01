@@ -51,6 +51,9 @@ export interface InstanceGateSnapshot {
 
 /** What the connected SN Utils build reported about itself on connect. */
 export interface HelperBuildInfo {
+	/** The connected SN Utils build's own identity, as it reports it. */
+	extensionName?: string;
+	extensionVersion?: string;
 	debuggerAvailable?: boolean;
 	proFeatures?: boolean;
 	tier?: 'free' | 'pro' | 'trial' | 'enterprise';

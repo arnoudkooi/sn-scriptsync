@@ -90,6 +90,9 @@ export interface AgentPortFile {
 
 export interface HealthResponse {
   status: 'success';
+  /** Versions the HTTP/WebSocket contract. Absent on bridges before the rename. */
+  transportApiVersion?: number;
+  /** @deprecated Alias for transportApiVersion, kept for older bridges. */
   apiVersion: number;
   hostKind?: 'vscode' | 'standalone';
   commands: string[];

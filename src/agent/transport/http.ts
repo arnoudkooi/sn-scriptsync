@@ -173,6 +173,12 @@ export async function startAgentHttpServer(opts: {
 			if (req.method === 'GET' && url.pathname === '/api/health') {
 				return sendJson(res, 200, {
 					status: 'success',
+					// `transportApiVersion` is the real name: it versions this
+					// HTTP/WebSocket contract and nothing else. `apiVersion` was
+					// ambiguous against the instructions marker, which used the same
+					// word for an unrelated number. The alias stays because older
+					// CLIs read it and must keep working.
+					transportApiVersion: AGENT_API_VERSION,
 					apiVersion: AGENT_API_VERSION,
 					hostKind: 'vscode',
 					commands: commandNames(),

@@ -301,9 +301,14 @@ export async function checkHealth(port: number, expectedPid?: number): Promise<H
     if (health.status !== 'success') {
       throw new Error('Health check response missing status=success');
     }
-    if (typeof health.apiVersion === 'number' && health.apiVersion < MIN_API_VERSION) {
+    // Prefer the new name, fall back to the old. A bridge from before the
+    // rename reports only `apiVersion`, and refusing it would break every
+    // install that has not updated yet.
+    const transportVersion =
+      typeof health.transportApiVersion === 'number' ? health.transportApiVersion : health.apiVersion;
+    if (typeof transportVersion === 'number' && transportVersion < MIN_API_VERSION) {
       throw new ScriptSyncClientError(
-        `ScriptSync server API version ${health.apiVersion} is older than minimum supported ${MIN_API_VERSION}`,
+        `ScriptSync bridge transport version ${transportVersion} is older than the minimum supported ${MIN_API_VERSION}. Update the sn-scriptsync extension (or @snutils/snu if a standalone bridge is serving).`,
         'E_API_VERSION_INCOMPATIBLE'
       );
     }
@@ -332,6 +337,20 @@ export class ScriptSyncClient {
   private discoveryResult?: DiscoveryResult;
 
   constructor(private options?: DiscoveryOptions) {}
+
+  /** A human description of what is serving, for upgrade advice that names a target. */
+  private async describeBridgeHost(): Promise<string> {
+    try {
+      const discovery = await this.getDiscovery();
+      const health = await checkHealth(discovery.port);
+      const version = health.extensionVersion ? ` ${health.extensionVersion}` : '';
+      return health.hostKind === 'standalone'
+        ? `a standalone @snutils/snu bridge (PID ${health.pid}) — update @snutils/snu`
+        : `the sn-scriptsync extension${version} (PID ${health.pid}) — update the extension`;
+    } catch {
+      return 'the connected bridge';
+    }
+  }
 
   async getDiscovery(): Promise<DiscoveryResult> {
     if (!this.discoveryResult) {
@@ -409,7 +428,12 @@ export class ScriptSyncClient {
         // way to do the same write.
         let message = json.error || `Command ${mapped.command} failed`;
         if ((json.code || '') === 'E_UNKNOWN_COMMAND') {
-          message += ` The connected ScriptSync bridge does not implement '${mapped.command}'. If VS Code is hosting the bridge, update the sn-scriptsync extension; otherwise update @snutils/snu.`;
+          // Name the component and how to check, rather than leaving the caller
+          // to guess which of four moving parts is behind.
+          const host = this.discoveryResult ? await this.describeBridgeHost() : 'the connected bridge';
+          message +=
+            ` The bridge does not implement '${mapped.command}'. It is ${host}.` +
+            ` Run \`snu negotiate\` (or check the \`commands\` list it returns) to see what this bridge supports.`;
         }
 
         throw new ScriptSyncClientError(

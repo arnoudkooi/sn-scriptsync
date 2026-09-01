@@ -1,4 +1,4 @@
-<!-- SN-SCRIPTSYNC:BEGIN apiVersion=23 -->
+<!-- SN-SCRIPTSYNC:BEGIN instructionsSchemaVersion=23 -->
 <!-- apiVersion: 23 -->
 <!-- Managed by the sn-scriptsync VS Code extension and refreshed automatically.
      This is only a small pointer to agentinstructions.md so this file stays tiny.
