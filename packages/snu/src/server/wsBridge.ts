@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { defaultPendingRegistry, PendingRegistry } from './pendingRegistry.js';
+import { resolveGateMode } from './policy.js';
 import { HelperCapabilities, InstanceGateSnapshot, SecurityGates, ReviewEnvelope } from '../types.js';
 
 export interface HelperState {
@@ -215,6 +216,9 @@ export class StandaloneWsBridge {
           browserDebugger: rawGates.browserDebugger,
           restRequest: rawGates.restRequest,
         };
+        // Only newer helper builds publish this one, so it is not required
+        // above: left absent it resolves through GATE_FALLBACKS.
+        if (isValidGateVal(rawGates.updateRecords)) gates.updateRecords = rawGates.updateRecords;
 
         this.state.instanceGates.set(origin, {
           instanceOrigin: origin,
@@ -358,7 +362,7 @@ export class StandaloneWsBridge {
       const origin = new URL(instanceUrl).origin.toLowerCase();
       const snap = this.state.instanceGates.get(origin);
       if (snap) {
-        return snap.gates[gate] ?? 'approve';
+        return resolveGateMode(snap.gates, gate) ?? 'approve';
       }
     } catch {}
     return 'off';

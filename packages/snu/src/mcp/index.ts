@@ -193,7 +193,7 @@ export async function createMcpServer(): Promise<McpServer> {
   // 7. Update Record
   server.tool(
     'snu_update_record',
-    'Update a field on an existing ServiceNow record with synchronous persistence verification. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
+    'Update a field on an existing ServiceNow record with synchronous persistence verification. Covered by the updateRecords permission, which is on by default and follows createArtifacts where it is not set on its own. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
     {
       table: z.string().describe('Table name'),
       sys_id: z.string().describe('Record sys_id'),

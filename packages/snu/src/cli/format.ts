@@ -115,6 +115,7 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
         backgroundScripts: 'Background Scripts',
         deleteRecords: 'Delete Records',
         createArtifacts: 'Create Artifacts',
+        updateRecords: 'Update Records',
         browserDebugger: 'Browser Debugger',
         restRequest: 'REST Request API',
       };
@@ -133,9 +134,12 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
         if (value === 'allowed') return `${ANSI.green}Allowed${ANSI.reset}`;
         return `${ANSI.gray}Unknown${ANSI.reset}`;
       };
-      const rows = Object.keys(labels).map((key) => {
+      // Only render gates the payload actually carries: an older bridge does not
+      // report every gate this build knows about.
+      const rows = Object.keys(labels).flatMap((key) => {
         const gate = result.security.effectiveGates[key];
-        return [labels[key], hostLabel(gate.host), instanceLabel(gate.instance), resultLabel(gate.result)];
+        if (!gate) return [];
+        return [[labels[key], hostLabel(gate.host), instanceLabel(gate.instance), resultLabel(gate.result)]];
       });
       lines.push(formatTable(['Permission', 'Host', 'Instance', 'Effective'], rows).split('\n').map((line) => `  ${line}`).join('\n'));
     } else if (result.gates) {
@@ -147,6 +151,7 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
       lines.push(formatGate('Background Scripts', result.gates.backgroundScripts));
       lines.push(formatGate('Delete Records', result.gates.deleteRecords));
       lines.push(formatGate('Create Artifacts', result.gates.createArtifacts));
+      lines.push(formatGate('Update Records', result.gates.updateRecords));
       lines.push(formatGate('Browser Debugger', result.gates.browserDebugger));
       lines.push(formatGate('REST Request API', result.gates.restRequest));
       if (result.security?.instanceGateProtocol) {

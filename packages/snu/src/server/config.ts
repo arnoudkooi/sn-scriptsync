@@ -22,9 +22,13 @@ export function resolveStandaloneConfig(cliFlags?: Partial<SecurityGates & { rev
     backgroundScripts: false,
     deleteRecords: false,
     createArtifacts: true,
+    // Resolved at the end of this function: with nothing configured for it,
+    // "may the agent change existing records" follows the create decision.
+    updateRecords: true,
     browserDebugger: false,
     restRequest: false,
   };
+  let updateRecordsExplicit = false;
   let reviewHighRisk = true;
 
   // 2. Read user-controlled global file: ~/.sn-scriptsync/settings.json
@@ -36,6 +40,7 @@ export function resolveStandaloneConfig(cliFlags?: Partial<SecurityGates & { rev
       if (typeof data.backgroundScripts === 'boolean') gates.backgroundScripts = data.backgroundScripts;
       if (typeof data.deleteRecords === 'boolean') gates.deleteRecords = data.deleteRecords;
       if (typeof data.createArtifacts === 'boolean') gates.createArtifacts = data.createArtifacts;
+      if (typeof data.updateRecords === 'boolean') { gates.updateRecords = data.updateRecords; updateRecordsExplicit = true; }
       if (typeof data.browserDebugger === 'boolean') gates.browserDebugger = data.browserDebugger;
       if (typeof data.restRequest === 'boolean') gates.restRequest = data.restRequest;
       if (typeof data.reviewHighRisk === 'boolean') reviewHighRisk = data.reviewHighRisk;
@@ -52,6 +57,9 @@ export function resolveStandaloneConfig(cliFlags?: Partial<SecurityGates & { rev
   const envArt = parseStrictBool(process.env.SNU_ALLOW_CREATE_ARTIFACTS);
   if (envArt !== undefined) gates.createArtifacts = envArt;
 
+  const envUpd = parseStrictBool(process.env.SNU_ALLOW_UPDATE_RECORDS);
+  if (envUpd !== undefined) { gates.updateRecords = envUpd; updateRecordsExplicit = true; }
+
   const envDbg = parseStrictBool(process.env.SNU_ALLOW_BROWSER_DEBUGGER);
   if (envDbg !== undefined) gates.browserDebugger = envDbg;
 
@@ -66,10 +74,16 @@ export function resolveStandaloneConfig(cliFlags?: Partial<SecurityGates & { rev
     if (typeof cliFlags.backgroundScripts === 'boolean') gates.backgroundScripts = cliFlags.backgroundScripts;
     if (typeof cliFlags.deleteRecords === 'boolean') gates.deleteRecords = cliFlags.deleteRecords;
     if (typeof cliFlags.createArtifacts === 'boolean') gates.createArtifacts = cliFlags.createArtifacts;
+    if (typeof cliFlags.updateRecords === 'boolean') { gates.updateRecords = cliFlags.updateRecords; updateRecordsExplicit = true; }
     if (typeof cliFlags.browserDebugger === 'boolean') gates.browserDebugger = cliFlags.browserDebugger;
     if (typeof cliFlags.restRequest === 'boolean') gates.restRequest = cliFlags.restRequest;
     if (typeof cliFlags.reviewHighRisk === 'boolean') reviewHighRisk = cliFlags.reviewHighRisk;
   }
+
+  // 5. Inherit the create decision when nothing named updateRecords explicitly,
+  //    so a host locked down with SNU_ALLOW_CREATE_ARTIFACTS=0 does not leave
+  //    update_record wide open.
+  if (!updateRecordsExplicit) gates.updateRecords = gates.createArtifacts;
 
   return { gates, reviewHighRisk };
 }

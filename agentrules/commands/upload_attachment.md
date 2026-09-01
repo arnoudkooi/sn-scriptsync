@@ -1,6 +1,8 @@
 ### `upload_attachment` ⚡ (Remote - Async)
 Upload a file (image, document, etc.) as an attachment to any ServiceNow record.
 
+**Gating:** `createArtifacts` (`sn-scriptsync.createArtifacts.enabled` in VS Code, `SNU_ALLOW_CREATE_ARTIFACTS` in the standalone `snu` host, or the per-instance grant in the SN Utils helper tab) — **on by default**. An upload inserts a `sys_attachment` row, so it carries the same permission as the other `create_*` commands and returns `E_DISABLED` when that permission is off.
+
 **Request (using filePath - recommended):**
 ```json
 {

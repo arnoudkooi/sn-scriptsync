@@ -12,7 +12,7 @@ import {
   MappedCommand,
   AGENT_API_VERSION,
 } from './types.js';
-import { getCommandPolicy } from './server/policy.js';
+import { getCommandPolicy, resolveGateMode } from './server/policy.js';
 
 export const MIN_API_VERSION = 7;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 70_000;
@@ -23,6 +23,7 @@ const CONTEXT_GATE_KEYS = [
   'backgroundScripts',
   'deleteRecords',
   'createArtifacts',
+  'updateRecords',
   'browserDebugger',
   'restRequest',
 ] as const;
@@ -100,8 +101,11 @@ export function resolveContextSecurity(
 
   const effectiveGates = {} as ContextSecurity['effectiveGates'];
   for (const key of CONTEXT_GATE_KEYS) {
-    const host = hostGates ? hostGates[key] === true : null;
-    const rawInstance = selectedInstanceGates?.[key];
+    // Both sides read through GATE_FALLBACKS, so a gate an older host or helper
+    // build does not know about reports what actually governs it rather than a
+    // misleading "missing".
+    const host = hostGates ? resolveGateMode(hostGates, key) === true : null;
+    const rawInstance = resolveGateMode(selectedInstanceGates, key);
     let instance: ContextInstanceGate = null;
     if (instanceGateProtocol) {
       if (!selectedInstanceGates || rawInstance === undefined) instance = 'missing';

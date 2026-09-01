@@ -470,7 +470,7 @@ function flushStagedCreates() {
 					instance: path.basename(r.instanceFolder),
 					params: r.params,
 					timestamp: Date.now(),
-				});
+				}, { internal: true });
 				if (resp.status === 'error') {
 					vscode.window.showErrorMessage(`sn-scriptsync: create failed for "${r.label}": ${resp.error}`);
 				} else {
@@ -587,7 +587,7 @@ function replayStagedCreate(reviewId: string) {
 				instance: path.basename(c.instanceFolder),
 				params,
 				timestamp: Date.now(),
-			});
+			}, { internal: true });
 			if (resp.status === 'error') {
 				vscode.window.showErrorMessage(`sn-scriptsync: create failed for "${c.label}": ${resp.error}`);
 			} else {
@@ -1198,7 +1198,12 @@ let connectedHelperInfo: import('./agent/types').HelperBuildInfo | null = null;
 // never widen permissions. Both maps are cleared when the helper disconnects.
 const helperInstanceGates = new Map<string, Record<string, any>>();
 const helperInstanceGateRevisions = new Map<string, number>();
+// Every gate a helper must publish for its snapshot to count as well-formed.
 const HELPER_GATE_KEYS = ['backgroundScripts', 'deleteRecords', 'createArtifacts', 'browserDebugger', 'restRequest'];
+// Gates only newer helper builds know about. Kept out of HELPER_GATE_KEYS so an
+// older helper's snapshot is still accepted; a gate missing here resolves
+// through GATE_FALLBACKS at enforcement time.
+const HELPER_OPTIONAL_GATE_KEYS = ['updateRecords'];
 const helperLiveInstances = new Map<string, { name: string; url: string; lastActiveAt: number }>();
 
 function noteHelperLiveInstance(instance: any): void {
@@ -2793,6 +2798,7 @@ async function startBridgeTransports(): Promise<void> {
 					if (prevRevision === undefined || revision > prevRevision) {
 						const snapshot: Record<string, any> = {};
 						for (const k of HELPER_GATE_KEYS) snapshot[k] = gates[k];
+						for (const k of HELPER_OPTIONAL_GATE_KEYS) if (validMode(gates[k])) snapshot[k] = gates[k];
 						helperInstanceGates.set(origin, snapshot);
 						helperInstanceGateRevisions.set(origin, revision);
 					}

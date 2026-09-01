@@ -7,7 +7,7 @@ import { getCommand } from './commands';
 import { getSetting } from './commands/_shared';
 import { resolveInstanceFolder } from './instanceResolver';
 import { buildContext, getRuntime } from './runtime';
-import { getCommandPolicy } from './policy';
+import { getCommandPolicy, GATE_FALLBACKS, resolveGateMode } from './policy';
 import { computePayloadHash } from './canonical';
 import { registerReview, settleReview } from './reviewRegistry';
 import { ExtensionUtils } from '../ExtensionUtils';
@@ -20,6 +20,7 @@ const GATE_LABELS: Record<string, string> = {
 	backgroundScripts: 'Background Scripts',
 	deleteRecords: 'Delete Records',
 	createArtifacts: 'Create Artifacts',
+	updateRecords: 'Update Records',
 	restRequest: 'REST write requests',
 	browserDebugger: 'Browser Debugger',
 };
@@ -36,13 +37,29 @@ function errorResponse(id: string, command: string, code: string, message: strin
 	};
 }
 
+/** Only the host itself may replay an approved staged write. */
+export interface DispatchOptions {
+	/** True when the extension is re-dispatching its own already-approved payload. */
+	internal?: boolean;
+}
+
 /**
  * Framework entry point. Every transport calls this and nothing
  * else. Evaluates CommandPolicy and Two-Phase Monaco Review.
  */
-export async function dispatchAgentCommand(request: AgentRequest): Promise<AgentResponse> {
+export async function dispatchAgentCommand(request: AgentRequest, options?: DispatchOptions): Promise<AgentResponse> {
 	if (!request || typeof request !== 'object') {
 		return errorResponse('unknown', 'unknown', 'E_INVALID_REQUEST', 'Request must be a JSON object');
+	}
+
+	// __review_bypass skips the Pending Saves queue and is set by the host when
+	// it replays a write the user already approved. Transports hand us whatever
+	// the caller sent, so strip it from anything that did not originate here:
+	// otherwise an agent can opt itself out of review mode by setting a flag.
+	if (!options?.internal && request.params && typeof request.params === 'object'
+		&& '__review_bypass' in request.params) {
+		request = { ...request, params: { ...request.params } };
+		delete (request.params as any).__review_bypass;
 	}
 	if (!request.id || !request.command) {
 		return errorResponse(request?.id || 'unknown', request?.command || 'unknown', 'E_INVALID_REQUEST', 'Missing required fields: id, command');
@@ -110,8 +127,10 @@ export async function dispatchAgentCommand(request: AgentRequest): Promise<Agent
 		const label = GATE_LABELS[gateName] || gateName;
 		if (hasInstanceGates) {
 			// Deny-wins: only an explicit 'auto' or 'approve' grant passes. 'off',
-			// a missing key, and a not-yet-received snapshot all refuse.
-			const mode = helperGates ? helperGates[gateName] : undefined;
+			// a missing key, and a not-yet-received snapshot all refuse. A gate
+			// the connected helper build does not publish yet reads through its
+			// GATE_FALLBACKS predecessor instead of refusing outright.
+			const mode = resolveGateMode(helperGates, gateName);
 			if (mode !== 'auto' && mode !== 'approve') {
 				return errorResponse(request.id, request.command, 'E_DISABLED',
 					`${label} is not allowed for ${instanceOrigin || 'this instance'}. Grant it in the SN Utils helper tab and retry.`);
@@ -120,15 +139,22 @@ export async function dispatchAgentCommand(request: AgentRequest): Promise<Agent
 				isReviewRequired = true;
 			}
 		} else {
-			// Legacy helper: same VS Code settings and defaults as v4.7.9.
-			if (!getSetting<boolean>(`${gateName}.enabled`, gateName === 'createArtifacts')) {
+			// Legacy helper: same VS Code settings and defaults as v4.7.9. A gate
+			// with no setting of its own inherits its GATE_FALLBACKS predecessor,
+			// so sn-scriptsync.createArtifacts.enabled governs updates too until
+			// sn-scriptsync.updateRecords.enabled is set explicitly.
+			const fallbackGate = GATE_FALLBACKS[gateName];
+			const legacyDefault = fallbackGate
+				? getSetting<boolean>(`${fallbackGate}.enabled`, fallbackGate === 'createArtifacts')
+				: gateName === 'createArtifacts';
+			if (!getSetting<boolean>(`${gateName}.enabled`, legacyDefault)) {
 				return errorResponse(request.id, request.command, 'E_DISABLED',
 					`${label} is disabled. Enable sn-scriptsync.${gateName}.enabled in VS Code settings, or update SN Utils to grant it per instance in the helper tab.`);
 			}
 		}
 	}
 	if (isReviewRequired && helperGates && policy.gates.length > 0 &&
-		policy.gates.every((g) => helperGates[g] === 'auto')) {
+		policy.gates.every((g) => resolveGateMode(helperGates, g) === 'auto')) {
 		// Every governing gate is explicitly 'auto': the user pre-approved this
 		// kind of operation for the instance, so skip the review round-trip.
 		isReviewRequired = false;

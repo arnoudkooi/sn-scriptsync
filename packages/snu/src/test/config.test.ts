@@ -30,3 +30,13 @@ test('Config: honors explicit CLI flags and environment variables', () => {
     delete process.env.SNU_ALLOW_DELETE_RECORDS;
   }
 });
+
+test('Config: updateRecords follows the create decision unless set explicitly', () => {
+  const inherited = resolveStandaloneConfig({ createArtifacts: false });
+  assert.strictEqual(inherited.gates.updateRecords, false, 'a host that may not create may not overwrite either');
+
+  const explicit = resolveStandaloneConfig({ createArtifacts: false, updateRecords: true });
+  assert.strictEqual(explicit.gates.updateRecords, true);
+
+  assert.strictEqual(resolveStandaloneConfig().gates.updateRecords, true, 'default stays open');
+});

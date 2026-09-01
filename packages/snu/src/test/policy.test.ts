@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { getCommandPolicy } from '../server/policy.js';
+import { getCommandPolicy, resolveGateMode } from '../server/policy.js';
 
 test('Policy: maps command risks, required gates, and review requirements', () => {
   // 1. Background script -> execute, backgroundScripts gate, required review
@@ -40,4 +40,48 @@ test('Policy: maps command risks, required gates, and review requirements', () =
   assert.strictEqual(destroyPolicy.risk, 'delete');
   assert.deepStrictEqual(destroyPolicy.gates, ['deleteRecords']);
   assert.strictEqual(destroyPolicy.review, 'required');
+});
+
+// Issue #158: update_record carried an empty gate list and update_record_batch
+// was missing from the switch entirely, so it was classified as a read.
+test('Policy: updates to existing records are gated writes', () => {
+  for (const command of ['update_record', 'update_record_batch']) {
+    const policy = getCommandPolicy({ id: '1', command, params: { table: 'incident', sys_id: '123' } });
+    assert.strictEqual(policy.risk, 'write', `${command} is a write`);
+    assert.deepStrictEqual(policy.gates, ['updateRecords'], `${command} is gated`);
+  }
+});
+
+test('Policy: a gate a publisher does not know about resolves through its fallback', () => {
+  // Older host/helper builds publish the five original gates only.
+  const legacy = { backgroundScripts: 'off', deleteRecords: 'off', createArtifacts: 'approve', browserDebugger: 'off', restRequest: 'off' };
+  assert.strictEqual(resolveGateMode(legacy, 'updateRecords'), 'approve');
+
+  // An explicit value always wins over the fallback, in both directions.
+  assert.strictEqual(resolveGateMode({ ...legacy, updateRecords: 'off' }, 'updateRecords'), 'off');
+  assert.strictEqual(resolveGateMode({ ...legacy, createArtifacts: 'off', updateRecords: 'auto' }, 'updateRecords'), 'auto');
+
+  // Gates without a fallback keep reading as absent.
+  assert.strictEqual(resolveGateMode({}, 'deleteRecords'), undefined);
+  assert.strictEqual(resolveGateMode(null, 'updateRecords'), undefined);
+});
+
+test('Policy: attachment uploads and form commits are gated writes', () => {
+  // An upload inserts sys_attachment, so it rides the create permission.
+  const upload = getCommandPolicy({ id: '1', command: 'upload_attachment', params: { table: 'incident', sys_id: '123' } });
+  assert.strictEqual(upload.risk, 'write');
+  assert.deepStrictEqual(upload.gates, ['createArtifacts']);
+
+  // Committing the open form writes an existing record, whatever the verb is
+  // called: a custom action's name says nothing about what it does.
+  for (const uiAction of ['sysverb_update', 'save', 'x_acme_do_the_thing']) {
+    const policy = getCommandPolicy({ id: '2', command: 'run_ui_action', params: { uiAction } });
+    assert.deepStrictEqual(policy.gates, ['updateRecords'], `${uiAction} is gated`);
+    assert.strictEqual(policy.review, 'never');
+  }
+
+  // The delete escalation still wins, so updateRecords is not a route to it.
+  const destructive = getCommandPolicy({ id: '3', command: 'run_ui_action', params: { uiAction: 'sysverb_delete' } });
+  assert.deepStrictEqual(destructive.gates, ['deleteRecords']);
+  assert.strictEqual(destructive.review, 'required');
 });

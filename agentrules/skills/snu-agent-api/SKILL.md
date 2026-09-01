@@ -3,7 +3,7 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL apiVersion=22 -->
+<!-- SN-SCRIPTSYNC:SKILL apiVersion=23 -->
 
 # SN ScriptSync — Agent API
 
@@ -490,6 +490,8 @@ Update a single field on an existing record. Fire-and-forget (the extension send
 
 **Requires:** browser helper tab connected.
 
+**Gating:** `updateRecords` (`sn-scriptsync.updateRecords.enabled` in VS Code, `SNU_ALLOW_UPDATE_RECORDS` in the standalone `snu` host, or the per-instance **Update Records** grant in the SN Utils helper tab) — **on by default**. Where nothing sets it, it follows `createArtifacts`: a host or instance that may not create records may not overwrite them either.
+
 **Request:**
 ```json
 {
@@ -531,6 +533,7 @@ Update a single field on an existing record. Fire-and-forget (the extension send
 
 **Errors:**
 - `E_INVALID_PARAMS` - missing sys_id/table/field/content
+- `E_DISABLED` - the `updateRecords` gate is off for this host or instance
 - `E_BROWSER_DISCONNECTED` - no helper tab available
 - `E_INSTANCE_NOT_FOUND` - `_settings.json` missing
 
@@ -539,6 +542,8 @@ Update a single field on an existing record. Fire-and-forget (the extension send
 Update multiple fields on the same record in one round-trip. Preferred for multi-file artifacts (widgets, UI pages) where you'd otherwise send many `update_record` calls.
 
 **Requires:** browser helper tab connected.
+
+**Gating:** `updateRecords` (`sn-scriptsync.updateRecords.enabled` in VS Code, `SNU_ALLOW_UPDATE_RECORDS` in the standalone `snu` host, or the per-instance **Update Records** grant in the SN Utils helper tab) — **on by default**. Where nothing sets it, it follows `createArtifacts`: a host or instance that may not create records may not overwrite them either.
 
 **Request:**
 ```json
@@ -580,6 +585,7 @@ Update multiple fields on the same record in one round-trip. Preferred for multi
 
 **Errors:**
 - `E_INVALID_PARAMS` - missing sys_id/table/fields, or `fields` object is empty
+- `E_DISABLED` - the `updateRecords` gate is off for this host or instance
 - `E_BROWSER_DISCONNECTED` - no helper tab available
 - `E_INSTANCE_NOT_FOUND` - `_settings.json` missing
 
@@ -2017,6 +2023,8 @@ Switch domain:
 
 ### `upload_attachment` ⚡ (Remote - Async)
 Upload a file (image, document, etc.) as an attachment to any ServiceNow record.
+
+**Gating:** `createArtifacts` (`sn-scriptsync.createArtifacts.enabled` in VS Code, `SNU_ALLOW_CREATE_ARTIFACTS` in the standalone `snu` host, or the per-instance grant in the SN Utils helper tab) — **on by default**. An upload inserts a `sys_attachment` row, so it carries the same permission as the other `create_*` commands and returns `E_DISABLED` when that permission is off.
 
 **Request (using filePath - recommended):**
 ```json

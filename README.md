@@ -210,9 +210,33 @@ sn-scriptsync is designed to work seamlessly with AI coding assistants. Changes 
 ### Settings
 - `externalChanges.monitorFileChanges`: Monitor external changes (AI agents/git/tools) and show them in the Pending Saves queue (default: true)
 - `externalChanges.syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 0 monitor-only, set to `> 0` to enable auto-sync)
-- `createArtifacts.enabled`: Allow creating new records in ServiceNow from file/agent flows (default: true). Disable to block all create-record operations.
+- `createArtifacts.enabled` / `updateRecords.enabled` and the other permission gates: see [Agent permissions](#agent-permissions) below.
 - `agentInstructions.autoUpdate`: Add/refresh the managed sn-scriptsync reference block inside *your own* agent instruction files (`CLAUDE.md` / `AGENTS.md` / `.cursorrules` / `.windsurfrules` / `.clinerules` / `.github/copilot-instructions.md`) on start (default: true). Turn off if you maintain your own agent instructions and don't want those files touched. Either way `agentinstructions.md` and the `agentrules/skills` folder are always kept current — opting out only stops the block being injected into your files, so you can still reference the docs on demand (e.g. `@agentinstructions.md`, or a specific `agentrules/skills/<name>/SKILL.md`).
 - Manual saves (Ctrl+S) always sync immediately, bypassing the queue
+
+### Agent permissions
+
+What an AI agent is allowed to do on an instance is decided in **one** of two places:
+
+1. **The SN Utils helper tab (recommended).** A v8+ helper publishes a permission set *per instance*, and it is authoritative: anything it has not explicitly granted is refused. Each permission is one of `off` (refuse), `approve` (hold the command in the helper's Review Queue until you approve it) or `auto` (run it). Set them in the helper tab's **Agent Access** panel — this is the only way to allow something on dev while holding or refusing it on production.
+2. **VS Code settings (fallback).** When you are on an older SN Utils build that publishes nothing, these settings apply globally instead. They are not shown in the Settings UI; add them to `settings.json` by hand.
+
+| Permission | VS Code setting | Standalone `snu` | Covers | Default |
+| --- | --- | --- | --- | --- |
+| Create records | `sn-scriptsync.createArtifacts.enabled` | `SNU_ALLOW_CREATE_ARTIFACTS` | `create_record`, `create_artifact`, `create_application`, `create_table`, `add_column`, `upload_attachment` | **on** |
+| Update records | `sn-scriptsync.updateRecords.enabled` | `SNU_ALLOW_UPDATE_RECORDS` | `update_record`, `update_record_batch`, `run_ui_action` (committing the open form) | **on** |
+| Delete records | `sn-scriptsync.deleteRecords.enabled` | `SNU_ALLOW_DELETE_RECORDS` | `delete_record`, `delete_application`, REST `DELETE`, delete verbs in `run_ui_action` | off |
+| REST writes | `sn-scriptsync.restRequest.enabled` | `SNU_ALLOW_REST_REQUEST` | `POST`/`PUT`/`PATCH` via `rest_request` | off |
+| Background scripts | `sn-scriptsync.backgroundScripts.enabled` | `SNU_ALLOW_BACKGROUND_SCRIPTS` | `run_background_script`, the `delete_application` cascade | off |
+| Browser debugger | `sn-scriptsync.browserDebugger.enabled` | `SNU_ALLOW_BROWSER_DEBUGGER` | the CDP capture commands | off |
+
+Deleting records and running background scripts are held for your approval in the helper tab even when granted — unless you set that permission to `auto`, which pre-approves them for that instance. On an older helper that cannot show the Review Queue, a granted permission simply runs.
+
+**Update records** is newer than the rest. Where nothing sets it — including on any SN Utils build that predates it — it follows the create permission, so an instance that holds new records for approval holds changes to existing ones too, and one that refuses creates refuses overwrites. Grant it explicitly to separate the two decisions.
+
+An agent that hits a permission you have turned off gets `E_DISABLED` naming the permission, so it can tell you what to enable rather than looking for a way around it.
+
+**Review every agent write instead:** `sn-scriptsync.agentApi.reviewWrites` (default off) is a separate, stricter switch. With it on, agent writes are not sent at all — they are written to their local file and parked in the Pending Saves panel for you to read, edit and approve with **Sync Now**. It applies to every instance, so use the per-instance permissions above when you only want to hold production.
 
 ### Forensic Audit Logging
 When `sn-scriptsync.debugLogging` is enabled, the extension writes structured NDJSON audit entries to `audit.log` in the workspace root.

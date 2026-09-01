@@ -4,6 +4,8 @@ Update a single field on an existing record. Fire-and-forget (the extension send
 
 **Requires:** browser helper tab connected.
 
+**Gating:** `updateRecords` (`sn-scriptsync.updateRecords.enabled` in VS Code, `SNU_ALLOW_UPDATE_RECORDS` in the standalone `snu` host, or the per-instance **Update Records** grant in the SN Utils helper tab) — **on by default**. Where nothing sets it, it follows `createArtifacts`: a host or instance that may not create records may not overwrite them either.
+
 **Request:**
 ```json
 {
@@ -45,5 +47,6 @@ Update a single field on an existing record. Fire-and-forget (the extension send
 
 **Errors:**
 - `E_INVALID_PARAMS` - missing sys_id/table/field/content
+- `E_DISABLED` - the `updateRecords` gate is off for this host or instance
 - `E_BROWSER_DISCONNECTED` - no helper tab available
 - `E_INSTANCE_NOT_FOUND` - `_settings.json` missing

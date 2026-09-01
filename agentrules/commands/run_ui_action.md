@@ -18,7 +18,9 @@ Trigger a UI action on the **active ServiceNow form** in the connected browser t
 
 **⚠️ Pick the verb that matches the record state:** use `sysverb_insert` ("Submit") on a **new** record (`sys_id=-1`) and `sysverb_update` ("Update"/"Save") on an **existing** one. Calling `sysverb_update` on a new record returns `{ "triggered": true }` but inserts nothing.
 
-**🔒 Destructive verbs are gated:** any delete verb (`sysverb_delete`, or a custom action whose name contains `delete`) is rejected with `E_DISABLED` unless `sn-scriptsync.deleteRecords.enabled` is on — the same guard that protects `delete_record`. Prefer `delete_record` for removals; it never raises a dialog.
+**🔒 Every verb is gated:** committing the open form writes a record, so `run_ui_action` requires the `updateRecords` permission (`sn-scriptsync.updateRecords.enabled`, `SNU_ALLOW_UPDATE_RECORDS`, or the per-instance grant; on by default, following `createArtifacts` where it is not set on its own). A custom action's name says nothing about what it does, so the gate applies to all of them rather than only the ones that look like writes.
+
+**🔒 Destructive verbs escalate:** any delete verb (`sysverb_delete`, or a custom action whose name contains `delete`) is rejected with `E_DISABLED` unless `sn-scriptsync.deleteRecords.enabled` is on — the same guard that protects `delete_record`, and it is not satisfied by `updateRecords`. Prefer `delete_record` for removals; it never raises a dialog.
 - `suppressDialogs` (optional, default `true`): Auto-handle native browser dialogs the action may raise — `confirm()` is **auto-accepted**, `alert()`/`prompt()` are swallowed — so the tab doesn't freeze on a modal no user will answer. **⚠️ This means `sysverb_delete`'s "Are you sure?" confirmation is accepted automatically and the record is deleted.** Set `false` only if you want the native dialog to appear (rarely useful headless).
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`).
 - `tabId` (optional): Specific browser tab ID to target.
@@ -45,6 +47,6 @@ Trigger a UI action on the **active ServiceNow form** in the connected browser t
 }
 ```
 
-**Error codes:** `E_NO_FORM` (no `g_form` on the page), `E_DISABLED` (a delete verb while `deleteRecords.enabled` is off), `E_BROWSER_DISCONNECTED`, `E_TIMEOUT`.
+**Error codes:** `E_NO_FORM` (no `g_form` on the page), `E_DISABLED` (the `updateRecords` gate is off, or a delete verb while `deleteRecords.enabled` is off), `E_BROWSER_DISCONNECTED`, `E_TIMEOUT`.
 
 **Note:** `success` confirms the action was dispatched, not that the save succeeded server-side. If a mandatory field or an onSubmit script blocks the save, the form stays open — verify with a follow-up `get_form_state` or a `take_screenshot`.

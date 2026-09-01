@@ -22,6 +22,7 @@ const GATE_LABELS: Record<keyof SecurityGates, string> = {
   backgroundScripts: 'Background Scripts',
   deleteRecords: 'Delete Records',
   createArtifacts: 'Create Artifacts',
+  updateRecords: 'Update Records',
   browserDebugger: 'Browser Debugger',
   restRequest: 'REST Request API',
 };
@@ -45,6 +46,7 @@ const GATE_ENV_VARS: Record<keyof SecurityGates, string> = {
   backgroundScripts: 'SNU_ALLOW_BACKGROUND_SCRIPTS',
   deleteRecords: 'SNU_ALLOW_DELETE_RECORDS',
   createArtifacts: 'SNU_ALLOW_CREATE_ARTIFACTS',
+  updateRecords: 'SNU_ALLOW_UPDATE_RECORDS',
   browserDebugger: 'SNU_ALLOW_BROWSER_DEBUGGER',
   restRequest: 'SNU_ALLOW_REST_REQUEST',
 };
