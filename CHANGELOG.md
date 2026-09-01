@@ -1,5 +1,13 @@
 # CHANGELOG.md
 
+## 4.9.1 (2026-09-01)
+
+**Updating an existing record is now a gated write (`@snutils/snu` 0.2.8).**
+
+- **Fixed: `update_record` and `update_record_batch` bypassed the per-instance security gates (#158).** `update_record` was classified as a write but carried no gate, and `update_record_batch` was missing from the policy switch entirely, so it was classified as a *read*. On an instance where creating a record was held for approval, an agent could still overwrite fields on every record that already existed — the larger blast radius of the two. Both commands now carry a new **`updateRecords`** gate (`sn-scriptsync.updateRecords.enabled`, `SNU_ALLOW_UPDATE_RECORDS`, or the per-instance grant in the SN Utils helper tab), on by default. Where nothing sets it — including every helper build that predates it — it follows `createArtifacts`, so an instance set to `approve` now holds updates for review exactly as it holds creates, and one set to `off` refuses them. Grant `updateRecords` explicitly to separate the two decisions.
+- **Fixed: two more write paths ran on a locked-down instance.** `upload_attachment` and `run_ui_action` were both classified as ungated, so an instance that refused every other write still accepted a file onto any record, and still let `navigate` → `set_field` → `run_ui_action('sysverb_update')` commit the open form — a complete write path with nothing on it, and the one the agent instructions already tell agents not to use for data writes. An upload now carries `createArtifacts` (it inserts a `sys_attachment` row, so it is a create like the rest), and `run_ui_action` carries `updateRecords`. Every UI verb is gated, not just the ones whose names look like writes, because a custom action's name says nothing about its effect; the existing delete-verb escalation to `deleteRecords` still applies on top and is not satisfied by `updateRecords`.
+- **Fixed: an agent could opt itself out of review mode.** `__review_bypass` is the host's own marker for replaying a write the user has already approved in the Pending Saves queue, but it was accepted from anyone: a caller that set it on `update_record` skipped the queue entirely. It is now stripped from every request that arrives over a transport and honoured only for the extension's own replay.
+
 ## 4.9.0 (2026-08-31)
 
 **Accurate instance selection and honest post-approval failures (`@snutils/snu` 0.2.7).**
