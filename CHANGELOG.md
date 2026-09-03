@@ -1,5 +1,12 @@
 # CHANGELOG.md
 
+## 4.9.2 (2026-09-04)
+
+**The newest helper tab always wins the bridge, and a `/token` refresh is confirmed when the snu daemon owns it (`@snutils/snu` 0.2.9).**
+
+- **Fixed: a stale helper tab could lock out a new one.** Reconnecting, reloading the helper tab, or opening it in another window used to be refused with a "Max connection" close while the old socket lingered. The bridge now evicts earlier connections so the newest tab takes over.
+- **Fixed: `/token` gave no confirmation against the snu daemon.** Pushing a session token from the slash palette refreshed the daemon silently; the helper tab now logs the refresh confirmation as it already did for the VS Code host.
+
 ## 4.9.1 (2026-09-01)
 
 **Updating an existing record is now a gated write, and the two versions both called `apiVersion` now have their own names (`@snutils/snu` 0.2.8).**
