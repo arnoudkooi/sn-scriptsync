@@ -2567,10 +2567,14 @@ async function startBridgeTransports(): Promise<void> {
 			return;
 		}
 
-		if (wss.clients.size > 1) {
-			ws.close(1008, 'Max connection');
-			return;
-		}
+		// Evict any previous stale connections so the newest tab/reconnection takes over
+		wss.clients.forEach((client: WebSocket) => {
+			if (client !== ws) {
+				try {
+					client.terminate();
+				} catch { /* ignore */ }
+			}
+		});
 
 		let helperBuildInfo: {
 			debuggerAvailable?: boolean;
@@ -2804,7 +2808,7 @@ async function startBridgeTransports(): Promise<void> {
 					}
 				}
 			}
-			else if (message.instance && !message?.action)
+			else if (messageJson?.instance && !messageJson?.action)
 				refreshedToken(messageJson);
 			// end new methods to replace webserver with websocket
 

@@ -156,6 +156,20 @@ export class StandaloneWsBridge {
       } catch {}
     }
 
+    // Acknowledge /token push so the helper tab logs the refresh confirmation
+    if (msg?.instance && !msg?.action) {
+      try {
+        ws.send(
+          JSON.stringify({
+            refreshedtoken: true,
+            appName: 'SN Utils CLI',
+            response: `Refreshed token in snu daemon via /token slashcommand. Instance: ${msg.instance.name || 'instance'}`,
+          })
+        );
+      } catch {}
+      return;
+    }
+
     // ServiceNow save-icon push: write the field to the sync workspace, the
     // same message VS Code handles as saveFieldAsFile.
     if (msg.action === 'saveFieldAsFile') {
