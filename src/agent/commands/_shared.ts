@@ -44,6 +44,7 @@ export interface RestOptions {
 }
 
 export interface RestResult {
+	pagination?: import('../../ScopeDiscovery').Pagination;
 	status: number;
 	data: any;
 }
@@ -74,7 +75,7 @@ export async function restRequest(ctx: AgentContext, instance: any, opts: RestOp
 		const code: AgentErrorCode = response?.code || codeForRest(response?.status, msg);
 		throw new AgentError(code, msg, response?.details || { status: response?.status, detail: response?.detail });
 	}
-	return { status: response.status, data: response.data };
+	return { status: response.status, data: response.data, pagination: response.pagination };
 }
 
 function codeForRest(status: number | undefined, msg: string): AgentErrorCode {

@@ -1,9 +1,10 @@
+import { randomUUID } from 'crypto';
 import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAlignment, StatusBarItem, TextDocument } from 'vscode';
 
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { ScopeTreeViewProvider } from "./ScopeTreeViewProvider";
-import { ScopeMetadataLoader } from "./ScopeMetadataLoader";
+import { discoverScopeFields, readAllPages, FetchPage } from "./ScopeDiscovery";
 import { HelperConnection } from "./HelperConnection";
 import { InfoTreeViewProvider } from "./InfoTreeViewProvider";
 import { QueueTreeViewProvider } from "./QueueTreeViewProvider";
@@ -62,11 +63,8 @@ import {
 let sass = require('sass');
 let metaDataRelations : any;
 let scopeTableResponseCount = 0;
-// Load Scope pages each table in chunks: the Table API silently truncates a
-// single request, so a large application used to lose every record past the
-// first hundred per table. Per-table totals feed the completion message.
-const SCOPE_LOAD_PAGE_SIZE = 200;
-const scopeMetadataLoader = new ScopeMetadataLoader(requestRecords, writeInstanceMetaDataScope, SCOPE_LOAD_PAGE_SIZE);
+// Scope loads share the header-aware pager with the Agent API.
+let scopeLoadActive = false;
 let scopeLoadCounts: Record<string, number> = {};
 let scopeJson : any = {};
 
@@ -2029,7 +2027,8 @@ function setScopeTree(showWarning = false) {
 		metaDataRelations = eu.getFileAsJson(path.join(__filename, '..', '..', 'resources', 'metaDataRelations.json'));
 
 	if (scopeTree?.scopeTree)	{
-		const scopeTreeViewProvider = new ScopeTreeViewProvider(scopeTree, metaDataRelations, instance);
+		const definitions = scopeTree.tableDefinitions ? { ...metaDataRelations, tableFields: scopeTree.tableDefinitions } : metaDataRelations;
+		const scopeTreeViewProvider = new ScopeTreeViewProvider(scopeTree, definitions, instance);
 		vscode.window.registerTreeDataProvider("scopeTreeView", scopeTreeViewProvider);		
 	}
 
@@ -2716,7 +2715,7 @@ async function startBridgeTransports(): Promise<void> {
 				// pending registry below. Skip the global popup / queue-pause /
 				// _last_error path for those so a single agent REST failure
 				// doesn't spam the UI or clobber the shared error file.
-				if (messageJson.hasOwnProperty('error') && !messageJson.agentRequestId) {
+				if (messageJson.hasOwnProperty('error') && !messageJson.agentRequestId && !messageJson.scopeRequestId) {
 					auditLog('remote_result_error', { action: messageJson?.action || 'unknown', detail: messageJson.error?.detail || null, instance: readErrorInstance(messageJson)?.name || null });
 					let errorDetail = '';
 					const rawDetail = messageJson.error?.detail;
@@ -2801,7 +2800,7 @@ async function startBridgeTransports(): Promise<void> {
 					});
 				}
 			}
-			else if (messageJson?.agentRequestId && resolvePending(messageJson.agentRequestId, messageJson)) {
+			else if ((messageJson?.agentRequestId || messageJson?.scopeRequestId) && resolvePending(messageJson.agentRequestId || messageJson.scopeRequestId, messageJson)) {
 				// Already resolved into a pending Agent API request.
 			}
 			else if (messageJson.action === 'helperGatesUpdated') {
@@ -2858,10 +2857,10 @@ async function startBridgeTransports(): Promise<void> {
 					writeInstanceScope(messageJson);
 				}
 				else if (messageJson.actionGoal == 'writeInstanceMetaDataScope') {
-					scopeMetadataLoader.accept(messageJson);
+					void writeInstanceMetaDataScope(messageJson).catch(error => vscode.window.showErrorMessage(`Scope load failed: ${error.message}`));
 				}
 				else if (messageJson.actionGoal == 'writeTableFields') {
-					writeTableFields(messageJson);
+					void writeTableFields(messageJson).catch(error => vscode.window.showErrorMessage(`Scope load incomplete: ${error.message}`));
 				}
 				else {
 					saveRequestResponse(messageJson);
@@ -3152,6 +3151,7 @@ function requestInstanceScope(instance, scopeId) {
 
 
 function requestScopeArtifacts(includeEmpty = false, scriptObj = null, showWarning = true) {
+	if (scopeLoadActive) { eu.showMessage("A scope load is already in progress.", 3000); return; }
 
 	if (scriptObj === null){
 		scriptObj = true;
@@ -3186,7 +3186,17 @@ function requestScopeArtifacts(includeEmpty = false, scriptObj = null, showWarni
 	requestJson.scopeName = scriptObj.scopeName;
 	requestJson.tableName = 'sys_metadata';
 	requestJson.queryString = 'sysparm_fields=sys_class_name,sys_name,sys_id,sys_updated_on&sysparm_query=sys_scope='+ scriptObj.scope +'^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYDESCsys_class_name^ORDERBYsys_id';
-	scopeMetadataLoader.start(requestJson);
+	scopeLoadActive = true;
+	const fetchPage = scopePageFetcher(scriptObj.instance);
+	void (async () => {
+		try {
+			const query = new URLSearchParams(requestJson.queryString);
+			const discovery = await readAllPages(fetchPage, 'sys_metadata', query.get('sysparm_query')!, query.get('sysparm_fields')!);
+			await writeInstanceMetaDataScope({ ...requestJson, results: discovery.rows, discoveryComplete: discovery.complete, discoveryWarnings: discovery.warnings });
+		} catch (error: any) {
+			vscode.window.showErrorMessage(`Scope load incomplete: ${error.message}`);
+		} finally { scopeLoadActive = false; }
+	})();
 
 }
 
@@ -3242,7 +3252,23 @@ function writeInstanceMetaData(messageJson) {
 
 
 
-function writeInstanceMetaDataScope(messageJson){
+function scopePageFetcher(instance: any): FetchPage {
+	return async (table, query) => {
+		if (!helperConnection.connected) throw new Error('Open the SN Utils helper tab and retry.');
+		const id = `scope_${randomUUID()}`;
+		const responsePromise = pendingRegistry.register<any>({ id, command: 'load_scope', instanceFolder: path.join(getWorkspaceRoot(), instance.name), timeoutMs: 70_000 });
+		requestRecords({ action: 'requestRecords', scopeRequestId: id, instance, tableName: table, queryString: new URLSearchParams(query).toString() });
+		const response = await responsePromise;
+		if (response.success === false || !Array.isArray(response.results)) throw new Error(response.error || `Invalid response from ${table}`);
+		return { rows: response.results, pagination: response.pagination };
+	};
+}
+
+function writeScopeFile(file: string, content: string): Promise<void> {
+	return new Promise((resolve, reject) => eu.writeFile(file, content, false, error => error ? reject(error) : resolve()));
+}
+
+async function writeInstanceMetaDataScope(messageJson){
 
 	let basePath = getWorkspaceRoot() + nodePath.sep + messageJson.instance.name + nodePath.sep;
 	let scopes = eu.getFileAsJson(basePath + 'scopes.json');
@@ -3251,60 +3277,22 @@ function writeInstanceMetaDataScope(messageJson){
 	// always read the correct file here to be sure we dont use it from diffrent instance or scope.
 	metaDataRelations = eu.getFileAsJson(path.join(__filename, '..', '..', 'resources', 'metaDataRelations.json'));
 
-	let uniqueScopeTables = [...new Set(messageJson.results.map(item => item.sys_class_name + ''))];
+	const uniqueScopeTables = [...new Set<string>(messageJson.results.map(item => String(item.sys_class_name)))].filter(name => /^[a-zA-Z0-9_]+$/.test(name));
+	const fetchPage = scopePageFetcher(messageJson.instance);
+	const schema = await discoverScopeFields(uniqueScopeTables, metaDataRelations.tableFields, fetchPage);
+	const scopeCodeTables = uniqueScopeTables.filter(table => Object.keys(schema.definitions[table]?.codeFields || {}).length > 0);
+	metaDataRelations.tableFields = schema.definitions;
+	const loadReport = {
+		complete: messageJson.discoveryComplete === true && !(messageJson.discoveryWarnings || []).length && schema.warnings.length === 0,
+		metadataRecords: messageJson.results.length,
+		filesWritten: 0, skippedEmpty: 0, skippedUnreadable: 0,
+		skippedTables: uniqueScopeTables.filter(table => !scopeCodeTables.includes(table)).map(table => ({ table, reason: schema.warnings.some(w => w.startsWith(`${table}:`)) ? 'dictionary_unavailable' : 'no_scriptable_fields' })),
+		warnings: [...(messageJson.discoveryWarnings || []), ...schema.warnings],
+	};
 
-	//for now only load tables with direct code fields in the tree, this function removes all table that dont have the .codeFields key
-	metaDataRelations.tableFields = Object.keys(metaDataRelations.tableFields).filter(key => metaDataRelations.tableFields[key]?.codeFields)
-	.reduce((obj, key) => { obj[key] = metaDataRelations.tableFields[key];
-	  return obj;
-	}, {});
-
-
-	let allCodeTables = Object.keys(metaDataRelations.tableFields);
-	let scopeCodeTables = allCodeTables.filter(value => uniqueScopeTables.includes(value + ''));
-
-	// Object.keys(metaDataRelations.tableFields).forEach(tbl => {
-	// 	let hasCodeChildren = false;
-	// 	if (tbl == 'sp_widget') {
-	// 		let p = 1;
-	// 	}
-	// 	if (metaDataRelations.tableFields[tbl].hasOwnProperty('referenceFields')){
-	// 		let refFields = metaDataRelations.tableFields[tbl].referenceFields;
-	// 		Object.keys(refFields).forEach(ref =>{
-	// 			let tableName = refFields[ref].table
-	// 			if (metaDataRelations.tableFields.hasOwnProperty(tableName) && allCodeTables.includes(tableName)){
-    //                 metaDataRelations.tableFields[tbl].canHaveCodeChildren = true;
-	// 				if (!metaDataRelations.tableFields[tableName].hasOwnProperty('codeChildReferences')) metaDataRelations.tableFields[tableName].codeChildReferences = {};
-    //                   if (!metaDataRelations.tableFields[tableName].codeChildReferences.hasOwnProperty(tbl)) 
-    //                       metaDataRelations.tableFields[tableName].codeChildReferences[tbl] = {};
-	// 				   metaDataRelations.tableFields[tableName].codeChildReferences[tbl][ref] = refFields[ref].label;
-	// 			}
-	// 			else {
-	// 				delete refFields[ref]
-	// 			}
-	// 		})
-			
-	// 	}
-		
-	// })
-	
-	// Object.keys(metaDataRelations.tableFields).forEach(tbl => {
-	// 	let keep = true;
-	// 	if (!metaDataRelations.tableFields[tbl].hasOwnProperty('codeFields')){
-	// 		if (!metaDataRelations.tableFields[tbl].hasOwnProperty('canHaveCodeChildren')){
-    // 			delete metaDataRelations.tableFields[tbl];
-    //             keep = false
-    //         }
-    //     }
-    //     if (keep) 
-    //         delete metaDataRelations.tableFields[tbl].canHaveCodeChildren;
-	// })
-
-	
 	let tree = {};
 	messageJson.results.forEach(rec => {
-		if (metaDataRelations.tableFields[rec['sys_class_name']]?.codeFields ||
-			metaDataRelations.tableFields[rec['sys_class_name']]?.referenceFields) {
+		if (scopeCodeTables.includes(String(rec.sys_class_name))) {
 			let cat = metaDataRelations.tableFields[rec.sys_class_name]?.group || 'other'
 			if (!tree[cat]) tree[cat] = { type : "tables", tables : {}};
 			if (!tree[cat].tables[rec['sys_class_name']]) tree[cat].tables[rec['sys_class_name']] = { type : "records", records : {}};
@@ -3325,14 +3313,22 @@ function writeInstanceMetaDataScope(messageJson){
 			name :  messageJson.scopeName,
 			sysId : scope
 		},
-		scopeTree : tree
+		scopeTree : tree,
+		tableDefinitions: schema.definitions,
+		loadReport,
 	}
 
 
-	let strObj = JSON.stringify(scopeJson,null,2);
-	eu.writeFile(messageJson.filePath, strObj, false, function () { });
+	let strObj = JSON.stringify({ ...scopeJson, loadReport: { ...loadReport, complete: false, status: 'loading' } }, null, 2);
+	await writeScopeFile(messageJson.filePath, strObj);
 
-	scopeCodeTables.forEach(table =>{
+	if (!scopeCodeTables.length) {
+		await writeScopeFile(messageJson.filePath, JSON.stringify(scopeJson, null, 2));
+		setScopeTree();
+		eu.showMessage(`Scope load ${loadReport.complete ? 'finished' : 'incomplete'}: no scriptable tables found; ${loadReport.skippedTables.length} tables skipped. See scope.json for details.`, 6000);
+		return;
+	}
+	for (const table of scopeCodeTables) {
 
 		if (metaDataRelations.tableFields[table]?.codeFields){ 
 
@@ -3349,29 +3345,36 @@ function writeInstanceMetaDataScope(messageJson){
 			requestJson.scopeTableRequestCount = scopeCodeTables.length;
 			requestJson.displayValueField = 'sys_name';
 			requestJson.fields = Object.keys({...metaDataRelations.tableFields[table].codeFields, ...metaDataRelations.tableFields[table].referenceFields});
-			requestJson.pageSize = SCOPE_LOAD_PAGE_SIZE;
-			requestJson.pageOffset = 0;
-			requestJson.queryString = `sysparm_fields=sys_name,sys_id,${requestJson.fields}&sysparm_query=sys_scope=${scope}^sys_class_name=${table}^ORDERBYsys_id&sysparm_exclude_reference_link=true&sysparm_no_count=true&sysparm_limit=${SCOPE_LOAD_PAGE_SIZE}&sysparm_offset=0`;
-
-			requestRecords(requestJson);
+			let rows: any[] = [];
+			try {
+				const result = await readAllPages(fetchPage, table, `sys_scope=${scope}^sys_class_name=${table}^ORDERBYsys_id`, `sys_name,sys_id,${requestJson.fields}`);
+				loadReport.complete = loadReport.complete && result.complete && result.warnings.length === 0;
+				loadReport.warnings.push(...result.warnings);
+				rows = result.rows;
+			} catch (error: any) {
+				loadReport.complete = false;
+				loadReport.warnings.push(`${table}: download failed: ${error.message}`);
+			}
+			await writeTableFields({ ...requestJson, results: rows });
 		}
 
-	});
+	}
 
 }
 
 
-function writeTableFields(messageJson) {
+async function writeTableFields(messageJson) {
 
 	if (!metaDataRelations)
 		metaDataRelations = eu.getFileAsJson(path.join(__filename, '..', '..', 'resources', 'metaDataRelations.json'));
 	let scopeMappingFile = messageJson.filePath + '_map.json';
 	let nameToSysId = eu.writeOrReadNameToSysIdMapping(scopeMappingFile);
 
-	messageJson.results.forEach(record =>{
+	for (const record of messageJson.results) {
 
 
 		
+		record.sys_name = String(record.sys_name || record.sys_id);
 		let cleanName = record.sys_name.replace(/[^a-z0-9\._\-+]+/gi, '').replace(/\./g, '-') || record.sys_id + '';
 		// If this file was synced before, use whatever name is in the _map.json
 		cleanName = Object.keys(nameToSysId).find(fileName => nameToSysId[fileName] === record.sys_id) ?? cleanName
@@ -3399,7 +3402,7 @@ function writeTableFields(messageJson) {
 		}
 	
 
-		codeFields.forEach(field => {
+		for (const field of codeFields) {
 
 			//if (record[field].length == 0) return;
 
@@ -3438,9 +3441,17 @@ function writeTableFields(messageJson) {
 			};
 			if ((messageJson.includeEmpty || isFolderRecordTable || fieldValue != '') && fieldValue != 'undefined') { //check if can be skipped when empty
 				nameToSysId[cleanName] = record.sys_id + '';
-				eu.writeFile(fileName, fieldValue, false, function () { });
-			}
-		})
+				try {
+					await writeScopeFile(fileName, fieldValue);
+					scopeJson.loadReport.filesWritten++;
+				} catch (error: any) {
+					scopeJson.loadReport.complete = false;
+					scopeJson.loadReport.warnings.push(`${messageJson.tableName}/${cleanName}.${field}: write failed: ${error.message}`);
+				}
+			} else if (fieldValue === 'undefined') {
+				if (field !== '_test_urls') { scopeJson.loadReport.skippedUnreadable++; scopeJson.loadReport.complete = false; }
+			} else { scopeJson.loadReport.skippedEmpty++; }
+		}
 
 		let referenceFields = Object.keys(metaDataRelations.tableFields[messageJson.tableName]?.referenceFields || {}); 
 		referenceFields.forEach(field => {
@@ -3461,25 +3472,13 @@ function writeTableFields(messageJson) {
 		// 	//scopeJson.scopeTree[cat].tables[messageJson.tableName].records[record.sys_id + ''].codeChildReferences[field] = record[field];
 		// });
 
-	})
+	}
 
 	if (Object.keys(nameToSysId).length)
-		eu.writeOrReadNameToSysIdMapping(scopeMappingFile, nameToSysId);
+		await writeScopeFile(scopeMappingFile, JSON.stringify(nameToSysId));
 
-	// A full page means there may be more: ask for the next one and only count
-	// the table as finished when a short page arrives.
-	const pageSize = Number(messageJson.pageSize) || 0;
-	const received = Array.isArray(messageJson.results) ? messageJson.results.length : 0;
+	const received = messageJson.results.length;
 	scopeLoadCounts[messageJson.tableName] = (scopeLoadCounts[messageJson.tableName] || 0) + received;
-	if (pageSize > 0 && received >= pageSize) {
-		const nextPage: any = { ...messageJson };
-		delete nextPage.results;
-		delete nextPage.type;
-		nextPage.pageOffset = (Number(messageJson.pageOffset) || 0) + pageSize;
-		nextPage.queryString = String(messageJson.queryString || '').replace(/sysparm_offset=\d+/, `sysparm_offset=${nextPage.pageOffset}`);
-		requestRecords(nextPage);
-		return;
-	}
 
 	scopeTableResponseCount++;
 	if (messageJson.scopeTableRequestCount == scopeTableResponseCount){
@@ -3541,14 +3540,15 @@ function writeTableFields(messageJson) {
 		// end of the cleanup loop
 		
 
-		setTimeout(()=>{
+		{
 			let strObj = JSON.stringify(scopeJson,null,2);
-			eu.writeFile(messageJson.scopeFilePath, strObj, false, function () { });
+			await writeScopeFile(messageJson.scopeFilePath, strObj);
 			setScopeTree();
 			const loadedTables = Object.keys(scopeLoadCounts).filter(t => scopeLoadCounts[t] > 0);
 			const loadedRecords = loadedTables.reduce((sum, t) => sum + scopeLoadCounts[t], 0);
-			eu.showMessage(`Loading scope artifacts finished: ${loadedRecords} record${loadedRecords === 1 ? '' : 's'} from ${loadedTables.length} table${loadedTables.length === 1 ? '' : 's'}.`, 4000);
-		},1000);
+			const report = scopeJson.loadReport;
+			eu.showMessage(`Scope load ${report.complete ? 'finished' : 'incomplete'}: ${loadedRecords} records from ${loadedTables.length} scriptable tables; ${report.filesWritten} files, ${report.skippedEmpty} empty fields, ${report.skippedUnreadable} unreadable fields, ${report.skippedTables.length} tables skipped. See scope.json for details.`, 8000);
+		}
 
 
 	}

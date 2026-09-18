@@ -1,3 +1,5 @@
+// Historical snapshot generator: Load Scope now discovers fields from the live dictionary.
+// Keep the JSON snapshot as a fallback and for curated labels, groups and relationships.
 //output of this background script is saved in metaDataRelations.json
 var tFields = {}
 var sf = [
