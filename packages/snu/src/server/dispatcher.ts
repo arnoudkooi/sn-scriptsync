@@ -1,3 +1,4 @@
+import { discoverScopeFields, readAllPages, pageState, FetchPage, FieldDefinition } from './scopeDiscovery.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -138,11 +139,11 @@ function resolveTableCodeFields(tableName: string, cwd: string): string[] {
   return ['script'];
 }
 
-function resolveFieldExtension(tableName: string, fieldName: string, cwd: string): string {
+function resolveFieldExtension(tableName: string, fieldName: string, cwd: string, liveType?: string): string {
   const meta = getMetaDataRelations(cwd);
   let fieldType = 'script';
   try {
-    fieldType = meta?.tableFields?.[tableName]?.codeFields?.[fieldName]?.type || fieldName;
+    fieldType = liveType || meta?.tableFields?.[tableName]?.codeFields?.[fieldName]?.type || fieldName;
   } catch {}
 
   let ext = FIELDTYPES[fieldType]?.extension;
@@ -447,7 +448,7 @@ export class StandaloneDispatcher {
   // One page of one table into canonical workspace files. Shared by
   // pull_records (a single page the caller sized) and pull_scope (which walks
   // every code table of an application page by page).
-  private async pullTablePage(inst: { name: string; settings: any }, reqCommand: string, opts: { table: string; query: string; codeFields: string[]; limit: number; offset?: number }) {
+  private async pullTablePage(inst: { name: string; settings: any }, reqCommand: string, opts: { table: string; query: string; codeFields: string[]; fieldDefinitions?: Record<string, FieldDefinition>; limit: number; offset?: number }) {
     const { table, codeFields, limit } = opts;
     const combinedQuery = opts.query;
     const offset = opts.offset || 0;
@@ -460,7 +461,7 @@ export class StandaloneDispatcher {
       sysparm_offset: String(offset),
       sysparm_display_value: 'false',
       sysparm_exclude_reference_link: 'true',
-      sysparm_no_count: 'true',
+      sysparm_no_count: 'false',
     };
     if (combinedQuery) {
       queryParams.sysparm_query = combinedQuery;
@@ -487,6 +488,7 @@ export class StandaloneDispatcher {
 
     let filesWritten = 0;
     let skippedEmpty = 0;
+    let skippedUnreadable = 0;
     const warnings: string[] = [];
     const pulledRecordsList: Array<{
       sys_id: string;
@@ -548,7 +550,12 @@ export class StandaloneDispatcher {
       const recordFiles: Array<{ field: string; path: string; bytes: number; action: 'created' | 'updated' | 'cleared' | 'skipped_empty' }> = [];
 
       for (const field of codeFields) {
-        const ext = resolveFieldExtension(table, field, this.cwd);
+        if (!Object.prototype.hasOwnProperty.call(rec, field)) {
+          skippedUnreadable++;
+          warnings.push(`${table}/${sysId}.${field}: field not returned; local file preserved.`);
+          continue;
+        }
+        const ext = resolveFieldExtension(table, field, this.cwd, opts.fieldDefinitions?.[field]?.type);
         let targetPath: string;
         try {
           targetPath = isFolderRecordTable
@@ -597,28 +604,19 @@ export class StandaloneDispatcher {
     }
 
     return {
+      pagination: res.pagination,
       table,
       matchedRecords: matchedRecords.length,
       pulledRecords: pulledRecordsList.length,
       filesWritten,
       skippedEmpty,
+      skippedUnreadable,
       warnings,
       records: pulledRecordsList,
     };
   }
 
-  // Which artifact tables snu knows how to write to disk: the ones in
-  // resources/metaDataRelations.json that declare code fields.
-  private allCodeTables(): Set<string> {
-    const meta = getMetaDataRelations(this.cwd);
-    const out = new Set<string>();
-    for (const [table, def] of Object.entries<any>(meta?.tableFields || {})) {
-      if (def?.codeFields && typeof def.codeFields === 'object') out.add(table);
-    }
-    return out;
-  }
-
-  private async restGet(inst: { settings: any }, reqCommand: string, endpoint: string, queryParams: Record<string, string>): Promise<any> {
+  private async restGet(inst: { settings: any }, reqCommand: string, endpoint: string, queryParams: Record<string, string>, withPagination = false): Promise<any> {
     const correlationId = crypto.randomUUID();
     const pendingPromise = this.pending.register({ id: correlationId, command: reqCommand, timeoutMs: 70_000 });
     this.ws.sendToBrowser({
@@ -634,7 +632,7 @@ export class StandaloneDispatcher {
     if (res?.success === false) {
       throw Object.assign(new Error(res.error || `REST request failed: ${endpoint}`), { code: res.code || 'E_COMMAND_FAILED' });
     }
-    return res?.data;
+    return withPagination ? { rows: res?.data?.result, pagination: res?.pagination } : res?.data;
   }
 
   resolveInstance(requestInstance?: string): { name: string; folder: string; settings: any } {
@@ -1465,56 +1463,56 @@ export class StandaloneDispatcher {
           } catch {}
         }
 
-        // Which artifact tables does this application actually use?
+        const fetchPage: FetchPage = (table, query) => this.restGet(inst, req.command, `/api/now/table/${table}`, query, true);
+        const discovery = await readAllPages(fetchPage, 'sys_metadata', `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`, 'sys_class_name');
         const classCounts = new Map<string, number>();
-        const metaPage = 1000;
-        for (let offset = 0; ; offset += metaPage) {
-          const data = await this.restGet(inst, req.command, '/api/now/table/sys_metadata', {
-            sysparm_query: `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`,
-            sysparm_fields: 'sys_class_name',
-            sysparm_limit: String(metaPage),
-            sysparm_offset: String(offset),
-            sysparm_exclude_reference_link: 'true',
-            sysparm_no_count: 'true',
-          });
-          const rows: any[] = Array.isArray(data?.result) ? data.result : [];
-          for (const r of rows) {
-            const cls = String(typeof r.sys_class_name === 'object' ? r.sys_class_name.value : r.sys_class_name || '');
-            if (cls) classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
-          }
-          if (rows.length < metaPage) break;
+        for (const row of discovery.rows) {
+          const cls = String(typeof row.sys_class_name === 'object' ? row.sys_class_name.value : row.sys_class_name || '');
+          if (/^[a-zA-Z0-9_]+$/.test(cls)) classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
         }
-
-        const codeTables = this.allCodeTables();
-        const tables = [...classCounts.keys()].filter((t) => codeTables.has(t) && (!tableFilter || tableFilter.has(t))).sort();
-        const skippedTables = [...classCounts.keys()].filter((t) => !codeTables.has(t)).sort()
-          .map((t) => ({ table: t, records: classCounts.get(t) || 0 }));
+        const schema = await discoverScopeFields([...classCounts.keys()], getMetaDataRelations(this.cwd)?.tableFields || {}, fetchPage);
+        const tables = [...classCounts.keys()].filter(t => Object.keys(schema.definitions[t]?.codeFields || {}).length && (!tableFilter || tableFilter.has(t))).sort();
+        const skippedTables = [...classCounts.keys()].filter(t => !Object.keys(schema.definitions[t]?.codeFields || {}).length).sort()
+          .map(table => ({ table, records: classCounts.get(table) || 0, reason: schema.warnings.some(w => w.startsWith(`${table}:`)) ? 'dictionary_unavailable' : 'no_scriptable_fields' }));
         const missingTables = tableFilter ? [...tableFilter].filter((t) => !classCounts.has(t)).sort() : [];
 
         const perTable: any[] = [];
-        const warnings: string[] = [];
-        let totalRecords = 0, totalFiles = 0, totalSkippedEmpty = 0;
+        const warnings: string[] = [...discovery.warnings, ...schema.warnings];
+        let complete = discovery.complete && schema.warnings.length === 0;
+        let totalRecords = 0, totalFiles = 0, totalSkippedEmpty = 0, totalSkippedUnreadable = 0;
         for (const table of tables) {
-          const codeFields = resolveTableCodeFields(table, this.cwd);
+          const fieldDefinitions = schema.definitions[table].codeFields!;
+          const codeFields = Object.keys(fieldDefinitions);
           const query = `sys_scope=${scopeSysId}^sys_class_name=${table}^ORDERBYsys_id`;
-          const entry: any = { table, matchedRecords: 0, pulledRecords: 0, filesWritten: 0, skippedEmpty: 0, truncated: false };
+          const entry: any = { table, matchedRecords: 0, pulledRecords: 0, filesWritten: 0, skippedEmpty: 0, skippedUnreadable: 0, truncated: false };
           if (includeRecords) entry.records = [];
-          for (let offset = 0; ; offset += PAGE) {
+          let reportedTotal: number | undefined;
+          for (let offset = 0; ;) {
             const pageLimit = Math.min(PAGE, limit - entry.matchedRecords);
             if (pageLimit <= 0) { entry.truncated = true; break; }
-            const page = await this.pullTablePage(inst, req.command, { table, query, codeFields, limit: pageLimit, offset });
+            const page = await this.pullTablePage(inst, req.command, { table, query, codeFields, fieldDefinitions, limit: pageLimit, offset });
+            if (page.pagination?.totalCount && /^\d+$/.test(page.pagination.totalCount)) reportedTotal = Number(page.pagination.totalCount);
             entry.matchedRecords += page.matchedRecords;
             entry.pulledRecords += page.pulledRecords;
             entry.filesWritten += page.filesWritten;
             entry.skippedEmpty += page.skippedEmpty;
+            entry.skippedUnreadable += page.skippedUnreadable;
             if (includeRecords) entry.records.push(...page.records);
             for (const w of page.warnings) warnings.push(`${table}: ${w}`);
-            if (page.matchedRecords < pageLimit) break;
+            const paging = pageState(page.pagination, offset, pageLimit, page.matchedRecords);
+            if (paging.nextOffset === undefined) {
+              complete = complete && paging.complete;
+              if (paging.warning) warnings.push(`${table}: ${paging.warning}`);
+              break;
+            }
+            offset = paging.nextOffset;
           }
+          if (!entry.truncated && reportedTotal !== undefined && reportedTotal > entry.matchedRecords) warnings.push(`${table}: ${reportedTotal - entry.matchedRecords} matching records were not returned; access controls or changing records may account for the difference.`);
           if (entry.truncated) warnings.push(`${table}: stopped at the per-table limit of ${limit} records; raise "limit" or pull the rest with pull_records.`);
           totalRecords += entry.pulledRecords;
           totalFiles += entry.filesWritten;
           totalSkippedEmpty += entry.skippedEmpty;
+          totalSkippedUnreadable += entry.skippedUnreadable;
           perTable.push(entry);
         }
         for (const t of missingTables) warnings.push(`${t}: no records of this table in scope ${scopeName}.`);
@@ -1525,10 +1523,12 @@ export class StandaloneDispatcher {
           status: 'success',
           timestamp: Date.now(),
           result: {
+            complete: complete && !perTable.some(t => t.truncated) && warnings.length === 0,
+            metadataRecords: discovery.rows.length,
             scope: { name: scopeName, sys_id: scopeSysId },
             folder: path.join(inst.name, scopeName).replace(/\\/g, '/'),
             tables: perTable,
-            totals: { tables: perTable.length, records: totalRecords, filesWritten: totalFiles, skippedEmpty: totalSkippedEmpty },
+            totals: { tables: perTable.length, records: totalRecords, filesWritten: totalFiles, skippedEmpty: totalSkippedEmpty, skippedUnreadable: totalSkippedUnreadable },
             skippedTables,
             warnings,
           },

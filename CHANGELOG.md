@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+## Unreleased
+
+- **Scope loads continue past short or empty pages caused by access controls (#160).** Paging follows ServiceNow response headers in the editor and CLI. Requires the updated SN Utils helper; older helpers now report unverified completion instead of claiming a complete load.
+- **Scope loads discover fields on the connected instance.** Script fields and inherited fields on newer or custom tables come from the live dictionary. Bundled definitions remain a fallback with explicit warnings. Results distinguish unsupported tables, empty fields, unreadable fields and incomplete downloads.
+- **Unreadable fields no longer clear existing local files.** The CLI and Agent API preserve local content when ServiceNow omits a field from its response.
+
 ## 4.9.4 (2026-09-10)
 
 **Complete large scope loads and keep helper reconnects reliable (`@snutils/snu` 0.2.11).**

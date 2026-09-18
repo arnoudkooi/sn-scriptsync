@@ -1,3 +1,4 @@
+import { discoverScopeFields, readAllPages, pageState, Pagination, FetchPage, FieldDefinition } from '../../ScopeDiscovery';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -680,11 +681,11 @@ function resolveTableCodeFields(tableName: string): string[] {
 	return ['script'];
 }
 
-function resolveFieldExtension(tableName: string, fieldName: string): string {
+function resolveFieldExtension(tableName: string, fieldName: string, liveType?: string): string {
 	const meta = getMetaDataRelations();
 	let fieldType = 'script';
 	try {
-		fieldType = meta?.tableFields?.[tableName]?.codeFields?.[fieldName]?.type || fieldName;
+		fieldType = liveType || meta?.tableFields?.[tableName]?.codeFields?.[fieldName]?.type || fieldName;
 	} catch {}
 
 	let ext = (Constants.FIELDTYPES as any)?.[fieldType]?.extension;
@@ -704,17 +705,20 @@ export interface PullTableOptions {
 	/** Encoded query (already combined with any sys_id selection). */
 	query: string;
 	codeFields: string[];
+	fieldDefinitions?: Record<string, FieldDefinition>;
 	limit: number;
 	offset?: number;
 	openFiles?: boolean;
 }
 
 export interface PullTableResult {
+	pagination?: Pagination;
 	table: string;
 	matchedRecords: number;
 	pulledRecords: number;
 	filesWritten: number;
 	skippedEmpty: number;
+	skippedUnreadable: number;
 	warnings: string[];
 	records: Array<{
 		sys_id: string;
@@ -743,13 +747,13 @@ async function pullTableToFiles(ctx: any, instanceSettings: any, instanceName: s
 		sysparm_offset: String(offset),
 		sysparm_display_value: 'false',
 		sysparm_exclude_reference_link: 'true',
-		sysparm_no_count: 'true',
+		sysparm_no_count: 'false',
 	};
 	if (combinedQuery) {
 		queryParams.sysparm_query = combinedQuery;
 	}
 
-	const { data } = await restRequest(ctx, instanceSettings, {
+	const { data, pagination } = await restRequest(ctx, instanceSettings, {
 		endpoint: `/api/now/table/${table}`,
 		method: 'GET',
 		queryParams,
@@ -760,6 +764,7 @@ async function pullTableToFiles(ctx: any, instanceSettings: any, instanceName: s
 
 	let filesWritten = 0;
 	let skippedEmpty = 0;
+	let skippedUnreadable = 0;
 	const warnings: string[] = [];
 	const pulledRecordsList: Array<{
 		sys_id: string;
@@ -838,7 +843,12 @@ async function pullTableToFiles(ctx: any, instanceSettings: any, instanceName: s
 		const recordFiles: Array<{ field: string; path: string; bytes: number; action: 'created' | 'updated' | 'cleared' | 'skipped_empty' }> = [];
 
 		for (const field of codeFields) {
-			const ext = resolveFieldExtension(table, field);
+			if (!Object.prototype.hasOwnProperty.call(rec, field)) {
+				skippedUnreadable++;
+				warnings.push(`${table}/${sysId}.${field}: field not returned; local file preserved.`);
+				continue;
+			}
+			const ext = resolveFieldExtension(table, field, opts.fieldDefinitions?.[field]?.type);
 			let targetPath: string;
 			try {
 				targetPath = isFolderRecordTable
@@ -900,11 +910,13 @@ async function pullTableToFiles(ctx: any, instanceSettings: any, instanceName: s
 	ctx.log(`Agent API: Pulled ${pulledRecordsList.length}/${matchedRecords.length} record(s) from ${table} (${filesWritten} file(s) written, ${skippedEmpty} skipped empty)`);
 
 	return {
+		pagination,
 		table,
 		matchedRecords: matchedRecords.length,
 		pulledRecords: pulledRecordsList.length,
 		filesWritten,
 		skippedEmpty,
+		skippedUnreadable,
 		warnings,
 		records: pulledRecordsList,
 	};
@@ -985,18 +997,6 @@ const pull_records: CommandHandler = {
 		return pullTableToFiles(ctx, instanceSettings, instanceName, { table, query: combinedQuery, codeFields, limit, openFiles });
 	},
 };
-
-// Every artifact table sn-scriptsync knows how to write to disk: the tables in
-// resources/metaDataRelations.json that declare code fields. Same list the
-// VS Code "Load Scope" button walks.
-function allCodeTables(): Set<string> {
-	const meta = getMetaDataRelations();
-	const out = new Set<string>();
-	for (const [table, def] of Object.entries<any>(meta?.tableFields || {})) {
-		if (def?.codeFields && typeof def.codeFields === 'object') out.add(table);
-	}
-	return out;
-}
 
 const PULL_SCOPE_PAGE_SIZE = 100;
 const PULL_SCOPE_DEFAULT_LIMIT = 2000;
@@ -1082,60 +1082,59 @@ const pull_scope: CommandHandler = {
 			rememberScope(ctx.instanceFolder, scopeName, scopeSysId, ctx.log);
 		}
 
-		// Which artifact tables does this application actually use?
+		const fetchPage: FetchPage = async (table, queryParams) => {
+			const result = await restRequest(ctx, instanceSettings, { endpoint: `/api/now/table/${table}`, method: 'GET', queryParams });
+			return { rows: result.data?.result, pagination: result.pagination };
+		};
+		const discovery = await readAllPages(fetchPage, 'sys_metadata', `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`, 'sys_class_name');
 		const classCounts = new Map<string, number>();
-		const metaPage = 1000;
-		for (let offset = 0; ; offset += metaPage) {
-			const { data } = await restRequest(ctx, instanceSettings, {
-				endpoint: '/api/now/table/sys_metadata',
-				method: 'GET',
-				queryParams: {
-					sysparm_query: `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`,
-					sysparm_fields: 'sys_class_name',
-					sysparm_limit: String(metaPage),
-					sysparm_offset: String(offset),
-					sysparm_exclude_reference_link: 'true',
-					sysparm_no_count: 'true',
-				},
-			});
-			const rows: any[] = Array.isArray(data?.result) ? data.result : [];
-			for (const r of rows) {
-				const cls = String(typeof r.sys_class_name === 'object' ? r.sys_class_name.value : r.sys_class_name || '');
-				if (cls) classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
-			}
-			if (rows.length < metaPage) break;
+		for (const row of discovery.rows) {
+			const cls = normaliseValue(row.sys_class_name);
+			if (/^[a-zA-Z0-9_]+$/.test(cls)) classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
 		}
-
-		const codeTables = allCodeTables();
-		const tables = [...classCounts.keys()].filter((t) => codeTables.has(t) && (!tableFilter || tableFilter.has(t))).sort();
-		const skippedTables = [...classCounts.keys()].filter((t) => !codeTables.has(t)).sort()
-			.map((t) => ({ table: t, records: classCounts.get(t) || 0 }));
+		const schema = await discoverScopeFields([...classCounts.keys()], getMetaDataRelations()?.tableFields || {}, fetchPage);
+		const tables = [...classCounts.keys()].filter(t => Object.keys(schema.definitions[t]?.codeFields || {}).length && (!tableFilter || tableFilter.has(t))).sort();
+		const skippedTables = [...classCounts.keys()].filter(t => !Object.keys(schema.definitions[t]?.codeFields || {}).length).sort()
+			.map(table => ({ table, records: classCounts.get(table) || 0, reason: schema.warnings.some(w => w.startsWith(`${table}:`)) ? 'dictionary_unavailable' : 'no_scriptable_fields' }));
 		const missingTables = tableFilter ? [...tableFilter].filter((t) => !classCounts.has(t)).sort() : [];
 
-		const perTable: Array<{ table: string; matchedRecords: number; pulledRecords: number; filesWritten: number; skippedEmpty: number; truncated: boolean; records?: PullTableResult['records'] }> = [];
-		const warnings: string[] = [];
-		let totalRecords = 0, totalFiles = 0, totalSkippedEmpty = 0;
+		const perTable: Array<{ table: string; matchedRecords: number; pulledRecords: number; filesWritten: number; skippedEmpty: number; skippedUnreadable: number; truncated: boolean; records?: PullTableResult['records'] }> = [];
+		const warnings: string[] = [...discovery.warnings, ...schema.warnings];
+		let complete = discovery.complete && schema.warnings.length === 0;
+		let totalRecords = 0, totalFiles = 0, totalSkippedEmpty = 0, totalSkippedUnreadable = 0;
 
 		for (const table of tables) {
-			const codeFields = resolveTableCodeFields(table);
+			const fieldDefinitions = schema.definitions[table].codeFields!;
+			const codeFields = Object.keys(fieldDefinitions);
 			const query = `sys_scope=${scopeSysId}^sys_class_name=${table}^ORDERBYsys_id`;
-			const entry = { table, matchedRecords: 0, pulledRecords: 0, filesWritten: 0, skippedEmpty: 0, truncated: false, records: includeRecords ? [] as PullTableResult['records'] : undefined };
-			for (let offset = 0; ; offset += PULL_SCOPE_PAGE_SIZE) {
+			const entry = { table, matchedRecords: 0, pulledRecords: 0, filesWritten: 0, skippedEmpty: 0, skippedUnreadable: 0, truncated: false, records: includeRecords ? [] as PullTableResult['records'] : undefined };
+			let reportedTotal: number | undefined;
+			for (let offset = 0; ;) {
 				const pageLimit = Math.min(PULL_SCOPE_PAGE_SIZE, limit - entry.matchedRecords);
 				if (pageLimit <= 0) { entry.truncated = true; break; }
-				const page = await pullTableToFiles(ctx, instanceSettings, instanceName, { table, query, codeFields, limit: pageLimit, offset, openFiles: false });
+				const page = await pullTableToFiles(ctx, instanceSettings, instanceName, { table, query, codeFields, fieldDefinitions, limit: pageLimit, offset, openFiles: false });
+				if (page.pagination?.totalCount && /^\d+$/.test(page.pagination.totalCount)) reportedTotal = Number(page.pagination.totalCount);
 				entry.matchedRecords += page.matchedRecords;
 				entry.pulledRecords += page.pulledRecords;
 				entry.filesWritten += page.filesWritten;
 				entry.skippedEmpty += page.skippedEmpty;
+				entry.skippedUnreadable += page.skippedUnreadable;
 				if (includeRecords && entry.records) entry.records.push(...page.records);
 				for (const w of page.warnings) warnings.push(`${table}: ${w}`);
-				if (page.matchedRecords < pageLimit) break;
+				const paging = pageState(page.pagination, offset, pageLimit, page.matchedRecords);
+				if (paging.nextOffset === undefined) {
+					complete = complete && paging.complete;
+					if (paging.warning) warnings.push(`${table}: ${paging.warning}`);
+					break;
+				}
+				offset = paging.nextOffset;
 			}
+			if (!entry.truncated && reportedTotal !== undefined && reportedTotal > entry.matchedRecords) warnings.push(`${table}: ${reportedTotal - entry.matchedRecords} matching records were not returned; access controls or changing records may account for the difference.`);
 			if (entry.truncated) warnings.push(`${table}: stopped at the per-table limit of ${limit} records; raise "limit" or pull the rest with pull_records.`);
 			totalRecords += entry.pulledRecords;
 			totalFiles += entry.filesWritten;
 			totalSkippedEmpty += entry.skippedEmpty;
+			totalSkippedUnreadable += entry.skippedUnreadable;
 			if (!includeRecords) delete entry.records;
 			perTable.push(entry);
 			ctx.log(`Agent API: pull_scope ${scopeName}: ${table} ${entry.pulledRecords} record(s), ${entry.filesWritten} file(s)`);
@@ -1143,10 +1142,12 @@ const pull_scope: CommandHandler = {
 		for (const t of missingTables) warnings.push(`${t}: no records of this table in scope ${scopeName}.`);
 
 		return {
+			complete: complete && !perTable.some(t => t.truncated) && warnings.length === 0,
+			metadataRecords: discovery.rows.length,
 			scope: { name: scopeName, sys_id: scopeSysId },
 			folder: path.join(instanceName, scopeName).replace(/\\/g, '/'),
 			tables: perTable,
-			totals: { tables: perTable.length, records: totalRecords, filesWritten: totalFiles, skippedEmpty: totalSkippedEmpty },
+			totals: { tables: perTable.length, records: totalRecords, filesWritten: totalFiles, skippedEmpty: totalSkippedEmpty, skippedUnreadable: totalSkippedUnreadable },
 			skippedTables,
 			warnings,
 		};

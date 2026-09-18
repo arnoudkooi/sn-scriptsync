@@ -17,7 +17,11 @@ function command(name: string) {
 }
 
 const SCOPE_ID = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
-const rest = (rows: any[]) => ({ success: true, status: 200, data: { result: rows } });
+const rest = (rows: any[], total = rows.length) => ({ success: true, status: 200, data: { result: rows }, pagination: { totalCount: String(total) } });
+function schema(tables: string[]) {
+	harness.reply(rest(tables.map(name => ({ name, 'super_class.name': '' }))));
+	harness.reply(rest(tables.map(name => ({ name, element: name === 'sys_properties' ? 'value' : 'script', 'internal_type.name': name === 'sys_properties' ? 'string' : 'script', column_label: 'Script' }))));
+}
 const scriptRow = (n: number) => ({
 	sys_id: n.toString(16).padStart(32, '0'),
 	name: `Util${n}`,
@@ -39,18 +43,20 @@ test('pull_scope resolves the scope, discovers its tables, and pages every table
 		{ sys_class_name: 'sys_script' },
 		{ sys_class_name: 'sys_properties' },
 	]));
+	schema(['sys_script', 'sys_script_include', 'sys_properties']);
 	// 3. sys_script: one short page
 	harness.reply(rest([{ sys_id: 'b'.repeat(32), name: 'Before insert', sys_name: 'Before insert', 'sys_scope.scope': 'x_acme_app', script: 'current.u_x = 1;', condition: '' }]));
 	// 4. sys_script_include: a full page of 100 then a short page of 3
-	harness.reply(rest(Array.from({ length: 100 }, (_, i) => scriptRow(i + 1))));
-	harness.reply(rest(Array.from({ length: 3 }, (_, i) => scriptRow(101 + i))));
+	harness.reply(rest(Array.from({ length: 100 }, (_, i) => scriptRow(i + 1)), 103));
+	harness.reply(rest(Array.from({ length: 3 }, (_, i) => scriptRow(101 + i)), 103));
 
 	const result = await command('pull_scope').handle(ctx, { scope: 'x_acme_app' });
 
 	assert.deepStrictEqual(result.scope, { name: 'x_acme_app', sys_id: SCOPE_ID });
+	assert.strictEqual(result.complete, true);
 	assert.strictEqual(result.totals.tables, 2);
 	assert.strictEqual(result.totals.records, 104);
-	assert.deepStrictEqual(result.skippedTables, [{ table: 'sys_properties', records: 1 }]);
+	assert.deepStrictEqual(result.skippedTables, [{ table: 'sys_properties', records: 1, reason: 'no_scriptable_fields' }]);
 	const inc = result.tables.find((t: any) => t.table === 'sys_script_include');
 	assert.strictEqual(inc.matchedRecords, 103);
 	assert.strictEqual(inc.truncated, false);
@@ -78,15 +84,16 @@ test('pull_scope honours the tables filter and the per-table limit', async () =>
 		{ sys_class_name: 'sys_script_include' },
 		{ sys_class_name: 'sys_script' },
 	]));
+	schema(['sys_script', 'sys_script_include']);
 	// only sys_script_include is pulled, and only one page of `limit` records
-	harness.reply(rest(Array.from({ length: 5 }, (_, i) => scriptRow(200 + i))));
+	harness.reply(rest(Array.from({ length: 5 }, (_, i) => scriptRow(200 + i)), 10));
 
 	const result = await command('pull_scope').handle(ctx, { scope: 'x_acme_app', tables: ['sys_script_include', 'sys_ui_action'], limit: 5 });
 
 	assert.strictEqual(harness.sent[0].endpoint, '/api/now/table/sys_metadata');
 	assert.strictEqual(result.tables.length, 1);
 	assert.strictEqual(result.tables[0].truncated, true);
-	assert.strictEqual(harness.sent[1].queryParams.sysparm_limit, '5');
+	assert.strictEqual(harness.sent.find(m => m.endpoint === '/api/now/table/sys_script_include').queryParams.sysparm_limit, '5');
 	assert.ok(result.warnings.some((w: string) => w.startsWith('sys_script_include: stopped at the per-table limit')));
 	assert.ok(result.warnings.some((w: string) => w.startsWith('sys_ui_action: no records')));
 });
@@ -106,4 +113,21 @@ test('pull_records still pulls a single page and now passes an explicit offset',
 	assert.strictEqual(result.pulledRecords, 1);
 	assert.strictEqual(harness.sent[0].queryParams.sysparm_offset, '0');
 	assert.strictEqual(harness.sent[0].queryParams.sysparm_limit, '10');
+});
+
+test('unreadable script fields preserve local files while an explicit empty value clears them', async () => {
+	const ctx = harness.context();
+	const row = scriptRow(950);
+	const params = { table: 'sys_script_include', query: `sys_id=${row.sys_id}`, limit: 1 };
+	harness.reply(rest([row]));
+	await command('pull_records').handle(ctx, params);
+	const file = path.join(harness.instanceFolder, 'x_acme_app/sys_script_include/Util950.script.js');
+	const { script, ...unreadable } = row;
+	harness.reply(rest([unreadable]));
+	const result = await command('pull_records').handle(ctx, params);
+	assert.strictEqual(result.skippedUnreadable, 1);
+	assert.strictEqual(fs.readFileSync(file, 'utf8'), script);
+	harness.reply(rest([{ ...row, script: '' }]));
+	await command('pull_records').handle(ctx, params);
+	assert.strictEqual(fs.readFileSync(file, 'utf8'), '');
 });
