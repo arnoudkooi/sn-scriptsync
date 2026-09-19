@@ -56,3 +56,38 @@ test('a helper that does not answer WebSocket pings is disconnected and pending 
   assert.equal(bridge.hasBrowserClient(), false);
   assert.deepEqual(bridge.getLiveInstances(), []);
 });
+
+// SNU0000010172 / SNU0000010089: two Chrome profiles, one helper tab each.
+test('a newly opened helper takes over with a reason; an automatic reconnect stands by', async () => {
+  const bridge = new StandaloneWsBridge(0, new PendingRegistry(), 30_000, 'd'.repeat(64));
+  const port = await bridge.start();
+  const open = async (suffix = '') => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/${suffix}`);
+    const closed = new Promise<number>((resolve) => ws.on('close', (code) => resolve(code)));
+    await once(ws, 'open');
+    return { ws, closed };
+  };
+  try {
+    const profileA = await open();
+    const profileB = await open();
+    assert.strictEqual(await profileA.closed, 4001, 'the replaced helper is told it was replaced');
+
+    // Profile A reconnects on its own, as a helper tab does after any close.
+    const resumed = await open('?resume=1');
+    assert.strictEqual(await resumed.closed, 4002, 'the automatic reconnect is turned away');
+    assert.strictEqual(bridge.hasBrowserClient(), true);
+    assert.strictEqual(profileB.ws.readyState, WebSocket.OPEN, 'the live helper keeps its connection');
+
+    // Profile B goes away: now the automatic reconnect is welcome.
+    profileB.ws.close();
+    await profileB.closed;
+    await new Promise((r) => setTimeout(r, 30));
+    const back = await open('?resume=1');
+    await new Promise((r) => setTimeout(r, 30));
+    assert.strictEqual(back.ws.readyState, WebSocket.OPEN);
+    assert.strictEqual(bridge.hasBrowserClient(), true);
+    back.ws.close();
+  } finally {
+    await bridge.close();
+  }
+});

@@ -1,3 +1,4 @@
+import { loadBridgeId } from './bridgeIdentity.js';
 import * as crypto from 'crypto';
 import { HelperConnection } from './helperConnection.js';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -53,11 +54,15 @@ export class StandaloneWsBridge {
   // pushes land in the sync workspace instead of being dropped.
   onSaveFieldAsFile?: (msg: any) => void;
 
+  private bridgeId = '';
+
   constructor(
     private port = 1978,
     private pending: PendingRegistry = defaultPendingRegistry,
     heartbeatMs = 30_000,
+    bridgeId: string | (() => string) = loadBridgeId,
   ) {
+    try { this.bridgeId = typeof bridgeId === 'function' ? bridgeId() : bridgeId; } catch { this.bridgeId = ''; }
     this.helperConnection = new HelperConnection<WebSocket>(() => {
       this.resetHelperState();
       this.pending.rejectAll('E_BROWSER_DISCONNECTED', 'Browser helper disconnected');
@@ -79,7 +84,16 @@ export class StandaloneWsBridge {
           reject(err);
         });
 
-        wss.on('connection', (ws) => {
+        wss.on('connection', (ws, req) => {
+          // Browser helpers must be extension pages, including when a web page
+          // has an opaque (null) Origin. Native clients may omit Origin.
+          const origin = req?.headers?.origin;
+          if (origin !== undefined && !/^(chrome-extension|moz-extension|safari-web-extension):\/\/[^/]+$/.test(origin)) {
+            try { ws.close(1008, 'Not allowed'); } catch {}
+            return;
+          }
+          // An automatic reconnect never takes over from a live helper tab.
+          if (this.helperConnection.refuseResume(ws, req?.url)) return;
           this.helperConnection.accept(ws);
           this.state.sessionEpoch = crypto.randomUUID();
 
@@ -91,7 +105,11 @@ export class StandaloneWsBridge {
                 protocolVersion: 1,
                 hostKind: 'standalone',
                 sessionEpoch: this.state.sessionEpoch,
+                // Lets the helper tab recognise this bridge after a restart and
+                // refresh session tokens without a manual /token.
+                bridgeId: this.bridgeId,
                 features: {
+                  sessionRefresh: 1,
                   commandReview: 1,
                   rejectionFeedback: 1,
                   instanceSecurityGates: 1,
