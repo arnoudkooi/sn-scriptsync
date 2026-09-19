@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { ScopeTreeViewProvider } from "./ScopeTreeViewProvider";
 import { discoverScopeFields, readAllPages, FetchPage } from "./ScopeDiscovery";
 import { HelperConnection } from "./HelperConnection";
+import { loadBridgeId } from "./BridgeIdentity";
 import { InfoTreeViewProvider } from "./InfoTreeViewProvider";
 import { QueueTreeViewProvider } from "./QueueTreeViewProvider";
 import { ExtensionUtils } from "./ExtensionUtils";
@@ -2588,12 +2589,27 @@ async function startBridgeTransports(): Promise<void> {
 		// ownership check behind it may probe a foreign bridge over HTTP.
 		void reassertPortFiles();
 
-		if (typeof req.headers.origin === 'string' && req.headers.origin.startsWith('http')) { // only allow via extension pages like chrome-extension://;
+		if (req.headers.origin !== undefined && !/^(chrome-extension|moz-extension|safari-web-extension):\/\/[^/]+$/.test(req.headers.origin)) { // only allow via extension pages like chrome-extension://;
 			ws.close(1008, 'Not allowed');
 			return;
 		}
 
+		// An automatic reconnect never takes over from a live helper tab.
+		if (helperConnection.refuseResume(ws, req.url)) return;
 		helperConnection.accept(ws);
+
+		// Name this bridge so the helper tab can recognise it after a restart
+		// and refresh session tokens on its own. Helpers that predate the hello
+		// ignore it.
+		try {
+			ws.send(JSON.stringify({
+				action: 'hostHello',
+				protocolVersion: 1,
+				hostKind: 'vscode',
+				bridgeId: loadBridgeId(),
+				features: { sessionRefresh: 1 },
+			}));
+		} catch { /* the helper reconnects and gets another hello */ }
 
 		let helperBuildInfo: {
 			debuggerAvailable?: boolean;

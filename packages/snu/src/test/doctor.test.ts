@@ -211,3 +211,44 @@ test('an all-clear is still possible with unconnected folders present', () => {
   }));
   assert.match(report.findings.join(' '), /No problems found/);
 });
+
+// ---------------------------------------------------------------------------
+// Bridge identity. Automatic session refresh depends on it, and when it is
+// broken nothing fails loudly: the user just keeps needing /token.
+// ---------------------------------------------------------------------------
+
+test('doctor: a healthy identity adds a status line and no finding', () => {
+  const report = buildDoctorReport(sources({ bridgeIdentity: { status: 'ok', private: true } }));
+  assert.deepStrictEqual(report.identity, { status: 'ok', private: true });
+  assert.ok(!report.findings.some((f) => /identity/i.test(f)), report.findings.join(' | '));
+  assert.match(formatDoctorReport(report), /Bridge id\s+ok/);
+});
+
+test('doctor: an invalid identity file explains that it is never repaired', () => {
+  const report = buildDoctorReport(sources({ bridgeIdentity: { status: 'invalid', private: true } }));
+  const finding = report.findings.find((f) => /identity file/i.test(f)) || '';
+  assert.match(finding, /automatic session refresh is off/);
+  assert.match(finding, /delete the file and restart the bridge/);
+});
+
+test('doctor: a running bridge without an identity points at the home folder', () => {
+  const report = buildDoctorReport(sources({ bridgeIdentity: { status: 'missing', private: null } }));
+  assert.ok(report.findings.some((f) => /no identity file/.test(f) && /hard links/.test(f)), report.findings.join(' | '));
+});
+
+test('doctor: a missing identity is not a finding while no bridge is running', () => {
+  const report = buildDoctorReport(sources({ health: undefined, bridgeIdentity: { status: 'missing', private: null } }));
+  assert.ok(!report.findings.some((f) => /identity/i.test(f)), report.findings.join(' | '));
+});
+
+test('doctor: an identity readable by others is called out', () => {
+  const report = buildDoctorReport(sources({ bridgeIdentity: { status: 'ok', private: false } }));
+  assert.ok(report.findings.some((f) => /readable by other users/.test(f)));
+  assert.match(formatDoctorReport(report), /Bridge id\s+ok \(not private\)/);
+});
+
+test('doctor: the identity value can never reach the report', () => {
+  const id = 'f'.repeat(64);
+  const report = buildDoctorReport(sources({ bridgeIdentity: { status: 'ok', private: true, id } as any }));
+  assert.ok(!JSON.stringify(report).includes(id));
+});

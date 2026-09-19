@@ -35,6 +35,8 @@ export interface DoctorSources {
 	capabilities?: any;
 	/** Recent lifecycle/bridge errors, newest last. */
 	recentErrors?: string[];
+	/** State of the bridge identity file. Never the id itself. */
+	bridgeIdentity?: { status: string; private: boolean | null };
 	platform: string;
 	nodeVersion: string;
 	cwd: string;
@@ -79,6 +81,8 @@ export interface DoctorReport {
 	instances: Array<{ name: string; origin: string | null; hasSettings: boolean }>;
 	auth: Array<{ instance: string; state: string; ok: boolean; lastValidatedAt: number | null }>;
 	capabilities: { tier: string | null; proFeatures: boolean | null; commandReview: boolean | null } | null;
+	/** Bridge identity file, which automatic session refresh depends on. Never the id. */
+	identity: { status: string; private: boolean | null } | null;
 	findings: string[];
 	recentErrors: string[];
 }
@@ -207,6 +211,9 @@ export function buildDoctorReport(sources: DoctorSources, now: number | null = n
 		instances,
 		auth,
 		capabilities,
+		identity: sources.bridgeIdentity
+			? { status: asString(sources.bridgeIdentity.status) || 'unknown', private: sources.bridgeIdentity.private ?? null }
+			: null,
 		findings: [],
 		recentErrors: (sources.recentErrors || []).map((e) => scrubFreeText(e, 300)),
 	};
@@ -302,6 +309,27 @@ export function deriveFindings(report: DoctorReport): string[] {
 		);
 	}
 
+	// Automatic session refresh depends on the bridge being able to name itself.
+	// When it cannot, nothing fails loudly: the user just keeps needing /token.
+	const identityFile = '~/.sn-scriptsync/bridge-id';
+	if (report.identity?.status === 'invalid') {
+		findings.push(
+			`The bridge identity file (${identityFile}) does not hold a valid id, so automatic session refresh is off and /token is needed after every restart. ` +
+				'It is never repaired automatically: delete the file and restart the bridge to create a new one, then run /token once.'
+		);
+	} else if (report.identity?.status === 'not-a-file' || report.identity?.status === 'unreadable') {
+		findings.push(
+			`The bridge identity (${identityFile}) is ${report.identity.status === 'not-a-file' ? 'not a regular file' : 'not readable'}, so automatic session refresh is off. Remove it and restart the bridge.`
+		);
+	} else if (report.identity?.status === 'missing' && report.bridge.reachable) {
+		findings.push(
+			`A bridge is running but has no identity file (${identityFile}), so automatic session refresh is off. ` +
+				'Either the bridge predates this feature, or the home folder is not writable or does not support hard links (exFAT and some network folders do not).'
+		);
+	} else if (report.identity?.status === 'ok' && report.identity.private === false) {
+		findings.push(`The bridge identity file (${identityFile}) is readable by other users. The bridge makes it private the next time it starts.`);
+	}
+
 	if (!findings.length) {
 		const verified = report.auth.filter((a) => a.ok).length;
 		findings.push(
@@ -331,6 +359,9 @@ export function formatDoctorReport(report: DoctorReport): string {
 		lines.push(`    host         ${report.bridge.hostKind ?? 'unknown'} (PID ${report.bridge.pid ?? '?'})`);
 		lines.push(`    workspace    ${report.bridge.workspaceRoot ?? 'not reported'}`);
 		lines.push(`    commands     ${report.bridge.commandCount ?? '?'}`);
+	}
+	if (report.identity) {
+		lines.push(`  Bridge id      ${report.identity.status}${report.identity.private === false ? ' (not private)' : ''}`);
 	}
 	lines.push(`  Owner lease    ${yn(report.ownership.leasePresent)}${report.ownership.leasePid ? ` (PID ${report.ownership.leasePid}, ${report.ownership.leaseEditorKind ?? 'unknown editor'})` : ''}`);
 
@@ -379,6 +410,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 // apart is what makes the redaction testable.
 // ---------------------------------------------------------------------------
 
+import { inspectBridgeId } from '../server/bridgeIdentity.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -503,6 +535,7 @@ export async function collectDoctorSources(options: {
     auth,
     capabilities,
     recentErrors: [],
+    bridgeIdentity: inspectBridgeId(),
     platform: `${os.platform()} ${os.release()}`,
     nodeVersion: process.version,
     cwd: options.cwd,
