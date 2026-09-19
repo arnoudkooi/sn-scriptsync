@@ -284,7 +284,7 @@ snu screenshot
 ## 4. How It Works & Handover Protocol
 
 - **Attached Mode (VS Code Open):** `snu` connects to the local **ScriptSync Agent HTTP API** on `127.0.0.1:1977` (with token discovery via `.vscode/sn-agent-port.json` or `~/.sn-scriptsync/agent-port.json`), which relays commands over a local WebSocket to the **SN Utils browser extension**.
-- **Standalone Mode (VS Code Closed):** `snu serve` (or `snu --mcp`) hosts the WebSocket server on `127.0.0.1:1978` and HTTP API on `127.0.0.1:1977`.
+- **Standalone Mode (VS Code Closed):** `snu serve` (or `snu --mcp`) hosts the WebSocket server on `127.0.0.1:1978` and HTTP API on `127.0.0.1:1977`. `--port <p>` moves the HTTP API. `--ws <p>` moves the WebSocket server, but the SN Utils helper tab in the browser only connects on 1978, so a bridge on another WebSocket port is not reachable from the browser.
 - **Safe Handover:** When VS Code launches while a standalone bridge is active, VS Code sends an automated `yield` signal to acquire the WebSocket and HTTP ports cleanly without port collisions.
 
 Session credentials stay on your machine. The standalone bridge keeps the `/token` session in memory only, clears it when the helper disconnects, and never writes it to disk or sends it over the internet.

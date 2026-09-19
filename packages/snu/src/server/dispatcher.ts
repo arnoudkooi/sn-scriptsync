@@ -1,3 +1,4 @@
+import { classifyProbe, helperFailureHint } from './authProbe.js';
 import { discoverScopeFields, readAllPages, pageState, FetchPage, FieldDefinition } from './scopeDiscovery.js';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -630,7 +631,8 @@ export class StandaloneDispatcher {
     });
     const res: any = await pendingPromise;
     if (res?.success === false) {
-      throw Object.assign(new Error(res.error || `REST request failed: ${endpoint}`), { code: res.code || 'E_COMMAND_FAILED' });
+      const hint = res?.status ? '' : helperFailureHint(typeof res?.error === 'string' ? res.error : '', inst.settings?.url);
+      throw Object.assign(new Error([res.error || `REST request failed: ${endpoint}`, hint].filter(Boolean).join(' ')), { code: res.code || 'E_COMMAND_FAILED' });
     }
     return withPagination ? { rows: res?.data?.result, pagination: res?.pagination } : res?.data;
   }
@@ -670,8 +672,16 @@ export class StandaloneDispatcher {
         return { name: live.name, folder: this.cwd, settings: live };
       }
 
-      throw Object.assign(new Error(`No authenticated instance named "${requestInstance}" is connected. Run /token on that ServiceNow instance and retry.`), {
+      const known = [
+        ...liveInstances.map((candidate) => `${candidate.name} (${candidate.url})`),
+        ...folders.map((folder) => path.basename(folder)),
+      ];
+      const knownText = known.length
+        ? ` Known here: ${[...new Set(known)].join(', ')}. Pass one of these as the instance, by name, hostname or origin.`
+        : ' This bridge has not received any session since it started.';
+      throw Object.assign(new Error(`No authenticated instance named "${requestInstance}" is connected.${knownText} Otherwise open that exact hostname in the browser, run /token and retry.`), {
         code: 'E_INSTANCE_NOT_FOUND',
+        details: { requested: requestInstance, liveInstances: liveInstances.map((candidate) => ({ name: candidate.name, url: candidate.url })) },
       });
     }
 
@@ -788,6 +798,14 @@ export class StandaloneDispatcher {
           });
         }
 
+        const hasLiveSession = !!origin && this.ws.getLiveInstances().some((live) => {
+          try { return new URL(live.url).origin.toLowerCase() === origin; } catch { return false; }
+        });
+        if (!inst.settings?.g_ck) {
+          const verdict = classifyProbe({ error: 'Missing instance URL or authentication token', origin, hasLiveSession });
+          return reply({ ok: false, state: verdict.state, message: verdict.message });
+        }
+
         const correlationId = crypto.randomUUID();
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 15_000 });
         this.ws.sendToBrowser({
@@ -802,33 +820,24 @@ export class StandaloneDispatcher {
 
         try {
           const res: any = await pendingPromise;
-          const status: number | undefined = res?.status;
           // 401 and 403 mean opposite things: the session is gone, versus the
-          // session authenticated and an ACL refused the row.
-          const state =
-            res?.success === false
-              ? status === 401
-                ? 'AUTH_EXPIRED'
-                : status === 403
-                ? 'AUTH_OK'
-                : 'AUTH_UNKNOWN'
-              : 'AUTH_OK';
+          // session authenticated and an ACL refused the row. Failures without
+          // a status are classified from the helper tab's own error text.
+          const verdict = res?.success === false
+            ? classifyProbe({ status: res?.status, error: typeof res?.error === 'string' ? res.error : res?.error?.message, origin, hasLiveSession })
+            : classifyProbe({ status: 200, origin, hasLiveSession });
           return reply({
-            ok: state === 'AUTH_OK',
-            state,
-            message:
-              state === 'AUTH_OK'
-                ? 'ServiceNow accepted the session.'
-                : state === 'AUTH_EXPIRED'
-                ? 'ServiceNow rejected the session (401). Open the instance in the browser and run /token to refresh it.'
-                : 'The session check could not complete. This is not a verdict — retry before acting on it.',
+            ok: verdict.state === 'AUTH_OK',
+            state: verdict.state,
+            message: verdict.message,
             detail: res?.error,
           });
         } catch (err: any) {
+          const verdict = classifyProbe({ status: err?.details?.status, error: err?.message || String(err), origin, hasLiveSession });
           return reply({
             ok: false,
-            state: 'AUTH_UNKNOWN',
-            message: 'The session check could not complete. This is not a verdict — retry before acting on it.',
+            state: verdict.state,
+            message: verdict.message,
             detail: err?.message || String(err),
           });
         }
