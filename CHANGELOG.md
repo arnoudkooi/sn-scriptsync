@@ -1,6 +1,8 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.9.5 (2026-09-19)
+
+**Scope loads that adapt to the instance, and clearer CLI and session errors (`@snutils/snu` 0.2.12).**
 
 - **Scope loads continue past short or empty pages caused by access controls (#160).** Paging follows ServiceNow response headers in the editor and CLI. Requires the updated SN Utils helper; older helpers now report unverified completion instead of claiming a complete load.
 - **Scope loads discover fields on the connected instance.** Script fields and inherited fields on newer or custom tables come from the live dictionary. Bundled definitions remain a fallback with explicit warnings. Results distinguish unsupported tables, empty fields, unreadable fields and incomplete downloads.
