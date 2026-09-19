@@ -5,6 +5,8 @@
 - **Scope loads continue past short or empty pages caused by access controls (#160).** Paging follows ServiceNow response headers in the editor and CLI. Requires the updated SN Utils helper; older helpers now report unverified completion instead of claiming a complete load.
 - **Scope loads discover fields on the connected instance.** Script fields and inherited fields on newer or custom tables come from the live dictionary. Bundled definitions remain a fallback with explicit warnings. Results distinguish unsupported tables, empty fields, unreadable fields and incomplete downloads.
 - **Unreadable fields no longer clear existing local files.** The CLI and Agent API preserve local content when ServiceNow omits a field from its response.
+- **Session checks say what is wrong instead of "retry".** A missing token, a hostname the helper tab has not approved, or an address the browser cannot reach now come back with the exact step to take, including when the OnPrem build is needed. An unknown instance name lists the instances that are connected, which helps when one instance is reached through two hostnames.
+- **`snu serve`, `status`, `stop` and `restart` reject mistyped options.** `snu serve --p 1979` now stops with a hint for `--port` instead of starting on the default port. A non-default `--ws` port prints a warning, because the SN Utils helper tab only connects on 1978.
 
 ## 4.9.4 (2026-09-10)
 

@@ -72,6 +72,40 @@ export function buildParseArgsOptions(tool: { cliOptions?: Record<string, { type
   return optionsConfig;
 }
 
+/** Options each bridge lifecycle command accepts. Anything else is a typo. */
+export const LIFECYCLE_OPTIONS: Record<string, string[]> = {
+  serve: ['port', 'ws', 'force'],
+  restart: ['port', 'ws', 'force'],
+  stop: ['port', 'ws', 'force'],
+  status: ['port', 'ws'],
+};
+
+/** The WebSocket port the SN Utils helper tab connects to. It is not configurable in the browser. */
+export const HELPER_WS_PORT = 1978;
+
+/**
+ * Lifecycle flags are parsed non-strictly because they share argv with every
+ * other command, so a typo such as `snu serve --p 1979` used to be dropped
+ * silently and the bridge came up on the default port. Returns the message to
+ * fail with, or null when every option is known.
+ */
+export function unknownLifecycleOptionError(command: string, args: string[]): string | null {
+  const allowed = LIFECYCLE_OPTIONS[command];
+  if (!allowed) return null;
+  const { tokens } = parseArgs({ args, options: {}, allowPositionals: true, strict: false, tokens: true });
+  const unknown = (tokens || [])
+    .filter((t): t is Extract<typeof t, { kind: 'option' }> => t.kind === 'option')
+    .filter((t) => !allowed.includes(t.name))
+    .map((t) => t.rawName);
+  if (!unknown.length) return null;
+  const hints = unknown.map((raw) => {
+    const bare = raw.replace(/^-+/, '');
+    const near = bare ? allowed.find((name) => name.startsWith(bare) || bare.startsWith(name)) : undefined;
+    return near ? `${raw} (did you mean --${near}?)` : raw;
+  });
+  return `Unknown option for \`snu ${command}\`: ${hints.join(', ')}. Supported: ${allowed.map((n) => `--${n}`).join(', ')}.`;
+}
+
 export function printHelp(): void {
   console.log(`
 \x1b[1mSN Utils CLI (snu)\x1b[0m — Unified CLI and MCP Bridge for ServiceNow
@@ -220,6 +254,9 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       console.log(`  • PID:         ${process.pid}`);
       console.log(`  • HTTP API:    http://127.0.0.1:${httpPort}/api`);
       console.log(`  • WebSocket:   ws://127.0.0.1:${wsPort} (connect via SN Utils helper tab)`);
+      if (wsPort !== HELPER_WS_PORT) {
+        console.warn(`\n\x1b[33m  ! The SN Utils helper tab only connects to port ${HELPER_WS_PORT}, so the browser cannot reach this bridge on ${wsPort}.\x1b[0m`);
+      }
       console.log(`\n\x1b[90mRunning standalone. Press Ctrl+C to stop.\x1b[0m\n`);
     }
     await printUpdateNotice(updateNotice);
@@ -284,6 +321,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     };
 
     try {
+      const unknownOption = unknownLifecycleOptionError(lifecycleCommand, nonGlobalTokens.slice(1));
+      if (unknownOption) throw new ScriptSyncClientError(unknownOption, 'E_INVALID_PARAMS');
       ports = { ws: parsePort('ws', 1978), http: parsePort('port', 1977) };
       bridgePorts = [ports.ws, ports.http];
       const status = await inspectBridge({ portFile, cwd: process.cwd() });
