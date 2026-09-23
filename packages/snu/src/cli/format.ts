@@ -278,7 +278,13 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
     return `\n${ANSI.yellow}[Dry Run] Target record that would be deleted:${ANSI.reset}\n${JSON.stringify(result.record, null, 2)}\n`;
   }
   if (result.saved && result.filePath) {
-    return `\n${ANSI.green}✓ Screenshot saved to:${ANSI.reset} ${result.filePath}\n`;
+    const via = result.capturedVia === 'debugger' ? ` ${ANSI.gray}(via Chrome debugger)${ANSI.reset}` : '';
+    return `\n${ANSI.green}✓ Screenshot saved to:${ANSI.reset} ${result.filePath}${via}\n`;
+  }
+  if (result.switched && result.switchType) {
+    const labels: Record<string, string> = { updateset: 'update set', application: 'application', domain: 'domain' };
+    const reload = result.reloaded ? ` ${ANSI.gray}(tab reloaded)${ANSI.reset}` : '';
+    return `\n${ANSI.green}✓ Switched ${labels[result.switchType] || result.switchType} to:${ANSI.reset} ${result.value}${reload}\n`;
   }
 
   return '\n' + JSON.stringify(result, null, 2) + '\n';

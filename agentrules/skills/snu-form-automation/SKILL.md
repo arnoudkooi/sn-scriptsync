@@ -3,7 +3,7 @@ name: snu-form-automation
 description: Drive live ServiceNow forms via the g_form bridge (navigate, set_field, get_form_state, run_ui_action, click_element): insert vs update verbs, optimistic-write verification, auto-handled native dialogs, and auto-filling mandatory reference fields. Read this when automating or visually verifying a form/UI page/widget.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=24 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=25 -->
 
 # SN ScriptSync — Live Form Automation
 
@@ -117,6 +117,7 @@ Navigate a connected ServiceNow tab to a URL (opening a tab if none is found) an
 - `newTab` (optional, default `false`): Open the URL in a new tab instead of reusing an existing ServiceNow tab.
 - `waitForLoad` (optional, default `true`): Resolve only after the tab reports load `complete` (capped at 30s).
 - `discardUnsaved` (optional, default `true`): Drop a dirty-form "Leave site?" guard before navigating, so unsaved changes don't stall the navigation on a prompt. **⚠️ Any unsaved edits on the current form are discarded.** Set `false` to keep the guard (the navigation may then time out if the form is dirty); save first with `run_ui_action` if you need to keep the changes.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json
@@ -168,6 +169,7 @@ Set a field value on the **active ServiceNow form** in the connected browser tab
 - `displayValue` (optional): Display value for reference/choice fields (`g_form.setValue(field, value, displayValue)`).
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`).
 - `tabId` (optional): Specific browser tab ID to target.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json
@@ -284,6 +286,7 @@ Trigger a UI action on the **active ServiceNow form** in the connected browser t
 - `suppressDialogs` (optional, default `true`): Auto-handle native browser dialogs the action may raise — `confirm()` is **auto-accepted**, `alert()`/`prompt()` are swallowed — so the tab doesn't freeze on a modal no user will answer. **⚠️ This means `sysverb_delete`'s "Are you sure?" confirmation is accepted automatically and the record is deleted.** Set `false` only if you want the native dialog to appear (rarely useful headless).
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`).
 - `tabId` (optional): Specific browser tab ID to target.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json
@@ -328,6 +331,7 @@ Click a DOM element by CSS selector in the ServiceNow content document of the co
 - `suppressDialogs` (optional, default `true`): Auto-handle native dialogs the click may raise (`confirm()` auto-accepted, `alert()`/`prompt()` swallowed) so the tab doesn't freeze on a modal. Set `false` to let a native dialog appear.
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`).
 - `tabId` (optional): Specific browser tab ID to target.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json

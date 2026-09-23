@@ -3737,7 +3737,11 @@ function linkAppToVSCode(postedJson) {
 
 function refreshedToken(postedJson) {
 	postedJson.refreshedtoken = true;
-	postedJson.response = "Refreshed token in VS Code via /token slashcommand. Instance: " + postedJson.instance.name;
+	// An automatic refresh (helper tab reconnected to a known bridge) carries the
+	// same shape as a typed /token; keep the acknowledgement honest about which it was.
+	postedJson.response = postedJson.silentRefresh === true
+		? "Session token refreshed automatically in VS Code. Instance: " + postedJson.instance.name
+		: "Refreshed token in VS Code via /token slashcommand. Instance: " + postedJson.instance.name;
 	broadcastToHelperTab(postedJson);
 }
 

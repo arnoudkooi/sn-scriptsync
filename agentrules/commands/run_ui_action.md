@@ -24,6 +24,7 @@ Trigger a UI action on the **active ServiceNow form** in the connected browser t
 - `suppressDialogs` (optional, default `true`): Auto-handle native browser dialogs the action may raise — `confirm()` is **auto-accepted**, `alert()`/`prompt()` are swallowed — so the tab doesn't freeze on a modal no user will answer. **⚠️ This means `sysverb_delete`'s "Are you sure?" confirmation is accepted automatically and the record is deleted.** Set `false` only if you want the native dialog to appear (rarely useful headless).
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`).
 - `tabId` (optional): Specific browser tab ID to target.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json

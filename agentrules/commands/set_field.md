@@ -19,6 +19,7 @@ Set a field value on the **active ServiceNow form** in the connected browser tab
 - `displayValue` (optional): Display value for reference/choice fields (`g_form.setValue(field, value, displayValue)`).
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`).
 - `tabId` (optional): Specific browser tab ID to target.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json

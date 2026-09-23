@@ -3,7 +3,7 @@ name: snu-agent-api
 description: SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=24 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=25 -->
 
 # SN ScriptSync — Agent API
 
@@ -1662,6 +1662,7 @@ Take a screenshot of a ServiceNow page. The browser picks the best capture path 
 - `tabId` (optional): Specific browser tab ID to capture (alternative to url)
 - `fileName` (optional): Custom filename (defaults to `screenshot_TIMESTAMP.png`)
 - `exactUrl` (optional): When `true`, do not reuse the last-captured tab — target the given `tabId`/`url` strictly. Use when you must capture a precise page. (`navigate_and_screenshot` sets this automatically.)
+- `focus` (optional, default `false`): Leave the captured tab in front afterwards. The capture has to bring the tab forward for a moment; by default it then switches back to the tab the user had open.
 
 **Response (success):**
 ```json
@@ -1773,6 +1774,7 @@ Execute SN Utils slash commands on a ServiceNow tab. **Particularly useful for d
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`)
 - `tabId` (optional): Specific browser tab ID to target
 - `autoRun` (optional): Auto-execute the command (default: `true`)
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json

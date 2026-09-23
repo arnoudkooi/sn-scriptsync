@@ -15,6 +15,29 @@ import { resolveCreateScope, ScopeResolution, ScopeRow } from './scopeResolver.j
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
 
+// Helper tab action names this host sends for the browser-relayed commands.
+// The helper tab dispatches on the exact string and drops an unknown action
+// without answering, so a wrong name here only ever surfaces as E_TIMEOUT
+// 70 seconds later (take_screenshot shipped as 'agentTakeScreenshot' and never
+// worked in standalone mode). Keep in step with the dispatch chain in the
+// extension's scriptsync.js; browserRelay.test.ts pins these values.
+export const BROWSER_ACTIONS = {
+  get_form_state: 'agentGetFormState',
+  set_field: 'agentSetField',
+  run_ui_action: 'agentRunUiAction',
+  navigate: 'agentNavigate',
+  take_screenshot: 'takeScreenshot',
+  switch_context: 'switchContext',
+} as const;
+
+const SWITCH_CONTEXT_TYPES = ['updateset', 'application', 'domain'];
+const SWITCH_CONTEXT_ALIASES: Record<string, string> = {
+  app: 'application',
+  scope: 'application',
+  update_set: 'updateset',
+  'update-set': 'updateset',
+};
+
 // Human labels + the environment variable each gate is *actually* read from in
 // config.ts. Deriving the variable name from the camelCase gate key produces
 // SNU_ALLOW_RESTREQUEST, which nothing reads, so an agent told to set it hits
@@ -225,6 +248,8 @@ export class StandaloneDispatcher {
   private pending: PendingRegistry;
   private config: StandaloneConfig;
   private pendingReviewRequests = new Map<string, string>(); // correlationId/requestId -> reviewId
+  /** Pause before the single retry after E_SCREENSHOT_PERMISSION; tests shorten it. */
+  screenshotRetryDelayMs = 10_000;
   private requestIdToCorrelationId = new Map<string, string>(); // requestId -> correlationId
 
   constructor(opts: StandaloneDispatcherOptions) {
@@ -735,6 +760,90 @@ export class StandaloneDispatcher {
     this.pending.cancel(correlationId, reason);
     this.pending.cancel(requestId, reason);
     this.requestIdToCorrelationId.delete(requestId);
+  }
+
+  // Screenshot round trip, mirroring the VS Code host: the helper answers a
+  // takeScreenshot with base64 PNG data and this side writes the file under
+  // <workspace>/screenshots. allowDebugger carries the user's browserDebugger
+  // gate so a tab without an activeTab grant can be captured through the
+  // Chrome debugger (Debug edition + Pro; the helper re-checks both). Without
+  // it, or when the debugger path is not available, the helper asks for the
+  // extension-icon click and this side retries once after a pause.
+  private async captureScreenshot(req: AgentRequest, correlationId: string): Promise<Record<string, any>> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    let fileName = typeof req.params?.fileName === 'string' && req.params.fileName.trim()
+      ? req.params.fileName.trim()
+      : `screenshot_${timestamp}.png`;
+    if (!/\.png$/i.test(fileName)) fileName += '.png';
+    const savePath = safeJoinUnderRoot(this.cwd, 'screenshots', fileName);
+
+    const request = async (id: string, tabId: any): Promise<any> => {
+      const pendingPromise = this.pending.register({ id, command: req.command, timeoutMs: 70_000 });
+      this.ws.sendToBrowser({
+        action: BROWSER_ACTIONS.take_screenshot,
+        agentRequestId: id,
+        url: req.params?.url,
+        tabId,
+        exactUrl: req.params?.exactUrl === true,
+        focus: req.params?.focus === true,
+        fileName,
+        savePath,
+        allowDebugger: this.config.gates.browserDebugger === true,
+        appName: 'SN Utils CLI',
+      });
+      try {
+        return await pendingPromise;
+      } catch (err: any) {
+        // The bridge rejects a failed helper reply; a permission refusal is
+        // handled here (retry), so hand it back as a plain result.
+        if (err?.code === 'E_SCREENSHOT_PERMISSION') {
+          return {
+            success: false,
+            code: err.code,
+            error: err.message,
+            tabId: err.details?.tabId,
+            tabUrl: err.details?.tabUrl,
+            cdpFallbackAvailable: err.details?.cdpFallbackAvailable,
+          };
+        }
+        throw err;
+      }
+    };
+
+    let res = await request(correlationId, req.params?.tabId);
+    if (res?.code === 'E_SCREENSHOT_PERMISSION') {
+      // Give the user time to click the extension icon on the tab, then retry
+      // once on the tab the helper named.
+      await new Promise((resolve) => setTimeout(resolve, this.screenshotRetryDelayMs));
+      if (!this.ws.hasBrowserClient()) {
+        throw Object.assign(new Error('Browser helper disconnected while waiting for screenshot permission.'), { code: 'E_BROWSER_DISCONNECTED' });
+      }
+      res = await request(`${correlationId}_retry`, res.tabId ?? req.params?.tabId);
+    }
+    if (res?.code === 'E_SCREENSHOT_PERMISSION') {
+      throw Object.assign(new Error(res.error || 'Browser denied the screenshot (tab not capturable / permission).'), {
+        code: 'E_SCREENSHOT_PERMISSION',
+        details: { tabId: res.tabId, tabUrl: res.tabUrl, cdpFallbackAvailable: res.cdpFallbackAvailable === true },
+      });
+    }
+    if (res?.success === false) {
+      throw Object.assign(new Error(res.error || 'Screenshot failed'), { code: res.code || 'E_COMMAND_FAILED' });
+    }
+    if (typeof res?.imageData !== 'string' || !res.imageData) {
+      throw Object.assign(new Error('No image data received from browser'), { code: 'E_INTERNAL' });
+    }
+
+    fs.mkdirSync(path.dirname(savePath), { recursive: true });
+    fs.writeFileSync(savePath, Buffer.from(res.imageData, 'base64'));
+    return {
+      saved: true,
+      filePath: savePath,
+      fileName,
+      url: res.url || res.tabUrl || req.params?.url,
+      tabId: res.tabId ?? req.params?.tabId,
+      tabTitle: res.tabTitle,
+      capturedVia: res.capturedVia || 'activeTab',
+    };
   }
 
   async dispatch(req: AgentRequest): Promise<AgentResponse> {
@@ -1651,16 +1760,63 @@ export class StandaloneDispatcher {
         };
       }
 
-      // Browser Form & UI Actions
-      if (['get_form_state', 'set_field', 'run_ui_action', 'navigate', 'take_screenshot'].includes(req.command)) {
-        const actionMap: Record<string, string> = {
-          get_form_state: 'agentGetFormState',
-          set_field: 'agentSetField',
-          run_ui_action: 'agentRunUiAction',
-          navigate: 'agentNavigate',
-          take_screenshot: 'agentTakeScreenshot',
+      if (req.command === 'take_screenshot') {
+        const result = await this.captureScreenshot(req, correlationId);
+        return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result };
+      }
+
+      // Session context switch: the helper PUTs to the same concourse picker
+      // endpoint the header pickers use, so no form is driven. Needs the
+      // instance session (url + g_ck), which is why it is not in the generic
+      // browser relay below.
+      if (req.command === 'switch_context') {
+        const rawType = String(req.params?.switchType || '').trim().toLowerCase();
+        const switchType = SWITCH_CONTEXT_ALIASES[rawType] || rawType;
+        if (!SWITCH_CONTEXT_TYPES.includes(switchType)) {
+          throw Object.assign(
+            new Error(`Missing or invalid switchType. Must be one of: ${SWITCH_CONTEXT_TYPES.join(', ')}`),
+            { code: 'E_INVALID_PARAMS' }
+          );
+        }
+        const value = String(req.params?.value ?? req.params?.sysId ?? req.params?.sys_id ?? '').trim();
+        if (!value || /[\s\0]/.test(value)) {
+          throw Object.assign(
+            new Error('Missing required param: value (sys_id of the update set, application or domain)'),
+            { code: 'E_INVALID_PARAMS' }
+          );
+        }
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: BROWSER_ACTIONS.switch_context,
+          agentRequestId: correlationId,
+          switchType,
+          value,
+          reloadTab: req.params?.reloadTab !== false,
+          tabUrl: typeof req.params?.tabUrl === 'string' && req.params.tabUrl ? req.params.tabUrl : 'https://*.service-now.com/*',
+          instance: inst.settings,
+          appName: 'SN Utils CLI',
+        });
+        const res = await pendingPromise;
+        if (res?.success === false) {
+          throw Object.assign(new Error(res.error || `Could not switch ${switchType}`), { code: res.code || 'E_COMMAND_FAILED' });
+        }
+        return {
+          id: req.id,
+          command: req.command,
+          status: 'success',
+          timestamp: Date.now(),
+          result: {
+            switched: true,
+            switchType: res?.switchType || switchType,
+            value: res?.value || value,
+            reloaded: res?.reloaded === true,
+          },
         };
-        const action = actionMap[req.command];
+      }
+
+      // Browser Form & UI Actions
+      if (['get_form_state', 'set_field', 'run_ui_action', 'navigate'].includes(req.command)) {
+        const action = BROWSER_ACTIONS[req.command as keyof typeof BROWSER_ACTIONS];
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({
           action,
