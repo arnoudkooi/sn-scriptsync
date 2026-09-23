@@ -47,6 +47,8 @@ export interface DoctorReport {
 	versions: {
 		cli: string;
 		extension: string | null;
+		/** @snutils/snu version of a standalone bridge, when it reports one. */
+		bridge: string | null;
 		bridgeApi: number | null;
 		node: string;
 		platform: string;
@@ -187,6 +189,7 @@ export function buildDoctorReport(sources: DoctorSources, now: number | null = n
 		versions: {
 			cli: sources.cliVersion,
 			extension: asString(health?.extensionVersion),
+			bridge: asString(health?.bridgeVersion),
 			bridgeApi: asNumber(health?.apiVersion),
 			node: sources.nodeVersion,
 			platform: sources.platform,
@@ -351,6 +354,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 	lines.push('');
 	lines.push(`  CLI            ${report.versions.cli}`);
 	lines.push(`  Extension      ${report.versions.extension ?? 'not reported'}`);
+	lines.push(`  Bridge         ${report.versions.bridge ? `@snutils/snu ${report.versions.bridge}` : 'not reported'}`);
 	lines.push(`  Bridge API     ${report.versions.bridgeApi ?? 'unknown'}`);
 	lines.push(`  Node/platform  ${report.versions.node} on ${report.versions.platform}`);
 	lines.push('');

@@ -53,14 +53,21 @@ export function npmInstallSpawnSpec(platform: NodeJS.Platform = process.platform
   };
 }
 
+export const MANUAL_UPDATE_COMMAND = 'npm install -g @snutils/snu@latest';
+
+/** The automatic path failed; the manual one is always available, so name it. */
+export function updateFailure(reason: string): Error {
+  return Object.assign(new Error(`${reason}. Update by hand with: ${MANUAL_UPDATE_COMMAND}`), { code: 'E_UPDATE_FAILED' });
+}
+
 export async function installLatestWithNpm(): Promise<void> {
   const spec = npmInstallSpawnSpec();
   const exitCode = await new Promise<number>((resolve, reject) => {
     const child = spawn(spec.command, spec.args, spec.options);
-    child.once('error', reject);
+    child.once('error', (err: any) => reject(updateFailure(`Could not start npm (${err?.message || err})`)));
     child.once('close', (code) => resolve(code ?? 1));
   });
   if (exitCode !== 0) {
-    throw new Error(`npm exited with code ${exitCode}.`);
+    throw updateFailure(`npm exited with code ${exitCode}`);
   }
 }

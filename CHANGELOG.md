@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.2 (2026-09-23)
+
+- **The standalone bridge reports its version.** `snu doctor` shows a Bridge line with the `@snutils/snu` version that is serving, the health endpoint carries it as `bridgeVersion`, and the bridge tells the SN Utils helper tab in its hello. Lets a helper tab or agent tell an outdated bridge from an updated one.
+- **`snu update` names the manual command when the automatic update cannot run.** A failure now ends with `npm install -g @snutils/snu@latest` instead of a bare error code.
+
 ## `@snutils/snu` 0.3.1 (2026-09-23)
 
 - **Fixed: `snu update` failed on Windows with `spawn EINVAL`.** Node no longer runs npm's `.cmd` shim without a shell, so the updater (and `snu setup --client claude-code`) now go through one on Windows. Until you have 0.3.1, update by hand with `npm install -g @snutils/snu@latest`.

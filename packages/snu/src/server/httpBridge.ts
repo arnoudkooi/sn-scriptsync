@@ -1,4 +1,5 @@
 import * as http from 'http';
+import { VERSION } from '../version.js';
 import { StandaloneDispatcher } from './dispatcher.js';
 import { AgentRequest, AgentResponse } from '../types.js';
 import { AGENT_API_VERSION } from '../types.js';
@@ -97,6 +98,7 @@ export class StandaloneHttpBridge {
               status: 'success',
               apiVersion: AGENT_API_VERSION,
               hostKind: 'standalone',
+              bridgeVersion: VERSION,
               pid: process.pid,
               commands: [
                 'check_connection',

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { decideUpdate, isNpxExecution, npmInstallSpawnSpec } from '../cli/selfUpdate.js';
+import { decideUpdate, isNpxExecution, npmInstallSpawnSpec, updateFailure, MANUAL_UPDATE_COMMAND } from '../cli/selfUpdate.js';
 
 test('Self update: recognizes npx cache execution', () => {
   assert.strictEqual(isNpxExecution('/Users/me/.npm/_npx/abc/node_modules/@snutils/snu/bin/snu.js', {}), true);
@@ -30,4 +30,11 @@ test('Self update: npm is spawned through a shell on Windows only', () => {
     assert.strictEqual(spec.command, 'npm');
     assert.strictEqual(spec.options.shell, false);
   }
+});
+
+test('Self update: a failed automatic update names the manual command', () => {
+  const err: any = updateFailure('Could not start npm (spawn EINVAL)');
+  assert.strictEqual(err.code, 'E_UPDATE_FAILED');
+  assert.match(err.message, /spawn EINVAL/);
+  assert.ok(err.message.endsWith(MANUAL_UPDATE_COMMAND));
 });
