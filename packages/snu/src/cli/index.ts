@@ -23,11 +23,8 @@ import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 import { runSetup } from './setup.js';
 import { collectDoctorSources, buildDoctorReport, formatDoctorReport } from './doctor.js';
 
-const packageMetadata = JSON.parse(
-  fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
-) as { version: string };
-
-export const VERSION = packageMetadata.version;
+import { VERSION } from '../version.js';
+export { VERSION };
 
 function startUpdateCheck(enabled: boolean): Promise<string | undefined> {
   if (!enabled || !shouldCheckForUpdates()) return Promise.resolve(undefined);
@@ -401,7 +398,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         if (isJsonMode) {
           outputJson({ running: true, alreadyRunning: true, hostKind: status.health.hostKind, pid: status.health.pid });
         } else if (status.health.hostKind === 'standalone') {
-          console.log(`\nSN Utils standalone bridge is already active (PID ${status.health.pid}).`);
+          const served = status.health.bridgeVersion ? `@snutils/snu ${status.health.bridgeVersion}, ` : '';
+          console.log(`\nSN Utils standalone bridge is already active (${served}PID ${status.health.pid}).`);
           console.log('Use `snu restart` to replace it.\n');
         } else {
           console.log(`\nScriptSync bridge is active in VS Code (PID ${status.health.pid}).`);

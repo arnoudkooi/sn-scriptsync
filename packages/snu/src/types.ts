@@ -95,6 +95,8 @@ export interface HealthResponse {
   /** @deprecated Alias for transportApiVersion, kept for older bridges. */
   apiVersion: number;
   hostKind?: 'vscode' | 'standalone';
+  /** Version of @snutils/snu serving a standalone bridge. */
+  bridgeVersion?: string;
   commands: string[];
   pid: number;
   startedAt?: number;

@@ -344,8 +344,9 @@ export class ScriptSyncClient {
       const discovery = await this.getDiscovery();
       const health = await checkHealth(discovery.port);
       const version = health.extensionVersion ? ` ${health.extensionVersion}` : '';
+      const bridgeVersion = health.bridgeVersion ? ` ${health.bridgeVersion}` : '';
       return health.hostKind === 'standalone'
-        ? `a standalone @snutils/snu bridge (PID ${health.pid}) — update @snutils/snu`
+        ? `a standalone @snutils/snu${bridgeVersion} bridge (PID ${health.pid}) — update @snutils/snu`
         : `the sn-scriptsync extension${version} (PID ${health.pid}) — update the extension`;
     } catch {
       return 'the connected bridge';

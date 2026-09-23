@@ -214,6 +214,7 @@ test('Standalone: HTTP bridge serves health and handles yield command', async ()
     assert.strictEqual(health.status, 'success');
     assert.strictEqual(health.hostKind, 'standalone');
     assert.strictEqual(health.pid, process.pid);
+    assert.match(String(health.bridgeVersion), /^\d+\.\d+\.\d+/);
 
     // 2. Yield command
     const yieldRes = await fetch(`http://127.0.0.1:${httpPort}/api`, {

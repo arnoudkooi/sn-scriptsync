@@ -1,4 +1,5 @@
 import { loadBridgeId } from './bridgeIdentity.js';
+import { VERSION } from '../version.js';
 import * as crypto from 'crypto';
 import { HelperConnection } from './helperConnection.js';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -110,6 +111,8 @@ export class StandaloneWsBridge {
                 action: 'hostHello',
                 protocolVersion: 1,
                 hostKind: 'standalone',
+                // The helper tab can tell which @snutils/snu it is talking to.
+                hostVersion: VERSION,
                 sessionEpoch: this.state.sessionEpoch,
                 // Lets the helper tab recognise this bridge after a restart and
                 // refresh session tokens without a manual /token.
