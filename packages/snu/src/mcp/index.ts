@@ -292,7 +292,7 @@ export async function createMcpServer(): Promise<McpServer> {
   // 14. Take Screenshot
   server.tool(
     'snu_take_screenshot',
-    'Capture a screenshot of a ServiceNow page tab and save it under screenshots/ in the workspace. Uses the tab\'s one-time grant (the user clicks the SN Utils icon on that tab once, E_SCREENSHOT_PERMISSION until then). With the Browser Debugger permission on for snu (SNU_ALLOW_BROWSER_DEBUGGER=1) and the SN Utils Debug edition with Pro, it captures through the Chrome debugger with no click.',
+    'Capture a screenshot of a ServiceNow page tab and save it under screenshots/ in the workspace. Uses the tab\'s one-time grant (the user clicks the SN Utils icon on that tab once, E_SCREENSHOT_PERMISSION until then). With the Browser Debugger permission on for snu (the user runs `snu permissions set browserDebugger on`) and the SN Utils Debug edition with Pro, it captures through the Chrome debugger with no click.',
     {
       url: z.string().optional().describe('URL pattern of the tab to capture'),
       tabId: z.number().int().optional().describe('Specific tab ID to capture'),

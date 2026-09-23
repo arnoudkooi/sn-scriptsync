@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.4 (2026-09-23)
+
+- **New `snu permissions`.** Shows each standalone permission gate, its value and where it comes from (default, settings file, environment), and whether the running bridge still needs `snu restart`. `snu permissions set browserDebugger on` writes `~/.sn-scriptsync/settings.json` for you, so the Browser Debugger no longer needs a hand-made JSON file; `unset` removes a key again. CLI only, never an MCP tool. Error messages and the tool descriptions now point at the command.
+
 ## `@snutils/snu` 0.3.3 (2026-09-23)
 
 - **`snu update` on Windows no longer prints Node's `DEP0190` deprecation warning.** The update runs as one fixed command line; nothing else changed. Same for `snu setup --client claude-code`.
