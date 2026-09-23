@@ -15,6 +15,7 @@ Click a DOM element by CSS selector in the ServiceNow content document of the co
 - `suppressDialogs` (optional, default `true`): Auto-handle native dialogs the click may raise (`confirm()` auto-accepted, `alert()`/`prompt()` swallowed) so the tab doesn't freeze on a modal. Set `false` to let a native dialog appear.
 - `url` (optional): URL pattern to find the tab (default: `https://*.service-now.com/*`).
 - `tabId` (optional): Specific browser tab ID to target.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json

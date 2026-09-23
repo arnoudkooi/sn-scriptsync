@@ -25,6 +25,7 @@ Take a screenshot of a ServiceNow page. The browser picks the best capture path 
 - `tabId` (optional): Specific browser tab ID to capture (alternative to url)
 - `fileName` (optional): Custom filename (defaults to `screenshot_TIMESTAMP.png`)
 - `exactUrl` (optional): When `true`, do not reuse the last-captured tab — target the given `tabId`/`url` strictly. Use when you must capture a precise page. (`navigate_and_screenshot` sets this automatically.)
+- `focus` (optional, default `false`): Leave the captured tab in front afterwards. The capture has to bring the tab forward for a moment; by default it then switches back to the tab the user had open.
 
 **Response (success):**
 ```json

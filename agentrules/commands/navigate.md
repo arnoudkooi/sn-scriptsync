@@ -16,6 +16,7 @@ Navigate a connected ServiceNow tab to a URL (opening a tab if none is found) an
 - `newTab` (optional, default `false`): Open the URL in a new tab instead of reusing an existing ServiceNow tab.
 - `waitForLoad` (optional, default `true`): Resolve only after the tab reports load `complete` (capped at 30s).
 - `discardUnsaved` (optional, default `true`): Drop a dirty-form "Leave site?" guard before navigating, so unsaved changes don't stall the navigation on a prompt. **⚠️ Any unsaved edits on the current form are discarded.** Set `false` to keep the guard (the navigation may then time out if the form is dirty); save first with `run_ui_action` if you need to keep the changes.
+- `focus` (optional, default `false`): Bring the tab to the front. Tabs an agent drives stay in the background so the user can keep working; set `true` when the user asks to see the page.
 
 **Response (success):**
 ```json

@@ -234,7 +234,7 @@ const refresh_preview: CommandHandler = {
 };
 
 /** One round-trip of takeScreenshot. Throws structured errors, never writes. */
-async function requestCapture(ctx: AgentContext, opts: { url?: string; tabId?: any; fileName: string; savePath: string; exactUrl?: boolean }) {
+async function requestCapture(ctx: AgentContext, opts: { url?: string; tabId?: any; fileName: string; savePath: string; exactUrl?: boolean; focus?: boolean }) {
 	const correlationId = `agent_${ctx.request.id}_${Date.now()}`;
 	const pending = ctx.waitForBrowserResponse<any>(correlationId);
 	ctx.sendToBrowser({
@@ -243,6 +243,9 @@ async function requestCapture(ctx: AgentContext, opts: { url?: string; tabId?: a
 		url: opts.url,
 		tabId: opts.tabId,
 		exactUrl: opts.exactUrl || false,
+		// Leave the captured tab in front afterwards instead of restoring the
+		// user's previous tab (the helper tab keeps agent tabs in the background).
+		focus: opts.focus === true,
 		fileName: opts.fileName,
 		savePath: opts.savePath,
 		// The user's browserDebugger.enabled opt-in. When true, the browser may
@@ -279,7 +282,7 @@ async function requestCapture(ctx: AgentContext, opts: { url?: string; tabId?: a
  * E_SCREENSHOT_PERMISSION surface; we then retry ONCE after a pause long
  * enough for the user to actually click the extension icon and grant activeTab.
  */
-async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: any; fileName?: string; exactUrl?: boolean }) {
+async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: any; fileName?: string; exactUrl?: boolean; focus?: boolean }) {
 	const workspacePath = ctx.workspaceRoot;
 	if (!workspacePath) throw new AgentError('E_INTERNAL', 'No workspace folder open');
 
@@ -289,7 +292,7 @@ async function captureToFile(ctx: AgentContext, opts: { url?: string; tabId?: an
 	const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 	const fileName = opts.fileName || `screenshot_${timestamp}.png`;
 	const savePath = safeJoinUnderRoot(workspacePath, 'screenshots', fileName);
-	const captureOpts = { url: opts.url, tabId: opts.tabId, fileName, savePath, exactUrl: opts.exactUrl };
+	const captureOpts = { url: opts.url, tabId: opts.tabId, fileName, savePath, exactUrl: opts.exactUrl, focus: opts.focus };
 
 	let response: any;
 	try {
@@ -334,7 +337,7 @@ const take_screenshot: CommandHandler = {
 		const url = params?.url;
 		const tabId = params?.tabId;
 		if (!url && !tabId) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: url or tabId');
-		return captureToFile(ctx, { url, tabId, fileName: params?.fileName, exactUrl: params?.exactUrl === true });
+		return captureToFile(ctx, { url, tabId, fileName: params?.fileName, exactUrl: params?.exactUrl === true, focus: params?.focus === true });
 	},
 };
 
@@ -384,6 +387,7 @@ const run_slash_command: CommandHandler = {
 		const url = params?.url || 'https://*.service-now.com/*';
 		const tabId = params?.tabId;
 		const autoRun = params?.autoRun !== false;
+		const focus = params?.focus === true;
 
 		if (!command) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: command');
 
@@ -397,6 +401,7 @@ const run_slash_command: CommandHandler = {
 			url,
 			tabId,
 			autoRun,
+			focus,
 		});
 		ctx.log(`Agent API: Sent slash command request: ${command}`);
 		const response = await pending;
@@ -602,6 +607,7 @@ const set_field: CommandHandler = {
 			displayValue: params?.displayValue,
 			url: params?.url,
 			tabId: params?.tabId,
+			focus: params?.focus === true,
 		});
 		return { set: true, field: r.field ?? field, value: r.value, displayValue: r.displayValue };
 	},
@@ -638,6 +644,7 @@ const run_ui_action: CommandHandler = {
 			suppressDialogs: params?.suppressDialogs !== false,
 			url: params?.url,
 			tabId: params?.tabId,
+			focus: params?.focus === true,
 		});
 		return { triggered: true, uiAction: r.uiAction ?? uiAction, dialogsSuppressed: r.dialogsSuppressed };
 	},
@@ -658,6 +665,7 @@ const click_element: CommandHandler = {
 			suppressDialogs: params?.suppressDialogs !== false,
 			url: params?.url,
 			tabId: params?.tabId,
+			focus: params?.focus === true,
 		});
 		return { clicked: true, selector: r.selector ?? selector, dialogsSuppressed: r.dialogsSuppressed };
 	},
@@ -679,6 +687,7 @@ const navigate: CommandHandler = {
 			newTab: params?.newTab === true,
 			waitForLoad: params?.waitForLoad !== false,
 			discardUnsaved: params?.discardUnsaved !== false,
+			focus: params?.focus === true,
 		});
 		return { navigated: true, tabId: r.tabId, url: r.url || url, title: r.title };
 	},
