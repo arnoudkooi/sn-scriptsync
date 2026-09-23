@@ -37,12 +37,26 @@ export async function checkForCliUpdate(currentVersion: string): Promise<UpdateD
   return decideUpdate(currentVersion, latestVersion, isNpxExecution());
 }
 
+// On Windows npm is a .cmd shim, and Node refuses to spawn one without a
+// shell since the CVE-2024-27980 fix (18.20 / 20.12 / 22): `snu update`
+// died with "spawn EINVAL". Going through the shell resolves npm.cmd; the
+// arguments are fixed literals, so nothing user-controlled reaches it.
+export function npmInstallSpawnSpec(platform: NodeJS.Platform = process.platform): {
+  command: string;
+  args: string[];
+  options: { stdio: 'inherit'; shell: boolean; windowsHide: boolean };
+} {
+  return {
+    command: 'npm',
+    args: ['install', '--global', '@snutils/snu@latest'],
+    options: { stdio: 'inherit', shell: platform === 'win32', windowsHide: true },
+  };
+}
+
 export async function installLatestWithNpm(): Promise<void> {
-  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const spec = npmInstallSpawnSpec();
   const exitCode = await new Promise<number>((resolve, reject) => {
-    const child = spawn(npmCommand, ['install', '--global', '@snutils/snu@latest'], {
-      stdio: 'inherit',
-    });
+    const child = spawn(spec.command, spec.args, spec.options);
     child.once('error', reject);
     child.once('close', (code) => resolve(code ?? 1));
   });

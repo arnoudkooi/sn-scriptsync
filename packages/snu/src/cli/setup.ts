@@ -230,7 +230,9 @@ function applyClaudeCodeTarget(target: SetupTarget, projectScope: boolean): Appl
   if (!hasBinary('claude')) {
     throw new ScriptSyncClientError('`claude` CLI not found on PATH. Install Claude Code first, or use `snu setup --print`.', 'E_CLIENT_NOT_FOUND');
   }
-  const res = spawnSync('claude', buildClaudeCodeArgs(projectScope), { encoding: 'utf8' });
+  // `claude` is a .cmd shim on Windows, which Node only spawns through a
+  // shell (spawn EINVAL otherwise). The arguments are fixed literals.
+  const res = spawnSync('claude', buildClaudeCodeArgs(projectScope), { encoding: 'utf8', shell: process.platform === 'win32' });
   if (res.status === 0) {
     return {
       client: target.id,

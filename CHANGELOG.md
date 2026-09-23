@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.1 (2026-09-23)
+
+- **Fixed: `snu update` failed on Windows with `spawn EINVAL`.** Node no longer runs npm's `.cmd` shim without a shell, so the updater (and `snu setup --client claude-code`) now go through one on Windows. Until you have 0.3.1, update by hand with `npm install -g @snutils/snu@latest`.
+
 ## 4.9.6 (2026-09-23)
 
 **Standalone `snu`: screenshots work, the debugger is used when allowed, and update set or scope switching gets its own tool (`@snutils/snu` 0.3.0).**
