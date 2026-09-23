@@ -142,6 +142,11 @@ test('take_screenshot: no debugger opt-in by default, and a permission refusal i
   try {
     const dispatcher = new StandaloneDispatcher({ cwd: h.tmpDir, wsBridge: h.wsBridge, pending: h.pending, cliFlags: { browserDebugger: false } } as any);
     dispatcher.screenshotRetryDelayMs = 20;
+    // Debug edition with Pro on the other end: the refusal must say which
+    // host permission would let the debugger capture instead.
+    h.ws.send(JSON.stringify({ action: 'helperBuildInfo', debuggerAvailable: true }));
+    h.ws.send(JSON.stringify({ action: 'helperLicenseInfo', tier: 'pro', proFeatures: true }));
+    await new Promise((r) => setTimeout(r, 30));
     const resultPromise = dispatcher.dispatch({ id: 'shot2', command: 'take_screenshot', params: { tabId: 7 } });
 
     const first = await waitFor(() => h.received.find((m) => m.action === 'takeScreenshot'));
@@ -173,6 +178,10 @@ test('take_screenshot: no debugger opt-in by default, and a permission refusal i
     assert.strictEqual(resp.status, 'error');
     assert.strictEqual(resp.code, 'E_SCREENSHOT_PERMISSION');
     assert.strictEqual(resp.details?.tabId, 9);
+    assert.strictEqual(resp.details?.browserDebuggerGate, 'off');
+    assert.strictEqual(resp.details?.cdpFallbackAvailable, true);
+    assert.match(resp.error || '', /SNU_ALLOW_BROWSER_DEBUGGER=1/);
+    assert.doesNotMatch(resp.error || '', /capture_full_page/);
     assert.ok(!fs.existsSync(path.join(h.tmpDir, 'screenshots')));
   } finally {
     await h.close();

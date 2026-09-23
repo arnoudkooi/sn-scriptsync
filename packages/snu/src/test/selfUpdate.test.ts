@@ -21,13 +21,15 @@ test('Self update: installs global updates and redirects npx users', () => {
 test('Self update: npm is spawned through a shell on Windows only', () => {
   // Node refuses to spawn npm.cmd without a shell (spawn EINVAL), which is
   // how `snu update` failed on Windows in 0.3.0.
+  // One command line and no args array: a shell plus args draws DEP0190.
   const win = npmInstallSpawnSpec('win32');
-  assert.strictEqual(win.command, 'npm');
+  assert.strictEqual(win.command, 'npm install --global @snutils/snu@latest');
+  assert.deepStrictEqual(win.args, []);
   assert.strictEqual(win.options.shell, true);
-  assert.deepStrictEqual(win.args, ['install', '--global', '@snutils/snu@latest']);
   for (const platform of ['darwin', 'linux'] as const) {
     const spec = npmInstallSpawnSpec(platform);
     assert.strictEqual(spec.command, 'npm');
+    assert.deepStrictEqual(spec.args, ['install', '--global', '@snutils/snu@latest']);
     assert.strictEqual(spec.options.shell, false);
   }
 });

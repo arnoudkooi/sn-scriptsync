@@ -762,6 +762,30 @@ export class StandaloneDispatcher {
     this.requestIdToCorrelationId.delete(requestId);
   }
 
+  // Why the tab could not be captured and what would let the next attempt
+  // succeed. Composed here rather than relayed: the helper's own text points
+  // at capture_full_page, which the standalone bridge does not offer, and the
+  // helper cannot know this host's Browser Debugger permission.
+  private screenshotPermissionMessage(): string {
+    const cdp = this.ws.getHelperState().cdp;
+    const gateOn = this.config.gates.browserDebugger === true;
+    const parts = [
+      'The browser could not capture the tab: the SN Utils extension icon has not been clicked on it yet (the one-time activeTab grant). Ask the user to click the SN Utils icon on that tab, then retry.',
+    ];
+    if (cdp.available && !gateOn) {
+      parts.push(
+        'The connected SN Utils is the Debug edition with Pro, so a capture can go through the Chrome debugger without that click once the Browser Debugger permission is on for snu: ' +
+        'set SNU_ALLOW_BROWSER_DEBUGGER=1 in the MCP server\'s env block, or "browserDebugger": true in ~/.sn-scriptsync/settings.json, then restart snu. ' +
+        'This is the user\'s decision to make: ask them rather than routing around it.'
+      );
+    } else if (cdp.available && gateOn) {
+      parts.push('The Browser Debugger permission is on but the debugger capture did not succeed, usually because DevTools is open on that tab; close it and retry.');
+    } else if (cdp.reason === 'E_PRO_REQUIRED') {
+      parts.push('The connected SN Utils Debug edition could capture through the Chrome debugger with an active Pro, Trial or Enterprise license.');
+    }
+    return parts.join(' ');
+  }
+
   // Screenshot round trip, mirroring the VS Code host: the helper answers a
   // takeScreenshot with base64 PNG data and this side writes the file under
   // <workspace>/screenshots. allowDebugger carries the user's browserDebugger
@@ -821,9 +845,16 @@ export class StandaloneDispatcher {
       res = await request(`${correlationId}_retry`, res.tabId ?? req.params?.tabId);
     }
     if (res?.code === 'E_SCREENSHOT_PERMISSION') {
-      throw Object.assign(new Error(res.error || 'Browser denied the screenshot (tab not capturable / permission).'), {
+      const cdp = this.ws.getHelperState().cdp;
+      throw Object.assign(new Error(this.screenshotPermissionMessage()), {
         code: 'E_SCREENSHOT_PERMISSION',
-        details: { tabId: res.tabId, tabUrl: res.tabUrl, cdpFallbackAvailable: res.cdpFallbackAvailable === true },
+        details: {
+          tabId: res.tabId,
+          tabUrl: res.tabUrl,
+          cdpFallbackAvailable: cdp.available || res.cdpFallbackAvailable === true,
+          browserDebuggerGate: this.config.gates.browserDebugger === true ? 'on' : 'off',
+          cdp,
+        },
       });
     }
     if (res?.success === false) {
