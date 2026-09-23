@@ -22,6 +22,18 @@ import { findPortListener, reclaimPort, terminateListener, classifyListener, Rec
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 import { runSetup } from './setup.js';
 import { collectDoctorSources, buildDoctorReport, formatDoctorReport } from './doctor.js';
+import {
+  describePermissions,
+  formatPermissions,
+  gateDefinition,
+  parseOnOff,
+  resolveGateName,
+  setPermission,
+  staleLiveGates,
+  unsetPermission,
+  LiveBridgeGates,
+} from './permissions.js';
+import { GATE_DEFINITIONS } from '../server/config.js';
 
 import { VERSION } from '../version.js';
 export { VERSION };
@@ -119,6 +131,7 @@ export function printHelp(): void {
   snu stop [--force]                  Stop a standalone bridge, even an orphaned one holding port 1978
   snu update [--check]                Check for or install the latest CLI release
   snu setup [options]                 Configure AI clients (Claude Code, Cursor, ...) to use the MCP server
+  snu permissions [set <gate> on|off] Show or change what the standalone bridge lets an agent do
 
 \x1b[1mCORE COMMANDS:\x1b[0m
   context                             Show active connection, helper tab, and instance roster
@@ -609,6 +622,69 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         json: isJsonMode,
         portFile,
       });
+      await printUpdateNotice(updateNotice);
+    } catch (err: any) {
+      outputError(err, isJsonMode);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (lifecycleCommand === 'permissions') {
+    // The gates a running standalone bridge actually holds, so the report can
+    // say when a change still needs `snu restart`. A VS Code-hosted bridge has
+    // its own settings and is reported as such.
+    const liveGates = async (): Promise<{ live: LiveBridgeGates | null; vscode: boolean }> => {
+      try {
+        const status = await inspectBridge({ portFile });
+        if (!status.running) return { live: null, vscode: false };
+        if (status.health.hostKind !== 'standalone') return { live: null, vscode: true };
+        const client = new ScriptSyncClient({ portFile, cwd: process.cwd() });
+        const caps = await client.execute({ command: 'get_capabilities', params: {} }, 5_000);
+        const gates = caps.result?.gates && typeof caps.result.gates === 'object' ? caps.result.gates : {};
+        return { live: { pid: status.health.pid, version: status.health.bridgeVersion, gates }, vscode: false };
+      } catch {
+        return { live: null, vscode: false };
+      }
+    };
+    try {
+      const sub = nonGlobalTokens[1];
+      const gateNames = GATE_DEFINITIONS.map((d) => d.key).join(', ');
+      if (sub === 'set' || sub === 'unset') {
+        const gate = resolveGateName(nonGlobalTokens[2]);
+        if (!gate) {
+          throw new ScriptSyncClientError(`Unknown permission "${nonGlobalTokens[2] ?? ''}". One of: ${gateNames}.`, 'E_INVALID_PARAMS');
+        }
+        const value = sub === 'set' ? parseOnOff(nonGlobalTokens[3]) : undefined;
+        if (sub === 'set' && value === undefined) {
+          throw new ScriptSyncClientError(`Usage: snu permissions set ${gate} on|off`, 'E_INVALID_PARAMS');
+        }
+        const change = sub === 'set' ? setPermission({ gate, value: value as boolean }) : unsetPermission({ gate });
+        const report = describePermissions();
+        const { live, vscode } = await liveGates();
+        const stale = staleLiveGates(report, live);
+        const effective = report.gates.find((g) => g.gate === gate)!;
+        if (isJsonMode) {
+          outputJson({ ...change, effective: effective.value, source: effective.source, restartRequired: stale.length > 0 });
+        } else {
+          const label = gateDefinition(gate).label;
+          if (sub === 'set') console.log(`\n✓ ${label} ${value ? 'on' : 'off'} (written to ${change.file}).`);
+          else console.log(`\n✓ ${label} removed from ${change.file}; now ${effective.value ? 'on' : 'off'} (${effective.source}).`);
+          if (effective.source === 'env' && effective.value !== value && sub === 'set') {
+            console.log(`  Note: ${effective.envVar} in this shell overrides the file and keeps it ${effective.value ? 'on' : 'off'}.`);
+          }
+          if (stale.length) console.log('  Run `snu restart` so the running bridge picks it up.');
+          else if (vscode) console.log('  The active bridge runs in VS Code, which has its own settings (sn-scriptsync.*); this file applies to standalone snu.');
+          console.log('');
+        }
+      } else if (sub === undefined) {
+        const report = describePermissions();
+        const { live } = await liveGates();
+        if (isJsonMode) outputJson({ ...report, live });
+        else process.stdout.write(formatPermissions(report, live));
+      } else {
+        throw new ScriptSyncClientError(`Unknown subcommand "${sub}". Usage: snu permissions [set <gate> on|off | unset <gate>]`, 'E_INVALID_PARAMS');
+      }
       await printUpdateNotice(updateNotice);
     } catch (err: any) {
       outputError(err, isJsonMode);

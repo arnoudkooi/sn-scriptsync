@@ -170,7 +170,14 @@ For an MCP process, host gates can be enabled through environment variables in c
 }
 ```
 
-Supported host settings are `SNU_ALLOW_BACKGROUND_SCRIPTS`, `SNU_ALLOW_DELETE_RECORDS`, `SNU_ALLOW_CREATE_ARTIFACTS`, `SNU_ALLOW_BROWSER_DEBUGGER`, and `SNU_ALLOW_REST_REQUEST`. Global defaults can alternatively be stored in `~/.sn-scriptsync/settings.json`.
+The easier way is the CLI, which writes the same setting to `~/.sn-scriptsync/settings.json`:
+
+```bash
+snu permissions                          # show every gate, its value and where it comes from
+snu permissions set browserDebugger on   # then: snu restart
+```
+
+Gates are `createArtifacts`, `updateRecords`, `deleteRecords`, `backgroundScripts`, `restRequest` and `browserDebugger`. The matching environment variables (`SNU_ALLOW_CREATE_ARTIFACTS`, `SNU_ALLOW_UPDATE_RECORDS`, `SNU_ALLOW_DELETE_RECORDS`, `SNU_ALLOW_BACKGROUND_SCRIPTS`, `SNU_ALLOW_REST_REQUEST`, `SNU_ALLOW_BROWSER_DEBUGGER`) override the file; a bridge started by an MCP client reads that client's `env` block. There is deliberately no MCP tool for this: an agent asks, the user decides.
 
 Interactive CLI commands check for a newer release at most once every 24 hours and print an update hint when one is available. MCP, JSON output, CI, and npm offline mode never perform this check. Set `SNU_DISABLE_UPDATE_CHECK=1` to opt out explicitly.
 

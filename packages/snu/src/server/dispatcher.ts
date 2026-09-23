@@ -8,7 +8,7 @@ import { StandaloneWsBridge } from './wsBridge.js';
 import { defaultPendingRegistry, PendingRegistry } from './pendingRegistry.js';
 import { AgentRequest, AgentResponse } from '../types.js';
 import { getCommandPolicy, SecurityGates } from './policy.js';
-import { resolveStandaloneConfig, StandaloneConfig } from './config.js';
+import { resolveStandaloneConfig, StandaloneConfig, GATE_DEFINITIONS } from './config.js';
 import { computePayloadHash } from './canonical.js';
 import { AGENT_API_VERSION } from '../types.js';
 import { resolveCreateScope, ScopeResolution, ScopeRow } from './scopeResolver.js';
@@ -38,19 +38,10 @@ const SWITCH_CONTEXT_ALIASES: Record<string, string> = {
   'update-set': 'updateset',
 };
 
-// Human labels + the environment variable each gate is *actually* read from in
-// config.ts. Deriving the variable name from the camelCase gate key produces
-// SNU_ALLOW_RESTREQUEST, which nothing reads, so an agent told to set it hits
-// the same wall twice and starts looking for a way around the gate. Keep these
-// tables in step with resolveStandaloneConfig().
-const GATE_LABELS: Record<keyof SecurityGates, string> = {
-  backgroundScripts: 'Background Scripts',
-  deleteRecords: 'Delete Records',
-  createArtifacts: 'Create Artifacts',
-  updateRecords: 'Update Records',
-  browserDebugger: 'Browser Debugger',
-  restRequest: 'REST Request API',
-};
+// Human labels + the environment variable each gate is *actually* read from,
+// taken from the one table config.ts resolves with, so a message never names
+// a variable nothing reads.
+const GATE_LABELS = Object.fromEntries(GATE_DEFINITIONS.map((d) => [d.key, d.label])) as Record<keyof SecurityGates, string>;
 
 const REST_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
@@ -67,14 +58,7 @@ function codeForRestStatus(status: number | undefined, message: string): string 
   return 'E_COMMAND_FAILED';
 }
 
-const GATE_ENV_VARS: Record<keyof SecurityGates, string> = {
-  backgroundScripts: 'SNU_ALLOW_BACKGROUND_SCRIPTS',
-  deleteRecords: 'SNU_ALLOW_DELETE_RECORDS',
-  createArtifacts: 'SNU_ALLOW_CREATE_ARTIFACTS',
-  updateRecords: 'SNU_ALLOW_UPDATE_RECORDS',
-  browserDebugger: 'SNU_ALLOW_BROWSER_DEBUGGER',
-  restRequest: 'SNU_ALLOW_REST_REQUEST',
-};
+const GATE_ENV_VARS = Object.fromEntries(GATE_DEFINITIONS.map((d) => [d.key, d.envVar])) as Record<keyof SecurityGates, string>;
 
 // Steps a user must take to (re)connect the browser helper tab. Rendered by
 // the CLI as a friendly block and relayed verbatim by the MCP server so
@@ -775,7 +759,7 @@ export class StandaloneDispatcher {
     if (cdp.available && !gateOn) {
       parts.push(
         'The connected SN Utils is the Debug edition with Pro, so a capture can go through the Chrome debugger without that click once the Browser Debugger permission is on for snu: ' +
-        'set SNU_ALLOW_BROWSER_DEBUGGER=1 in the MCP server\'s env block, or "browserDebugger": true in ~/.sn-scriptsync/settings.json, then restart snu. ' +
+        'the user runs `snu permissions set browserDebugger on` (or sets SNU_ALLOW_BROWSER_DEBUGGER=1 in the MCP server\'s env block), then `snu restart`. ' +
         'This is the user\'s decision to make: ask them rather than routing around it.'
       );
     } else if (cdp.available && gateOn) {
@@ -1116,7 +1100,7 @@ export class StandaloneDispatcher {
           throw Object.assign(
             new Error(
               `${label} is disabled in this snu host config, so ${req.command} cannot run. ` +
-              `Turn it on with ${envVar}=1 in the MCP server's env block, or "${gateName}": true in ~/.sn-scriptsync/settings.json, then restart snu. ` +
+              `The user turns it on with \`snu permissions set ${gateName} on\` (or ${envVar}=1 in the MCP server's env block), then \`snu restart\`. ` +
               `This is the user's decision to make: ask them to enable it rather than routing around it through the browser UI.`
             ),
             { code: 'E_DISABLED', details: { gate: gateName, envVar, source: 'host' } }
