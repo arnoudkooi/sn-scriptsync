@@ -591,7 +591,7 @@ export const TOOLS: ToolDefinition[] = [
     name: 'snu_take_screenshot',
     agentCommand: 'take_screenshot',
     description:
-      'Capture a screenshot of a ServiceNow page tab (auto-routes between standard capture and debugger if available). Saves under workspace screenshots/.',
+      'Capture a screenshot of a ServiceNow page tab and save it under screenshots/ in the workspace. Uses the tab\'s one-time grant (the user clicks the SN Utils icon on that tab once, E_SCREENSHOT_PERMISSION until then). With the Browser Debugger permission on for snu (SNU_ALLOW_BROWSER_DEBUGGER=1) and the SN Utils Debug edition with Pro, it captures through the Chrome debugger with no click.',
     cliCommand: 'screenshot',
     cliUsage: 'snu screenshot [--url <u>] [--tab <id>] [--file <name>] [--exact] [--focus] [--instance <i>] [--json]',
     cliOptions: {

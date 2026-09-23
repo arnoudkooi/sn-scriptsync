@@ -81,6 +81,8 @@ test('Setup: targets honor project scope for cursor and vscode', () => {
 });
 
 test('Setup: claude mcp add args follow the canonical entry', () => {
+  // Joined into one command line on Windows, so no arg may need quoting.
+  for (const arg of buildClaudeCodeArgs(true)) assert.match(arg, /^[A-Za-z0-9@\/._-]+$/, arg);
   assert.deepStrictEqual(buildClaudeCodeArgs(false), [
     'mcp', 'add', '--scope', 'user', MCP_SERVER_KEY, '--', CANONICAL_COMMAND, ...CANONICAL_ARGS,
   ]);

@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.3 (2026-09-23)
+
+- **`snu update` on Windows no longer prints Node's `DEP0190` deprecation warning.** The update runs as one fixed command line; nothing else changed. Same for `snu setup --client claude-code`.
+- **A screenshot that needs the icon click now says how to avoid it.** When the connected SN Utils is the Debug edition with Pro, the `E_SCREENSHOT_PERMISSION` error explains that the Browser Debugger permission for snu (`SNU_ALLOW_BROWSER_DEBUGGER=1`, or `"browserDebugger": true` in `~/.sn-scriptsync/settings.json`) lets the capture go through the Chrome debugger without the click; the tool description says so too. The permission is separate from the VS Code setting and stays off by default.
+
 ## `@snutils/snu` 0.3.2 (2026-09-23)
 
 - **The standalone bridge reports its version.** `snu doctor` shows a Bridge line with the `@snutils/snu` version that is serving, the health endpoint carries it as `bridgeVersion`, and the bridge tells the SN Utils helper tab in its hello. Lets a helper tab or agent tell an outdated bridge from an updated one.
