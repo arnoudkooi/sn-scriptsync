@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+## 4.9.6 (2026-09-23)
+
+**Standalone `snu`: screenshots work, the debugger is used when allowed, and update set or scope switching gets its own tool (`@snutils/snu` 0.3.0).**
+
+- **Fixed: `snu_take_screenshot` and `snu screenshot` timed out in standalone mode.** The bridge sent the helper tab an action name it does not handle, so every capture waited 70 seconds and failed with `E_TIMEOUT`. The MCP server and CLI now capture through the same path as VS Code, save the PNG under `screenshots/` in the workspace and return its path. With the Browser Debugger permission on, a tab without a screenshot grant is captured through the Chrome debugger (SN Utils Debug edition + Pro) instead of asking for an extension-icon click.
+- **Fixed: `snu_get_context` reported `E_PRO_REQUIRED` for the debugger on Pro licenses.** The standalone bridge showed a placeholder instead of the helper's real state. It now derives debugger availability from the connected build and license, so a regular build says the debugger is not in this build and a Debug edition without Pro says Pro is required.
+- **New `snu_switch_context` MCP tool and `snu switch <updateset|application|domain> <sys_id>`.** Switches the session's update set, application scope or domain through the picker API the ServiceNow header uses, with no form driving, and reloads one open tab unless told not to. The VS Code host already had `switch_context`; the standalone bridge now matches it.
+- **Agent-driven tabs stay in the background.** `navigate`, `set_field`, `run_ui_action`, `click_element`, `run_slash_command` and `take_screenshot` no longer bring the tab in front of what you are doing; pass `focus: true` to show the page. Screenshots come forward for the capture and switch back. Requires SN Utils 10.2.4.5.
+
 ## 4.9.5 (2026-09-19)
 
 **Scope loads that adapt to the instance, and clearer CLI and session errors (`@snutils/snu` 0.2.12).**

@@ -39,10 +39,16 @@ export class StandaloneWsBridge {
   private wss?: WebSocketServer;
   private helperConnection: HelperConnection<WebSocket>;
   private get activeClient(): WebSocket | undefined { return this.helperConnection.current; }
+  // Whether the connected helper's build carries the debugger permission
+  // (helperBuildInfo.debuggerAvailable). Combined with proFeatures from
+  // helperLicenseInfo to derive cdp, since the helper never sends a cdp field
+  // in its handshake; before this the placeholder reason E_PRO_REQUIRED was
+  // reported to every user, whatever their tier or build.
+  private debuggerAvailable?: boolean;
   private state: HelperState = {
     tier: 'free',
     proFeatures: false,
-    cdp: { available: false, reason: 'E_PRO_REQUIRED' },
+    cdp: { available: false, reason: null },
     capabilities: { protocolVersion: 1 },
     sessionEpoch: '',
     instanceGates: new Map(),
@@ -133,11 +139,19 @@ export class StandaloneWsBridge {
     });
   }
 
+  private deriveCdp(): HelperState['cdp'] {
+    if (this.debuggerAvailable === undefined) return { available: false, reason: null };
+    if (!this.debuggerAvailable) return { available: false, reason: 'E_CDP_UNAVAILABLE' };
+    if (!this.state.proFeatures) return { available: false, reason: 'E_PRO_REQUIRED' };
+    return { available: true, reason: null };
+  }
+
   private resetHelperState(): void {
+    this.debuggerAvailable = undefined;
     this.state = {
       tier: 'free',
       proFeatures: false,
-      cdp: { available: false, reason: 'E_PRO_REQUIRED' },
+      cdp: { available: false, reason: null },
       capabilities: { protocolVersion: 1 },
       sessionEpoch: '',
       instanceGates: new Map(),
@@ -176,7 +190,9 @@ export class StandaloneWsBridge {
           JSON.stringify({
             refreshedtoken: true,
             appName: 'SN Utils CLI',
-            response: `Refreshed token in snu daemon via /token slashcommand. Instance: ${msg.instance.name || 'instance'}`,
+            response: msg.silentRefresh === true
+              ? `Session token refreshed automatically in snu daemon. Instance: ${msg.instance.name || 'instance'}`
+              : `Refreshed token in snu daemon via /token slashcommand. Instance: ${msg.instance.name || 'instance'}`,
           })
         );
       } catch {}
@@ -194,7 +210,10 @@ export class StandaloneWsBridge {
     if (msg.action === 'helperLicenseInfo' || msg.action === 'helperBuildInfo' || msg.action === 'helperHello') {
       if (msg.tier) this.state.tier = msg.tier;
       if (typeof msg.proFeatures === 'boolean') this.state.proFeatures = msg.proFeatures;
-      if (msg.cdp) this.state.cdp = msg.cdp;
+      if (typeof msg.debuggerAvailable === 'boolean') this.debuggerAvailable = msg.debuggerAvailable;
+      // An explicit cdp report wins; otherwise derive it from build + license.
+      if (msg.cdp && typeof msg.cdp === 'object') this.state.cdp = msg.cdp;
+      else this.state.cdp = this.deriveCdp();
       if (msg.capabilities && typeof msg.capabilities === 'object') {
         this.state.capabilities = {
           ...this.state.capabilities,
@@ -328,6 +347,11 @@ export class StandaloneWsBridge {
         const executionCode = msg.code && msg.code !== 'E_USER_REJECTED' ? msg.code : 'E_COMMAND_FAILED';
         this.pending.reject(msg.agentRequestId, executionCode, message, {
           ...(msg.details && typeof msg.details === 'object' ? msg.details : {}),
+          // The helper puts tab hints on the message itself (screenshotResponse
+          // names the tab that needs the extension-icon click).
+          ...(msg.tabId !== undefined ? { tabId: msg.tabId } : {}),
+          ...(msg.tabUrl !== undefined ? { tabUrl: msg.tabUrl } : {}),
+          ...(msg.cdpFallbackAvailable !== undefined ? { cdpFallbackAvailable: msg.cdpFallbackAvailable } : {}),
           status: msg.status,
           detail: msg.detail ?? remoteError?.detail ?? null,
           response: msg.data ?? null,

@@ -458,9 +458,10 @@ export const TOOLS: ToolDefinition[] = [
     description:
       'Set a field value on the active ServiceNow form via g_form.setValue (triggers client scripts and UI policies).',
     cliCommand: 'browser set',
-    cliUsage: 'snu browser set <field> <value> [--display-value <v>] [--url <u>] [--tab <id>] [--instance <i>] [--json]',
+    cliUsage: 'snu browser set <field> <value> [--display-value <v>] [--focus] [--url <u>] [--tab <id>] [--instance <i>] [--json]',
     cliOptions: {
       'display-value': { type: 'string', short: 'd', description: 'Display value for reference fields' },
+      focus: { type: 'boolean', description: 'Bring the browser tab to the front' },
       url: { type: 'string', description: 'Target tab URL pattern' },
       tab: { type: 'string', description: 'Browser tab ID' },
     },
@@ -472,6 +473,7 @@ export const TOOLS: ToolDefinition[] = [
         displayValue: { type: 'string', description: 'Optional display value for reference fields' },
         url: { type: 'string', description: 'Target tab URL pattern (optional)' },
         tabId: { type: 'integer', description: 'Specific browser tab ID (optional)' },
+        focus: { type: 'boolean', default: false, description: 'Bring the browser tab to the front. By default the tab stays in the background so the user can keep working' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['field', 'value'],
@@ -488,6 +490,7 @@ export const TOOLS: ToolDefinition[] = [
           displayValue: input.displayValue || input['display-value'],
           url: input.url,
           tabId,
+          focus: input.focus === true,
         },
       };
     },
@@ -499,9 +502,11 @@ export const TOOLS: ToolDefinition[] = [
     agentCommand: 'run_ui_action',
     description: 'Trigger a UI action on the form already open in the connected browser tab (e.g. "save", "submit", "sysverb_update"). This drives the live UI and is for exercising real form behaviour (client scripts, UI policies, business rules). It is NOT the way to create or update records as data: use snu_create_record and snu_update_record, which write through the REST API and are far more reliable.',
     cliCommand: 'browser action',
-    cliUsage: 'snu browser action <action> [--no-suppress-dialogs] [--url <u>] [--tab <id>] [--instance <i>] [--json]',
+    cliUsage: 'snu browser action <action> [--no-suppress-dialogs] [--focus] [--url <u>] [--tab <id>] [--instance <i>] [--json]',
     cliOptions: {
       'no-suppress-dialogs': { type: 'boolean', description: 'Do not auto-confirm browser dialogs' },
+      focus: { type: 'boolean', description: 'Bring the browser tab to the front' },
+
       url: { type: 'string', description: 'Target tab URL pattern' },
       tab: { type: 'string', description: 'Browser tab ID' },
     },
@@ -512,6 +517,7 @@ export const TOOLS: ToolDefinition[] = [
         suppressDialogs: { type: 'boolean', default: true, description: 'Auto-confirm browser dialogs' },
         url: { type: 'string', description: 'Target tab URL pattern (optional)' },
         tabId: { type: 'integer', description: 'Specific browser tab ID (optional)' },
+        focus: { type: 'boolean', default: false, description: 'Bring the browser tab to the front. By default the tab stays in the background so the user can keep working' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['uiAction'],
@@ -528,6 +534,7 @@ export const TOOLS: ToolDefinition[] = [
           suppressDialogs: suppress,
           url: input.url,
           tabId,
+          focus: input.focus === true,
         },
       };
     },
@@ -539,9 +546,11 @@ export const TOOLS: ToolDefinition[] = [
     agentCommand: 'navigate',
     description: 'Navigate connected ServiceNow browser tab to a URL and wait for page load to finish.',
     cliCommand: 'browser nav',
-    cliUsage: 'snu browser nav <url> [--new-tab] [--no-wait] [--instance <i>] [--json]',
+    cliUsage: 'snu browser nav <url> [--new-tab] [--no-wait] [--focus] [--instance <i>] [--json]',
     cliOptions: {
       'new-tab': { type: 'boolean', short: 'n', description: 'Open in new tab' },
+      focus: { type: 'boolean', description: 'Bring the browser tab to the front' },
+
       'no-wait': { type: 'boolean', description: 'Do not wait for page load' },
       'no-discard-unsaved': { type: 'boolean', description: 'Do not bypass unsaved changes warnings' },
       tab: { type: 'string', description: 'Browser tab ID' },
@@ -554,6 +563,7 @@ export const TOOLS: ToolDefinition[] = [
         newTab: { type: 'boolean', default: false, description: 'Open in a new tab instead of active tab' },
         waitForLoad: { type: 'boolean', default: true, description: 'Wait for page load event before returning' },
         discardUnsaved: { type: 'boolean', default: true, description: 'Bypass unsaved changes warnings' },
+        focus: { type: 'boolean', default: false, description: 'Bring the browser tab to the front. By default the tab stays in the background so the user can keep working' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['url'],
@@ -570,6 +580,7 @@ export const TOOLS: ToolDefinition[] = [
           newTab: input.newTab === true || input['new-tab'] === true,
           waitForLoad: input.waitForLoad !== false && input['no-wait'] !== true,
           discardUnsaved: input.discardUnsaved !== false && input['no-discard-unsaved'] !== true,
+          focus: input.focus === true,
         },
       };
     },
@@ -582,8 +593,9 @@ export const TOOLS: ToolDefinition[] = [
     description:
       'Capture a screenshot of a ServiceNow page tab (auto-routes between standard capture and debugger if available). Saves under workspace screenshots/.',
     cliCommand: 'screenshot',
-    cliUsage: 'snu screenshot [--url <u>] [--tab <id>] [--file <name>] [--exact] [--instance <i>] [--json]',
+    cliUsage: 'snu screenshot [--url <u>] [--tab <id>] [--file <name>] [--exact] [--focus] [--instance <i>] [--json]',
     cliOptions: {
+      focus: { type: 'boolean', description: 'Leave the captured tab in front instead of switching back' },
       url: { type: 'string', short: 'u', description: 'URL pattern of tab to capture' },
       tab: { type: 'string', short: 't', description: 'Tab ID to capture' },
       file: { type: 'string', short: 'f', description: 'Custom PNG filename' },
@@ -596,6 +608,7 @@ export const TOOLS: ToolDefinition[] = [
         tabId: { type: 'integer', description: 'Specific tab ID to capture' },
         fileName: { type: 'string', description: 'Optional custom filename (defaults to timestamped PNG)' },
         exactUrl: { type: 'boolean', default: false, description: 'Require exact URL match' },
+        focus: { type: 'boolean', default: false, description: 'Leave the captured tab in front afterwards. By default the capture switches back to the tab the user had open' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       anyOf: [{ required: ['url'] }, { required: ['tabId'] }],
@@ -611,6 +624,7 @@ export const TOOLS: ToolDefinition[] = [
           tabId,
           fileName: input.fileName || input.file,
           exactUrl: input.exactUrl === true || input.exact === true,
+          focus: input.focus === true,
         },
       };
     },
@@ -731,6 +745,52 @@ export const TOOLS: ToolDefinition[] = [
           method,
           body: body && typeof body === 'object' ? body : undefined,
           queryParams: queryParams && typeof queryParams === 'object' ? queryParams : undefined,
+        },
+      };
+    },
+  },
+
+  // 17. Switch Context (update set / application scope / domain)
+  {
+    name: 'snu_switch_context',
+    agentCommand: 'switch_context',
+    description:
+      "Switch the browser session's current update set, application scope or domain by sys_id. Uses the same picker API as the ServiceNow header (no form driving), so use it before snu_create_artifact or snu_update_record to make sure changes are captured in the right update set and application. Find the sys_id first with snu_query_records on sys_update_set, sys_scope or domain. One open ServiceNow tab is reloaded afterwards unless reloadTab is false.",
+    cliCommand: 'switch',
+    cliUsage: 'snu switch <updateset|application|domain> <sys_id> [--no-reload] [--tab-url <pattern>] [--instance <i>] [--json]',
+    cliOptions: {
+      'no-reload': { type: 'boolean', description: 'Do not reload a ServiceNow tab after switching' },
+      'tab-url': { type: 'string', description: 'URL pattern of the tab to reload (default: https://*.service-now.com/*)' },
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        switchType: { type: 'string', enum: ['updateset', 'application', 'domain'], description: 'What to switch: updateset, application (scope) or domain' },
+        value: { type: 'string', description: 'sys_id of the target update set, application (sys_scope) or domain' },
+        reloadTab: { type: 'boolean', default: true, description: 'Reload one open ServiceNow tab afterwards so the header reflects the change' },
+        tabUrl: { type: 'string', description: 'URL pattern of the tab to reload (default: https://*.service-now.com/*)' },
+        instance: { type: 'string', description: 'Target instance name/folder (optional)' },
+      },
+      required: ['switchType', 'value'],
+      additionalProperties: false,
+    },
+    mapInput: (input) => {
+      let switchType = String(input.switchType || input.type || '').trim().toLowerCase();
+      if (switchType === 'app' || switchType === 'scope') switchType = 'application';
+      if (switchType === 'update_set' || switchType === 'update-set') switchType = 'updateset';
+      if (!['updateset', 'application', 'domain'].includes(switchType)) {
+        throw new Error('Invalid switchType. Must be one of: updateset, application, domain');
+      }
+      const value = String(input.value ?? input.sysId ?? input.sys_id ?? '').trim();
+      if (!value) throw new Error('Missing required value: the sys_id of the update set, application or domain');
+      return {
+        command: 'switch_context',
+        instance: input.instance,
+        params: {
+          switchType,
+          value,
+          reloadTab: input.reloadTab !== false && input['no-reload'] !== true,
+          tabUrl: input.tabUrl || input['tab-url'] || undefined,
         },
       };
     },

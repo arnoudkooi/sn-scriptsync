@@ -131,6 +131,7 @@ When more than one instance is connected, tell the agent which instance to use o
 | Escape hatch | `snu_rest_request` | Call any ServiceNow REST endpoint through the authenticated browser session. |
 | Server execution | `snu_run_background_script` | Run server-side JavaScript and return its captured output. |
 | Browser and forms | `snu_get_form_state`, `snu_set_form_field`, `snu_run_ui_action`, `snu_navigate`, `snu_take_screenshot` | Inspect and operate the connected ServiceNow browser tab. |
+| Session context | `snu_switch_context` | Switch the current update set, application scope or domain by `sys_id` through the picker API, without driving a form. |
 
 **Choosing a write tool.** `snu_create_record` inserts a plain data row (incident, task, `sys_user`, CMDB CI) and returns the inserted record. `snu_create_artifact` is for scriptable artifacts (Script Include, Business Rule, widget) and also tracks the record in the local workspace. Both sit on the same Create Artifacts permission, which is on by default. The browser tools exist to exercise real form behaviour and to show something on screen; they are not a record-writing path.
 

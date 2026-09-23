@@ -119,6 +119,7 @@ export class StandaloneHttpBridge {
                 'run_ui_action',
                 'navigate',
                 'take_screenshot',
+                'switch_context',
               ],
             })
           );

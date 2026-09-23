@@ -146,6 +146,7 @@ export function printHelp(): void {
   browser action <action>             Trigger form UI action (e.g. save, sysverb_update)
   browser nav <url>                   Navigate connected tab to URL and wait for load
   screenshot                          Capture viewport screenshot of active tab
+  switch <type> <sys_id>              Switch update set, application scope or domain (updateset|application|domain)
 
 \x1b[1mSETUP OPTIONS:\x1b[0m
   --client <name>                     One of: claude-code, cursor, claude-desktop, windsurf, vscode
@@ -861,6 +862,14 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
           throw new ScriptSyncClientError('Usage: snu browser nav <url>', 'E_INVALID_PARAMS');
         }
         inputData.url = positionals[0];
+        break;
+
+      case 'switch':
+        if (!positionals[0] || !positionals[1]) {
+          throw new ScriptSyncClientError('Usage: snu switch <updateset|application|domain> <sys_id>', 'E_INVALID_PARAMS');
+        }
+        inputData.switchType = positionals[0];
+        inputData.value = positionals[1];
         break;
 
       case 'screenshot':

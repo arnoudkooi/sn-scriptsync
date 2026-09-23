@@ -252,6 +252,7 @@ export async function createMcpServer(): Promise<McpServer> {
       displayValue: z.string().optional().describe('Optional display value for reference fields'),
       url: z.string().optional().describe('Target tab URL pattern (optional)'),
       tabId: z.number().int().optional().describe('Specific browser tab ID (optional)'),
+      focus: z.boolean().default(false).optional().describe('Bring the browser tab to the front. By default the tab stays in the background so the user can keep working'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_set_form_field', args)
@@ -266,6 +267,7 @@ export async function createMcpServer(): Promise<McpServer> {
       suppressDialogs: z.boolean().default(true).optional().describe('Auto-confirm browser dialogs'),
       url: z.string().optional().describe('Target tab URL pattern (optional)'),
       tabId: z.number().int().optional().describe('Specific browser tab ID (optional)'),
+      focus: z.boolean().default(false).optional().describe('Bring the browser tab to the front. By default the tab stays in the background so the user can keep working'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_run_ui_action', args)
@@ -281,6 +283,7 @@ export async function createMcpServer(): Promise<McpServer> {
       newTab: z.boolean().default(false).optional().describe('Open in a new tab instead of active tab'),
       waitForLoad: z.boolean().default(true).optional().describe('Wait for page load event before returning'),
       discardUnsaved: z.boolean().default(true).optional().describe('Bypass unsaved changes warnings'),
+      focus: z.boolean().default(false).optional().describe('Bring the browser tab to the front. By default the tab stays in the background so the user can keep working'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_navigate', args)
@@ -295,6 +298,7 @@ export async function createMcpServer(): Promise<McpServer> {
       tabId: z.number().int().optional().describe('Specific tab ID to capture'),
       fileName: z.string().optional().describe('Optional custom filename (defaults to timestamped PNG)'),
       exactUrl: z.boolean().default(false).optional().describe('Require exact URL match'),
+      focus: z.boolean().default(false).optional().describe('Leave the captured tab in front afterwards. By default the capture switches back to the tab the user had open'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => {
@@ -331,6 +335,20 @@ export async function createMcpServer(): Promise<McpServer> {
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_rest_request', args)
+  );
+
+  // 17. Switch Context
+  server.tool(
+    'snu_switch_context',
+    "Switch the browser session's current update set, application scope or domain by sys_id. Uses the same picker API as the ServiceNow header (no form driving), so use it before snu_create_artifact or snu_update_record to make sure changes are captured in the right update set and application. Find the sys_id first with snu_query_records on sys_update_set, sys_scope or domain. One open ServiceNow tab is reloaded afterwards unless reloadTab is false.",
+    {
+      switchType: z.enum(['updateset', 'application', 'domain']).describe('What to switch: updateset, application (scope) or domain'),
+      value: z.string().min(1).describe('sys_id of the target update set, application (sys_scope) or domain'),
+      reloadTab: z.boolean().default(true).optional().describe('Reload one open ServiceNow tab afterwards so the header reflects the change'),
+      tabUrl: z.string().optional().describe('URL pattern of the tab to reload (default: https://*.service-now.com/*)'),
+      instance: z.string().optional().describe('Target instance name/folder (optional)'),
+    },
+    async (args) => executeTool('snu_switch_context', args)
   );
 
   return server;

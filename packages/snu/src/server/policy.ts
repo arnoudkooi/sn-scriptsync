@@ -107,10 +107,20 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
     case 'pull_scope':
       return { risk: 'read', gates: [], review: 'never' };
 
+    // A screenshot is a read. The debugger is only used when the host's
+    // browserDebugger gate is on (the dispatcher passes it as allowDebugger),
+    // so the gate is not a precondition here; exactUrl is a tab-matching
+    // option, not a debugger request.
     case 'take_screenshot': {
-      const useCdp = req.params?.exactUrl === true || req.params?.cdp === true;
+      const useCdp = req.params?.cdp === true;
       return { risk: 'read', gates: useCdp ? ['browserDebugger'] : [], review: 'never' };
     }
+
+    // Changes the session's current update set / application / domain through
+    // the picker API. No record is written and the header shows the result,
+    // so it runs ungated like on the VS Code host.
+    case 'switch_context':
+      return { risk: 'execute', gates: [], review: 'never' };
 
     // Explicit CDP commands attach Chrome's debugger to the helper tab, so the
     // ones that start or expand a session carry the browserDebugger gate.
