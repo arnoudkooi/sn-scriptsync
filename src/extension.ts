@@ -8,8 +8,10 @@ import { discoverScopeFields, readAllPages, FetchPage } from "./ScopeDiscovery";
 import { HelperConnection } from "./HelperConnection";
 import { loadBridgeId } from "./BridgeIdentity";
 import { InfoTreeViewProvider } from "./InfoTreeViewProvider";
+import { NowSdkTreeViewProvider } from "./NowSdkTreeView";
 import { QueueTreeViewProvider } from "./QueueTreeViewProvider";
 import { ExtensionUtils } from "./ExtensionUtils";
+import { changeNowSdkInstance, deployNowSdkApp, nowSdkMenu, pullNowSdkApp, registerNowSdkStatusBar, NowSdkDeployDeps } from "./NowSdkDeploy";
 import { Constants } from "./constants";
 import {
 	getWorkspaceRoot,
@@ -789,6 +791,37 @@ function reportMalformedFrame(raw: any, err: any) {
 	vscode.window.showErrorMessage('sn-scriptsync ignored a message that is not valid JSON. Enable debug logging for diagnostic metadata.');
 }
 
+function nowSdkDeployDeps(): NowSdkDeployDeps {
+	return {
+		isRunning: () => serverRunning,
+		listInstances: () => {
+			const root = getWorkspaceRoot();
+			if (!root) return [];
+			let names: string[] = [];
+			try {
+				names = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+			} catch {
+				return [];
+			}
+			return names
+				.filter((name) => isValidInstanceRoot(path.join(root, name)))
+				.map((name) => ({ name, url: eu.getInstanceSettings(name)?.url }))
+				.filter((i) => typeof i.url === 'string' && i.url.length > 0)
+				.sort((a, b) => a.name.localeCompare(b.name));
+		},
+		getInstanceSettings: (name) => eu.getInstanceSettings(name),
+		helperCapabilities: () => (connectedHelperInfo ? connectedHelperInfo.capabilities || {} : null),
+		helperProFeatures: () => (connectedHelperInfo?.licenseResolved ? connectedHelperInfo.proFeatures === true : undefined),
+		sendToHelper: (payload) => broadcastToHelperTab(payload),
+		waitForHelper: (id, timeoutMs, instanceName) => pendingRegistry.register<any>({
+			id,
+			command: 'deploy_app',
+			instanceFolder: path.join(getWorkspaceRoot() || '', instanceName),
+			timeoutMs,
+		}),
+	};
+}
+
 function getInstanceRootForPath(filePath: string): string | undefined {
 	const workspaceRoot = getWorkspaceRoot() || '';
 	if (!workspaceRoot || !filePath.startsWith(workspaceRoot)) {
@@ -1438,6 +1471,23 @@ export function activate(context: vscode.ExtensionContext) {
 		const version: string = context.extension?.packageJSON?.version || '';
 		showWelcomePanel(context, version, false);
 	});
+
+	vscode.commands.registerCommand('extension.nowSdkDeploy', (resource?: vscode.Uri) => {
+		deployNowSdkApp(nowSdkDeployDeps(), resource instanceof vscode.Uri ? resource : undefined);
+	});
+
+	vscode.commands.registerCommand('extension.nowSdkPull', (resource?: vscode.Uri) => {
+		pullNowSdkApp(nowSdkDeployDeps(), resource instanceof vscode.Uri ? resource : undefined);
+	});
+
+	vscode.commands.registerCommand('extension.nowSdkChangeInstance', (resource?: vscode.Uri) => {
+		changeNowSdkInstance(nowSdkDeployDeps(), resource instanceof vscode.Uri ? resource : undefined);
+	});
+
+	vscode.commands.registerCommand('extension.nowSdkMenu', () => {
+		nowSdkMenu(nowSdkDeployDeps());
+	});
+	context.subscriptions.push(...registerNowSdkStatusBar());
 
 
 
@@ -2931,6 +2981,7 @@ function registerQueueViewsAndCommands(context: vscode.ExtensionContext): void {
 
 	const infoTreeViewProvider = new InfoTreeViewProvider();
 	context.subscriptions.push(vscode.window.registerTreeDataProvider("infoTreeView", infoTreeViewProvider));
+	context.subscriptions.push(...new NowSdkTreeViewProvider(() => nowSdkDeployDeps()).register());
 
 	queueProvider = new QueueTreeViewProvider();
 	const queueView = vscode.window.createTreeView("queueTreeView", {

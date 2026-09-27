@@ -158,7 +158,7 @@ const SKILL_MARKER = `<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=${INSTR
 const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
 	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'get_review_result', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
 	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_record', 'create_artifact', 'delete_record'] },
-	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'create_table', 'add_column', 'delete_application'] },
+	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'create_table', 'add_column', 'delete_application', 'sdk_deploy', 'sdk_pull'] },
 	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote', 'pull_records', 'pull_scope'] },
 	{ label: 'Queries', cmds: ['query_records', 'get_parent_options', 'code_search'] },
 	{ label: 'Escape hatches', cmds: ['rest_request', 'run_background_script'] },

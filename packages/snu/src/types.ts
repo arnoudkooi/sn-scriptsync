@@ -36,6 +36,10 @@ export interface HelperCapabilities {
   commandReview?: 1;
   rejectionFeedback?: 1;
   instanceSecurityGates?: 1;
+  /** The helper tab can install NOW SDK app packages (deployAppPackage). */
+  sdkDeploy?: 1;
+  /** The helper tab can download NOW SDK app packages (downloadAppPackage). */
+  sdkPull?: 1;
 }
 
 export interface InstanceGateSnapshot {
@@ -146,4 +150,6 @@ export interface ToolDefinition {
     additionalProperties?: boolean;
   };
   mapInput: (input: Record<string, any>) => MappedCommand;
+  /** Client timeout for this tool when it needs longer than the default (e.g. a deploy waiting on a confirmation). */
+  timeoutMs?: number;
 }

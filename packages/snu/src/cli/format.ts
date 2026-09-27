@@ -1,3 +1,4 @@
+import { describeChange } from '../nowsdk/NowSdkFlows.js';
 /**
  * Terminal formatters and JSON output renderer for @snutils/snu CLI
  */
@@ -59,6 +60,38 @@ export function formatTable(headers: string[], rows: string[][]): string {
 
 export function formatHumanOutput(command: string, result: any, cliCommand?: string): string {
   if (!result) return `${ANSI.gray}(empty result)${ANSI.reset}`;
+
+  if (command === 'sdk_pull') {
+    const where = result.instance ? ` from ${result.instance}` : '';
+    const lines: string[] = [];
+    if (result.dryRun) {
+      lines.push(result.changes?.length ? `${ANSI.bold}${result.changes.length} file(s) differ${where}:${ANSI.reset}` : `${ANSI.green}Up to date${where}.${ANSI.reset}`);
+      for (const c of result.changes || []) lines.push(`  ${c.status === 'added' ? '+' : c.status === 'removed' ? '-' : '~'} ${c.path}`);
+    } else if (result.upToDate) {
+      lines.push(`${ANSI.green}Up to date${where}.${ANSI.reset}`);
+    } else {
+      lines.push(`${ANSI.green}Pulled ${result.applied?.length || 0} file(s)${where}.${ANSI.reset} Review with git diff, undo with git checkout.`);
+      for (const p of result.applied || []) lines.push(`  ${p}`);
+      if (result.firstPull) lines.push(`${ANSI.gray}The first pull also writes out defaults and IDs the ServiceNow SDK keeps in the source.${ANSI.reset}`);
+    }
+    if (result.notOnInstance?.length) lines.push(`${ANSI.yellow}Not on the instance (kept): ${result.notOnInstance.join(', ')}${ANSI.reset}`);
+    if (result.notPulled?.length) lines.push(`${ANSI.yellow}A pull cannot bring in: ${result.notPulled.map(describeChange).join(', ')}. Copy these into your source by hand, or the next deploy overwrites them.${ANSI.reset}`);
+    return `\n${lines.join('\n')}\n`;
+  }
+
+  if (command === 'sdk_deploy') {
+    const app = result.app ? `${result.app.name} ${result.app.version}` : 'App';
+    const seconds = typeof result.durationMs === 'number' ? ` in ${(result.durationMs / 1000).toFixed(1)}s` : '';
+    const lines = [result.partial
+      ? `${ANSI.yellow}${app} installed${seconds}, but flow activation had problems.${ANSI.reset}`
+      : `${ANSI.green}${app} installed${seconds}.${ANSI.reset}`];
+    const flow = result.flowActivation;
+    if (flow) lines.push(`Flows: ${flow.error ? flow.error : `${flow.succeeded ?? 0} of ${flow.total ?? 0} activated`}`);
+    if (result.rollbackUrl) lines.push(`Rollback: ${result.rollbackUrl}`);
+    if (result.overwritten?.length) lines.push(`${ANSI.yellow}Overwrote instance changes: ${result.overwritten.map(describeChange).join(', ')}${ANSI.reset}`);
+    if (result.instanceOnly?.length) lines.push(`${ANSI.gray}On the instance but not in your source (left as is): ${result.instanceOnly.map(describeChange).join(', ')}${ANSI.reset}`);
+    return `\n${lines.join('\n')}\n`;
+  }
 
   // Raw REST passthrough: show the HTTP status, then the payload. Only `snu
   // rest` lands here; `snu record create` rides the same bridge command but is

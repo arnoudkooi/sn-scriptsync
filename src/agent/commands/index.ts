@@ -11,6 +11,7 @@ import { restCommands } from './rest';
 import { backgroundCommands } from './background';
 import { lifecycleCommands } from './lifecycle';
 import { negotiateCommands } from './negotiate';
+import { sdkCommands } from './sdk';
 
 const allHandlers: CommandHandler[] = [
 	...connectionCommands,
@@ -25,6 +26,7 @@ const allHandlers: CommandHandler[] = [
 	...backgroundCommands,
 	...lifecycleCommands,
 	...negotiateCommands,
+	...sdkCommands,
 ];
 
 const registry = new Map<string, CommandHandler>();

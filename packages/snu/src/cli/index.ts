@@ -150,6 +150,10 @@ export function printHelp(): void {
   artifact create <table> <name>      Create a scriptable artifact (Script Include, etc.)
   rest <endpoint>                     Call any REST endpoint (--method, --body, --query)
 
+\x1b[1mNOW SDK (FLUENT) APPS (Pro):\x1b[0m
+  sdk deploy [path]                   Build and install the app with your browser session (--force)
+  sdk pull [path]                     Pull instance changes into the app's source (--dry-run, --force)
+
 \x1b[1mBROWSER COMMANDS:\x1b[0m
   browser form                        Read live form table, sys_id, and fields via g_form
   browser set <field> <value>         Set live form field value via g_form.setValue
@@ -946,6 +950,13 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         inputData.value = positionals[1];
         break;
 
+      case 'sdk deploy':
+      case 'sdk pull':
+        // Resolved against the terminal's folder; the bridge refuses a path
+        // outside its workspace.
+        if (positionals[0]) inputData.projectPath = path.resolve(process.cwd(), positionals[0]);
+        break;
+
       case 'screenshot':
         if (values.url) inputData.url = values.url;
         if (values.tab) inputData.tabId = parseInt(String(values.tab), 10);
@@ -964,7 +975,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       result = await client.getContext(inputData.instance);
     } else {
       const mapped = tool.mapInput(inputData);
-      const resp = await client.execute(mapped);
+      const resp = await client.execute(mapped, tool.timeoutMs);
       result = resp.result;
     }
 

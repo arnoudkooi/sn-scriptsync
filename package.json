@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.9.6",
+	"version": "4.9.7",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -129,9 +129,105 @@
 			{
 				"command": "extension.snScriptSyncSelectFolder",
 				"title": "sn-scriptsync: Select Sync Folder (multi-root)"
+			},
+			{
+				"command": "extension.nowSdkDeploy",
+				"title": "sn-scriptsync: Deploy NOW SDK app to instance"
+			},
+			{
+				"command": "extension.nowSdkPull",
+				"title": "sn-scriptsync: Pull instance changes into NOW SDK app"
+			},
+			{
+				"command": "extension.nowSdkChangeInstance",
+				"title": "sn-scriptsync: Change NOW SDK app instance"
+			},
+			{
+				"command": "extension.nowSdkMenu",
+				"title": "sn-scriptsync: NOW SDK app actions"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.deploy",
+				"title": "Deploy to instance",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(cloud-upload)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.pull",
+				"title": "Pull instance changes",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(cloud-download)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.refresh",
+				"title": "Refresh and check the instance",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.changeInstance",
+				"title": "Change instance",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.openRecord",
+				"title": "Open on the instance",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(globe)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.diff",
+				"title": "Show what changed",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(diff)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.dismiss",
+				"title": "Dismiss (keep my source version)",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(close)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.accept",
+				"title": "Accept instance change (beta)",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(check)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkView.openOnInstance",
+				"title": "Open on Instance",
+				"category": "sn-scriptsync NOW SDK",
+				"icon": "$(globe)"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkEditor.open",
+				"title": "Open on Instance",
+				"category": "sn-scriptsync NOW SDK"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkEditor.compare",
+				"title": "Compare with Instance",
+				"category": "sn-scriptsync NOW SDK"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkEditor.accept",
+				"title": "Accept Instance Change (beta)",
+				"category": "sn-scriptsync NOW SDK"
+			},
+			{
+				"command": "sn-scriptsync.nowSdkEditor.dismiss",
+				"title": "Keep My Version (dismiss instance change)",
+				"category": "sn-scriptsync NOW SDK"
 			}
 		],
 		"keybindings": [
+			{
+				"command": "extension.nowSdkDeploy",
+				"key": "ctrl+alt+u",
+				"mac": "ctrl+cmd+u",
+				"when": "sn-scriptsync.inNowSdkProject"
+			},
 			{
 				"command": "extension.requestInstanceMetaData",
 				"key": "ctrl+alt+j",
@@ -167,52 +263,77 @@
 		"menus": {
 			"editor/context": [
 				{
+					"command": "sn-scriptsync.nowSdkEditor.open",
+					"group": "sn-scriptsync-nowsdk-record@1",
+					"when": "sn-scriptsync.inNowSdkProject && resourceFilename =~ /\\.now\\.ts$/ && sn-scriptsync.showContextMenu"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkEditor.compare",
+					"group": "sn-scriptsync-nowsdk-record@2",
+					"when": "sn-scriptsync.inNowSdkProject && resourceFilename =~ /\\.now\\.ts$/ && sn-scriptsync.nowSdkFileHasChanges && sn-scriptsync.showContextMenu"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkEditor.accept",
+					"group": "sn-scriptsync-nowsdk-record@3",
+					"when": "sn-scriptsync.inNowSdkProject && resourceFilename =~ /\\.now\\.ts$/ && sn-scriptsync.nowSdkFileHasChanges && sn-scriptsync.showContextMenu"
+				},
+				{
+					"command": "extension.nowSdkDeploy",
+					"group": "sn-scriptsync-nowsdk@1",
+					"when": "sn-scriptsync.inNowSdkProject && sn-scriptsync.showContextMenu"
+				},
+				{
+					"command": "extension.nowSdkPull",
+					"group": "sn-scriptsync-nowsdk@2",
+					"when": "sn-scriptsync.inNowSdkProject && sn-scriptsync.showContextMenu"
+				},
+				{
 					"command": "extension.bgScriptGlobal",
 					"group": "sn-scriptsync",
 					"title": "Selection to Background Script (global)",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && editorLangId == javascript && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.bgScriptScope",
 					"group": "sn-scriptsync",
 					"title": "Selection to Background Script (scope)",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && editorLangId == javascript && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.openInInstance",
 					"group": "sn-scriptsync",
 					"title": "Open in Instance",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.refreshFromInstance",
 					"group": "sn-scriptsync",
 					"title": "Retrieve current version from Instance",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.requestScopeArtifacts",
 					"group": "sn-scriptsync",
 					"title": "Load/Refresh artifacts from scope",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.requestScopeArtifactsAll",
 					"group": "sn-scriptsync",
 					"title": "Load/Refresh artifacts from scope (include empty)",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.requestInstanceMetaData",
 					"group": "sn-scriptsync",
 					"title": "Load instance tablenames and properties for IntelliSense",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && editorLangId == javascript && resourceFilename =~ /^[^_]/"
 				},
 				{
 					"command": "extension.bgScriptExecute",
 					"group": "sn-scriptsync",
 					"title": "Execute Background Script in Instance",
-					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && editorLangId == javascript && resourceDirname =~ /background/ && resourceFilename =~ /^[^_]/"
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && editorLangId == javascript && resourceDirname =~ /background/ && resourceFilename =~ /^[^_]/"
 				}
 			],
 			"view/title": [
@@ -235,6 +356,21 @@
 					"command": "extension.clearQueue",
 					"when": "view == queueTreeView",
 					"group": "navigation@3"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.deploy",
+					"when": "view == nowSdkTreeView",
+					"group": "navigation@1"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.pull",
+					"when": "view == nowSdkTreeView",
+					"group": "navigation@2"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.refresh",
+					"when": "view == nowSdkTreeView",
+					"group": "navigation@3"
 				}
 			],
 			"view/item/context": [
@@ -247,9 +383,79 @@
 					"command": "extension.removeFromQueue",
 					"when": "view == queueTreeView && viewItem == queueItem",
 					"group": "inline@2"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.pull",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkInstanceChanged",
+					"group": "inline"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.deploy",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkLocalEdits",
+					"group": "inline"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.changeInstance",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkInstance",
+					"group": "inline"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.accept",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkChange",
+					"group": "inline"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.openOnInstance",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkAppRecord",
+					"group": "inline"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.openRecord",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkChange",
+					"group": "inline"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.diff",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkChange",
+					"group": "nowsdk@1"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.openRecord",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkChange",
+					"group": "nowsdk@2"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.dismiss",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkChange",
+					"group": "nowsdk@3"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.accept",
+					"when": "view == nowSdkTreeView && viewItem == nowSdkChange",
+					"group": "nowsdk@0"
 				}
 			],
 			"commandPalette": [
+				{
+					"command": "sn-scriptsync.nowSdkView.openOnInstance",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkEditor.open",
+					"when": "sn-scriptsync.inNowSdkProject && resourceFilename =~ /\\.now\\.ts$/"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkEditor.compare",
+					"when": "sn-scriptsync.inNowSdkProject && resourceFilename =~ /\\.now\\.ts$/"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkEditor.accept",
+					"when": "sn-scriptsync.inNowSdkProject && resourceFilename =~ /\\.now\\.ts$/"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkEditor.dismiss",
+					"when": "sn-scriptsync.inNowSdkProject && resourceFilename =~ /\\.now\\.ts$/"
+				},
 				{
 					"command": "extension.takeScreenshot",
 					"when": "false"
@@ -285,6 +491,55 @@
 				{
 					"command": "extension.syncQueuedFile",
 					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.deploy",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.pull",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.refresh",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.changeInstance",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.openRecord",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.diff",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.dismiss",
+					"when": "false"
+				},
+				{
+					"command": "sn-scriptsync.nowSdkView.accept",
+					"when": "false"
+				}
+			],
+			"explorer/context": [
+				{
+					"command": "extension.nowSdkDeploy",
+					"when": "resourceFilename == now.config.json",
+					"group": "sn-scriptsync"
+				},
+				{
+					"command": "extension.nowSdkPull",
+					"when": "resourceFilename == now.config.json",
+					"group": "sn-scriptsync"
+				},
+				{
+					"command": "extension.nowSdkChangeInstance",
+					"when": "resourceFilename == now.config.json",
+					"group": "sn-scriptsync"
 				}
 			]
 		},
@@ -348,6 +603,11 @@
 		},
 		"views": {
 			"sn-scriptsync": [
+				{
+					"id": "nowSdkTreeView",
+					"name": "NOW SDK App",
+					"when": "sn-scriptsync.hasNowSdkProject"
+				},
 				{
 					"id": "queueTreeView",
 					"name": "Pending Saves"

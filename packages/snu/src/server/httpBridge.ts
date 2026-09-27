@@ -122,6 +122,8 @@ export class StandaloneHttpBridge {
                 'navigate',
                 'take_screenshot',
                 'switch_context',
+                'sdk_deploy',
+                'sdk_pull',
               ],
             })
           );

@@ -71,7 +71,7 @@ export async function createMcpServer(): Promise<McpServer> {
       }
 
       const mapped = tool.mapInput(args);
-      const resp = await client.execute(mapped);
+      const resp = await client.execute(mapped, tool.timeoutMs);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(resp.result, null, 2) }],
       };
@@ -349,6 +349,29 @@ export async function createMcpServer(): Promise<McpServer> {
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_switch_context', args)
+  );
+
+  server.tool(
+    'snu_sdk_deploy',
+    getToolByName('snu_sdk_deploy')!.description,
+    {
+      projectPath: z.string().optional().describe('Folder of the NOW SDK project (the one with now.config.json), relative to the workspace root or absolute. Optional when the workspace holds one project.'),
+      force: z.boolean().optional().describe('Overwrite changes made on the instance since the last deploy or pull. Only after the user agreed.'),
+      instance: z.string().optional().describe("Target instance name/folder (optional; defaults to the app's linked instance)"),
+    },
+    async (args) => executeTool('snu_sdk_deploy', args)
+  );
+
+  server.tool(
+    'snu_sdk_pull',
+    getToolByName('snu_sdk_pull')!.description,
+    {
+      projectPath: z.string().optional().describe('Folder of the NOW SDK project (the one with now.config.json), relative to the workspace root or absolute. Optional when the workspace holds one project.'),
+      dryRun: z.boolean().optional().describe('Only list what would change'),
+      force: z.boolean().optional().describe('Apply even without git protection. Only after the user agreed.'),
+      instance: z.string().optional().describe("Target instance name/folder (optional; defaults to the app's linked instance)"),
+    },
+    async (args) => executeTool('snu_sdk_pull', args)
   );
 
   return server;
