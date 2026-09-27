@@ -1,4 +1,32 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { ToolDefinition, MappedCommand } from './types.js';
+import { findNowSdkProjects, readDeployLink } from './nowsdk/NowSdkProject.js';
+
+/**
+ * The instance a NOW SDK app is linked to (.snu/deploy.json), so deploy and
+ * pull use the same instance as the editor when none is given. Resolved from
+ * this process's folder; undefined when there is no single project or link.
+ */
+function linkedSdkInstance(projectPath?: string): string | undefined {
+  try {
+    const base = process.cwd();
+    let root: string | undefined;
+    if (projectPath) {
+      const abs = path.resolve(base, projectPath);
+      root = fs.statSync(abs).isDirectory() ? abs : path.dirname(abs);
+    } else {
+      const found = findNowSdkProjects(base);
+      root = found.length === 1 ? found[0] : undefined;
+    }
+    return root ? readDeployLink(root)?.instance : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const sdkProjectPath = (input: Record<string, any>) =>
+  typeof input.projectPath === 'string' && input.projectPath ? input.projectPath : undefined;
 
 function formatOrderBy(orderBy?: string): string | undefined {
   if (!orderBy) return undefined;
@@ -794,6 +822,63 @@ export const TOOLS: ToolDefinition[] = [
         },
       };
     },
+  },
+  // NOW SDK app deploy
+  {
+    name: 'snu_sdk_deploy',
+    agentCommand: 'sdk_deploy',
+    description:
+      'Build, pack and install a ServiceNow SDK (NOW SDK / Fluent) app on the instance with the browser session, without a separate SDK login. The user confirms the install in the SN Utils helper tab, so the call waits for them (up to 15 minutes). Stops with E_INSTANCE_CHANGED when the app changed on the instance since the last deploy or pull: ask the user whether to pull first (snu_sdk_pull) or overwrite (force: true). E_CONFIRM_REQUIRED means that check could not run: retry, or ask the user before force: true, which deploys without it. Returns installed, partial (installed but some flows did not activate), the rollback link and the flow activation result. Uses the instance the app was last deployed to or pulled from when none is given. Requires SN Utils Pro or Trial and the createArtifacts permission.',
+    cliCommand: 'sdk deploy',
+    cliUsage: 'snu sdk deploy [projectPath] [--force] [--instance <i>] [--json]',
+    cliOptions: {
+      force: { type: 'boolean', short: 'f', description: 'Deploy even when the app changed on the instance since the last deploy or pull' },
+    },
+    timeoutMs: 16 * 60 * 1000,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: { type: 'string', description: 'Folder of the NOW SDK project (the one with now.config.json), relative to the workspace root or absolute. Optional when the workspace holds one project.' },
+        force: { type: 'boolean', default: false, description: 'Overwrite changes made on the instance since the last deploy or pull. Only after the user agreed.' },
+        instance: { type: 'string', description: 'Target instance name/folder (optional; defaults to the app\'s linked instance)' },
+      },
+      additionalProperties: false,
+    },
+    mapInput: (input) => ({
+      command: 'sdk_deploy',
+      instance: input.instance || linkedSdkInstance(sdkProjectPath(input)),
+      params: { projectPath: sdkProjectPath(input), force: input.force === true },
+    }),
+  },
+
+  // NOW SDK app pull
+  {
+    name: 'snu_sdk_pull',
+    agentCommand: 'sdk_pull',
+    description:
+      'Pull changes made on the instance into a ServiceNow SDK (NOW SDK / Fluent) project, with the browser session and the project\'s own SDK (no separate SDK login). Applies straight away when the affected files have no uncommitted git changes, so the user can review with git diff and undo with git checkout. E_CONFIRM_REQUIRED means the project is not in git or an affected file has uncommitted edits: ask the user before passing force: true. dryRun only lists the changes. Uses the instance the app was last deployed to or pulled from when none is given. Requires SN Utils Pro or Trial.',
+    cliCommand: 'sdk pull',
+    cliUsage: 'snu sdk pull [projectPath] [--dry-run] [--force] [--instance <i>] [--json]',
+    cliOptions: {
+      'dry-run': { type: 'boolean', short: 'n', description: 'Only list what would change' },
+      force: { type: 'boolean', short: 'f', description: 'Apply even when the project is not in git or affected files have uncommitted edits' },
+    },
+    timeoutMs: 5 * 60 * 1000,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: { type: 'string', description: 'Folder of the NOW SDK project (the one with now.config.json), relative to the workspace root or absolute. Optional when the workspace holds one project.' },
+        dryRun: { type: 'boolean', default: false, description: 'Only list what would change' },
+        force: { type: 'boolean', default: false, description: 'Apply even without git protection. Only after the user agreed.' },
+        instance: { type: 'string', description: 'Target instance name/folder (optional; defaults to the app\'s linked instance)' },
+      },
+      additionalProperties: false,
+    },
+    mapInput: (input) => ({
+      command: 'sdk_pull',
+      instance: input.instance || linkedSdkInstance(sdkProjectPath(input)),
+      params: { projectPath: sdkProjectPath(input), force: input.force === true, dryRun: input.dryRun === true || input['dry-run'] === true },
+    }),
   },
 ];
 

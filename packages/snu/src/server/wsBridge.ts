@@ -337,7 +337,13 @@ export class StandaloneWsBridge {
       return;
     }
 
-    // 4. Standard correlated agent responses
+    // 4. Standard correlated agent responses. NOW SDK deploy and download
+    // replies are handed over whole: the handlers read installed, partial,
+    // tracker, reason and the package from them and pick the error code.
+    if (msg.agentRequestId && (msg.action === 'deployAppPackageResponse' || msg.action === 'downloadAppPackageResponse')) {
+      this.pending.resolve(msg.agentRequestId, msg);
+      return;
+    }
     if (msg.agentRequestId) {
       const approvedReview = [...this.activeReviews.values()].find(
         (review) => review.correlationId === msg.agentRequestId && review.consumed

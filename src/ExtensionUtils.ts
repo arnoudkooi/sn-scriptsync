@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { open } from 'fs';
 import { Constants } from "./constants";
 import { getWorkspaceRoot, assertPathUnderRoot } from "./workspaceRoot";
+import { findNowSdkProjectRoot } from "./NowSdkProject";
 
 let idx = 0;
 
@@ -514,6 +515,13 @@ export class ExtensionUtils {
         let fullPath = basePath + fileNameArr[1]+ nodePath.sep + fileNameArr[2]+ nodePath.sep
 
         if (fileNameArr[5] === "ts") {
+            return true;
+        }
+
+        // Files of a NOW SDK (Fluent) project are compiled into an app package
+        // and deployed as a whole, never synced field by field.
+        const syncRoot = getWorkspaceRoot();
+        if (syncRoot && findNowSdkProjectRoot(fileName, syncRoot)) {
             return true;
         }
 

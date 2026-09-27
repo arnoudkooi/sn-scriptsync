@@ -412,7 +412,7 @@ Every available command grouped by purpose. Open the listed skill for full docs 
   _docs: `agentrules/skills/snu-agent-api/SKILL.md`_
 - **Records — write** — `update_record`, `update_record_batch`, `create_record`, `create_artifact`, `delete_record`  
   _docs: `agentrules/skills/snu-agent-api/SKILL.md`_
-- **Scoped-app ergonomics** — `create_application`, `create_table`, `add_column`, `delete_application`  
+- **Scoped-app ergonomics** — `create_application`, `create_table`, `add_column`, `delete_application`, `sdk_deploy`, `sdk_pull`  
   _docs: `agentrules/skills/snu-agent-api/SKILL.md`_
 - **Records — read** — `get_record`, `get_table_metadata`, `check_name_exists_remote`, `pull_records`, `pull_scope`  
   _docs: `agentrules/skills/snu-agent-api/SKILL.md`_

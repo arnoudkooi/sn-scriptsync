@@ -12,6 +12,9 @@ import { resolveStandaloneConfig, StandaloneConfig, GATE_DEFINITIONS } from './c
 import { computePayloadHash } from './canonical.js';
 import { AGENT_API_VERSION } from '../types.js';
 import { resolveCreateScope, ScopeResolution, ScopeRow } from './scopeResolver.js';
+import { resolveNowSdkProjectRoot } from '../nowsdk/NowSdkProject.js';
+import { DEPLOY_TIMEOUT_MS, buildDeployMessage } from '../nowsdk/NowSdkBuild.js';
+import { NowSdkFlowError, NowSdkTransport, deployFlow, pullFlow } from '../nowsdk/NowSdkFlows.js';
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
 
@@ -777,6 +780,61 @@ export class StandaloneDispatcher {
   // Chrome debugger (Debug edition + Pro; the helper re-checks both). Without
   // it, or when the debugger path is not available, the helper asks for the
   // extension-icon click and this side retries once after a pause.
+  // NOW SDK (Fluent) deploy and pull, the same steps as the VS Code bridge
+  // (nowsdk/NowSdkFlows.ts); this only supplies the transport to the helper
+  // tab. A deploy is always confirmed by the user in the helper tab's modal.
+  private async runNowSdk(req: AgentRequest, inst: { name: string; settings: any }, correlationId: string): Promise<Record<string, any>> {
+    const helper = this.ws.getHelperState();
+    if (helper.capabilities?.sdkDeploy !== 1) {
+      throw Object.assign(new Error('The connected SN Utils helper tab cannot deploy or pull NOW SDK apps. Update SN Utils and reopen the ScriptSync helper tab.'), { code: 'E_UNSUPPORTED_HOST' });
+    }
+    let root: string;
+    try {
+      root = resolveNowSdkProjectRoot(this.cwd, typeof req.params?.projectPath === 'string' ? req.params.projectPath : undefined);
+    } catch (e: any) {
+      throw Object.assign(new Error(e?.message || String(e)), { code: 'E_INVALID_PARAMS' });
+    }
+    if (!inst.settings?.url || !inst.settings?.g_ck) {
+      throw Object.assign(new Error(`No session token for ${inst.name}. Run /token on the instance and retry.`), { code: 'E_TOKEN_EXPIRED' });
+    }
+    const instance = { name: inst.name, url: inst.settings.url, g_ck: inst.settings.g_ck };
+    let seq = 0;
+    const transport: NowSdkTransport = {
+      instanceName: inst.name,
+      instanceUrl: inst.settings.url,
+      canDownload: helper.capabilities?.sdkPull === 1,
+      download: async (project) => {
+        const id = `${correlationId}_pull_${++seq}`;
+        const pending = this.pending.register({ id, command: req.command, timeoutMs: 3 * 60 * 1000 });
+        this.ws.sendToBrowser({
+          action: 'downloadAppPackage',
+          agentRequestId: id,
+          appName: 'SN Utils CLI',
+          initiatedBy: 'agent',
+          instance,
+          app: { name: project.name, scope: project.scope, scopeId: project.scopeId },
+        });
+        const result: any = await pending;
+        if (!result?.success) throw Object.assign(new Error(result?.error || 'Download failed'), { code: result?.code || 'E_COMMAND_FAILED' });
+        return Buffer.from(String(result.packageBase64 || ''), 'base64');
+      },
+      deploy: async (pkg) => {
+        const id = `${correlationId}_deploy_${++seq}`;
+        const pending = this.pending.register({ id, command: req.command, timeoutMs: DEPLOY_TIMEOUT_MS });
+        this.ws.sendToBrowser(buildDeployMessage(id, pkg, instance, 'agent'));
+        return pending;
+      },
+    };
+    try {
+      return req.command === 'sdk_pull'
+        ? await pullFlow(root, transport, { force: req.params?.force === true, dryRun: req.params?.dryRun === true })
+        : await deployFlow(root, transport, { force: req.params?.force === true });
+    } catch (e: any) {
+      if (e instanceof NowSdkFlowError) throw Object.assign(new Error(e.message), { code: e.code, details: e.details });
+      throw e;
+    }
+  }
+
   private async captureScreenshot(req: AgentRequest, correlationId: string): Promise<Record<string, any>> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     let fileName = typeof req.params?.fileName === 'string' && req.params.fileName.trim()
@@ -1773,6 +1831,11 @@ export class StandaloneDispatcher {
           timestamp: Date.now(),
           result: { status: res.status, data: res.data },
         };
+      }
+
+      if (req.command === 'sdk_deploy' || req.command === 'sdk_pull') {
+        const result = await this.runNowSdk(req, inst, correlationId);
+        return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result };
       }
 
       if (req.command === 'take_screenshot') {

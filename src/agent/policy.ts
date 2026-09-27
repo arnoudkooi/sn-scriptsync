@@ -94,6 +94,16 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
     case 'upload_attachment':
       return { risk: 'write', gates: ['createArtifacts'], review: 'never' };
 
+    // Installing a NOW SDK app writes its artifacts as a package. The helper
+    // tab always asks the user to confirm in its own modal, so there is no
+    // separate command review on top.
+    case 'sdk_deploy':
+      return { risk: 'write', gates: ['createArtifacts'], review: 'never' };
+
+    // A pull only writes the local project, like pull_records.
+    case 'sdk_pull':
+      return { risk: 'read', gates: [], review: 'never' };
+
     // Overwriting fields on records that already exist is its own decision,
     // and on a populated table the bigger blast radius of the two. Gated on
     // updateRecords, which falls back to createArtifacts (see GATE_FALLBACKS)
