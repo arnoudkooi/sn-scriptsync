@@ -1191,7 +1191,8 @@ export class StandaloneDispatcher {
           const gateMode = this.ws.getInstanceGate(instanceUrl, gateName);
           if (gateMode === 'auto') {
             isReviewRequired = false;
-          } else if (gateMode === 'approve') {
+          } else if (gateMode === 'approve' && !policy.selfConfirmed) {
+            // A selfConfirmed command is confirmed in the helper's own modal.
             isReviewRequired = true;
           }
         }

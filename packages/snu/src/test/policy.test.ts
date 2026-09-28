@@ -85,3 +85,10 @@ test('Policy: attachment uploads and form commits are gated writes', () => {
   assert.deepStrictEqual(destructive.gates, ['deleteRecords']);
   assert.strictEqual(destructive.review, 'required');
 });
+
+test('Policy: sdk_deploy is gated but confirmed in the helper modal, not a command review', () => {
+  const policy = getCommandPolicy({ id: '1', command: 'sdk_deploy', params: {} });
+  assert.deepStrictEqual(policy.gates, ['createArtifacts']);
+  assert.strictEqual(policy.selfConfirmed, true);
+  assert.strictEqual(getCommandPolicy({ id: '2', command: 'create_record', params: {} }).selfConfirmed, undefined);
+});

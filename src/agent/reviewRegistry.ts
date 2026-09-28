@@ -12,13 +12,21 @@ interface PendingReview {
 	command: string;
 	createdAt: number;
 	settled: boolean;
+	running: boolean; // approved, and the host is executing the command now
 	response?: AgentResponse; // final response once settled
 	waiters: Array<() => void>; // long-poll wakeups
 }
 
-// Settled results stay collectable for a while after the 5-minute review
-// window, so a slow agent can still pick them up.
-const RETENTION_AFTER_EXPIRY_MS = 10 * 60_000;
+// Settled results stay collectable for this long after they settle, so a slow
+// agent can still pick them up. The clock starts at settle time, not at
+// creation: an approved command can run for many minutes after the review
+// (sdk_deploy builds, packs and waits on the install modal), and its result
+// must not be dropped before it exists (issue #162).
+const RETENTION_AFTER_SETTLE_MS = 10 * 60_000;
+
+// Safety net for an entry that never settles (a bug, not a normal path: the
+// review wait always times out and settles). Keeps the map from leaking.
+const MAX_UNSETTLED_MS = 2 * 60 * 60_000;
 
 const reviews = new Map<string, PendingReview>();
 
@@ -29,18 +37,34 @@ export function registerReview(reviewId: string, requestId: string, command: str
 		command,
 		createdAt: Date.now(),
 		settled: false,
+		running: false,
 		waiters: [],
 	});
-	const t = setTimeout(() => { reviews.delete(reviewId); }, reviewTimeoutMs + RETENTION_AFTER_EXPIRY_MS);
+	const t = setTimeout(() => {
+		if (reviews.get(reviewId)?.settled === false) reviews.delete(reviewId);
+	}, Math.max(reviewTimeoutMs, MAX_UNSETTLED_MS));
 	(t as any).unref?.();
+}
+
+/** The review was approved and the host has started executing the command. */
+export function markReviewRunning(reviewId: string): void {
+	const r = reviews.get(reviewId);
+	if (r && !r.settled) r.running = true;
+}
+
+export function isReviewRunning(reviewId: string): boolean {
+	return reviews.get(reviewId)?.running === true;
 }
 
 export function settleReview(reviewId: string, response: AgentResponse): void {
 	const r = reviews.get(reviewId);
 	if (!r || r.settled) return;
 	r.settled = true;
+	r.running = false;
 	r.response = response;
 	r.waiters.splice(0).forEach((wake) => wake());
+	const t = setTimeout(() => { reviews.delete(reviewId); }, RETENTION_AFTER_SETTLE_MS);
+	(t as any).unref?.();
 }
 
 export function hasReview(reviewId: string): boolean {
