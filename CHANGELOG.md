@@ -1,5 +1,16 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.6 (2026-09-28)
+
+- Detect platform choice additions, edits and removals when checking a NOW SDK deploy, including separately packaged choice lists, translations and dependent choices. Respect the SDK's replace versus merge behavior when deciding which changes a deploy would overwrite.
+- Keep choice changes pending after a pull when their Table or ChoiceSet source disables synchronization, so the next deploy continues to warn about them.
+
+## 4.9.8 (2026-09-28)
+
+- Detect platform choice additions, edits and removals in NOW SDK apps, including choice lists packaged separately from other records. Comparisons ignore XML ordering and record history, preserve translations and dependent choices, and respect the SDK's replace versus merge behavior when checking a deploy. The standalone CLI and MCP bridge use the same check.
+- Use **Keep local version** consistently in the NOW SDK sidebar and Fluent editor. A disconnected helper shows the last instance check as cached, without a green current-status indicator.
+- Open a changed choice list on the instance from the sidebar. Accept uses the SDK's choice conversion and leaves changes pending when their source disables synchronization.
+
 ## `@snutils/snu` 0.3.5 (2026-09-26)
 
 - **Deploy and pull NOW SDK (Fluent) apps from the command line and AI agents (Pro/Trial, beta).** `snu sdk deploy` builds the project with its own SDK and installs it with your browser session after you confirm in the helper tab; it stops when the app changed on the instance since the last deploy or pull, or when that check cannot run, unless you add `--force`. `snu sdk pull` brings instance changes into the source when git can show and undo them (`--dry-run` lists them). No separate SDK login or OAuth setup. MCP tools `snu_sdk_deploy` and `snu_sdk_pull`. Needs SN Utils 10.2.5.0.

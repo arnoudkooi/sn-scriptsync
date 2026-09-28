@@ -72,12 +72,14 @@ let scopeLoadCounts: Record<string, number> = {};
 let scopeJson : any = {};
 
 let wss;
+const nowSdkConnectionChanged = new vscode.EventEmitter<void>();
 const helperConnection = new HelperConnection<WebSocket>(() => {
 	connectedHelperInfo = null;
 	helperInstanceGates.clear();
 	helperInstanceGateRevisions.clear();
 	helperLiveInstances.clear();
 	pendingRegistry.rejectAll('E_BROWSER_DISCONNECTED', 'Browser helper disconnected. Open the SN Utils helper tab and try again.');
+	nowSdkConnectionChanged.fire();
 });
 let serverRunning = false;
 let agentHttpState: HttpServerState | undefined;
@@ -158,6 +160,7 @@ function updateContextMenuVisibility() {
 // Update server running context
 function setServerRunningContext(running: boolean) {
 	serverRunning = running;
+	nowSdkConnectionChanged.fire();
 	vscode.commands.executeCommand('setContext', 'sn-scriptsync.serverRunning', running);
 }
 let eu = new ExtensionUtils();
@@ -794,6 +797,7 @@ function reportMalformedFrame(raw: any, err: any) {
 function nowSdkDeployDeps(): NowSdkDeployDeps {
 	return {
 		isRunning: () => serverRunning,
+		onConnectionChanged: nowSdkConnectionChanged.event,
 		listInstances: () => {
 			const root = getWorkspaceRoot();
 			if (!root) return [];
@@ -2748,6 +2752,7 @@ async function startBridgeTransports(): Promise<void> {
 						extensionVersion: typeof messageJson.extensionVersion === 'string' ? messageJson.extensionVersion : undefined,
 					};
 					connectedHelperInfo = { ...helperBuildInfo };
+					nowSdkConnectionChanged.fire();
 					clearTimeout(capabilityMessageTimer);
 					if (helperBuildInfo.debuggerAvailable) {
 						debugLicenseTimer = setTimeout(sendCapabilityMessage, 3000);
@@ -2767,6 +2772,7 @@ async function startBridgeTransports(): Promise<void> {
 						licenseResolved: true,
 					};
 					connectedHelperInfo = { ...helperBuildInfo };
+					nowSdkConnectionChanged.fire();
 					// External-agent connectivity (the well-known global port
 					// file that lets Claude Code/Codex/terminal tools connect
 					// from any directory) is Pro. Workspace agent workflows
@@ -2818,8 +2824,13 @@ async function startBridgeTransports(): Promise<void> {
 				}
 
 			// start new methods to replace webserver with websocket
-			if (messageJson?.instance) 
+			if (messageJson?.instance) {
+				let previous: any;
+				try { previous = eu.getInstanceSettings(messageJson.instance.name); } catch { /* A fresh session can replace unreadable settings. */ }
+				const sessionChanged = previous?.url !== messageJson.instance.url || previous?.g_ck !== messageJson.instance.g_ck;
 				eu.writeInstanceSettings(messageJson.instance);
+				if (sessionChanged) nowSdkConnectionChanged.fire();
+			}
 			if (messageJson?.action == 'saveFieldAsFile')
 				saveFieldAsFile(messageJson);
 			else if (messageJson?.action == 'createRecordResponse')

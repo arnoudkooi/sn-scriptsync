@@ -15,6 +15,8 @@ import * as path from 'path';
 import * as zlib from 'zlib';
 import { NowSdkProjectError, assertSupportedProject, assertSupportedSdk, readNowSdkProject } from './NowSdkProject';
 import { runNowSdk } from './NowSdkBuild';
+import { choiceSetFields, choicesWouldBeOverwritten, isChoiceSet } from './NowSdkChoices';
+import { disabledChoiceTables } from './NowSdkSource';
 
 export const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_UNPACKED_BYTES = 200 * 1024 * 1024;
@@ -335,7 +337,7 @@ export interface InstanceChange {
 	reason?: string;
 	/** At a deploy: the fields changed on the instance that the build would overwrite. */
 	fields?: string[];
-	/** The record's file in the package (update/<file>). */
+	/** The record's file name in the package's update or author_elective_update folder. */
 	file?: string;
 }
 
@@ -351,6 +353,8 @@ export const TABLE_LABELS: Record<string, string> = {
 	sys_hub_action_type_definition: 'Flow Action',
 	sys_db_object: 'Table',
 	sys_dictionary: 'Column',
+	sys_choice_set: 'Choices',
+	sys_choice_v2: 'Choices',
 	sys_security_acl: 'ACL',
 	sys_user_role: 'Role',
 	sys_properties: 'System Property',
@@ -390,18 +394,7 @@ function packageRecords(packageZip: Buffer): Map<string, string> {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-records-'));
 	try {
 		extractZip(packageZip, tempDir);
-		const records = new Map<string, string>();
-		const update = path.join(tempDir, 'update');
-		let files: string[] = [];
-		try {
-			files = fs.readdirSync(update);
-		} catch {
-			files = [];
-		}
-		for (const file of files) {
-			if (file.endsWith('.xml')) records.set(file, fs.readFileSync(path.join(update, file), 'utf8'));
-		}
-		return records;
+		return readBuiltRecords(tempDir);
 	} finally {
 		cleanupPull(tempDir);
 	}
@@ -439,12 +432,17 @@ function readBaselineRecords(projectRoot: string, instanceName: string): Map<str
 
 function readBuiltRecords(appOutputDir: string): Map<string, string> {
 	const records = new Map<string, string>();
-	const dir = path.join(appOutputDir, 'update');
-	try {
-		for (const file of fs.readdirSync(dir)) {
-			if (file.endsWith('.xml')) records.set(file, fs.readFileSync(path.join(dir, file), 'utf8'));
+	// Both folders use the same update-name identity. Platform downloads may
+	// put choices in update while SDK builds put them in author_elective_update.
+	for (const folder of ['update', 'author_elective_update']) {
+		const dir = path.join(appOutputDir, folder);
+		for (const file of listDir(dir)) {
+			if (!file.endsWith('.xml')) continue;
+			const xml = fs.readFileSync(path.join(dir, file), 'utf8');
+			if (records.has(file) && records.get(file) !== xml) throw new NowSdkProjectError(`The app package contains conflicting copies of ${file}.`);
+			records.set(file, xml);
 		}
-	} catch {}
+	}
 	return records;
 }
 
@@ -463,6 +461,7 @@ const HISTORY_FIELDS = new Set(['sys_updated_on', 'sys_updated_by', 'sys_mod_cou
 
 /** The top-level fields of a record's XML, values normalized for comparison (or as stored, with `raw`). */
 function recordFields(xml: string, raw = false): Map<string, string> {
+	if (isChoiceSet(xml)) return choiceSetFields(xml, raw);
 	const fields = new Map<string, string>();
 	const body = /<record_update[^>]*>\s*<([a-z0-9_]+)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/.exec(xml)?.[2] || '';
 	const re = /<([A-Za-z0-9_]+)(?:\s[^>]*?)?(?:\/>|>(<!\[CDATA\[[\s\S]*?\]\]>|[^<]*)<\/\1>)/g;
@@ -496,6 +495,10 @@ function sameRecord(a: string, b: string): boolean {
 }
 
 function recordLabel(table: string, xml: string, sysId: string): string {
+	if (isChoiceSet(xml)) {
+		const fields = choiceSetFields(xml);
+		return `Choices ${fields.get('name')}.${fields.get('element')}`;
+	}
 	const fields = table === 'sys_ui_page' ? ['description', 'name', 'endpoint'] : table === 'sys_dictionary' ? ['element'] : ['name', 'title', 'label', 'sys_name', 'path', 'key'];
 	let name = fields.map((f) => xmlField(xml, f)).find(Boolean) || sysId;
 	if (table === 'sys_dictionary' && xmlField(xml, 'name')) name = `${xmlField(xml, 'name')}.${name}`;
@@ -535,6 +538,7 @@ function disableSyncIds(projectRoot: string): Set<string> {
 	}
 	for (const file of marked) {
 		const text = fs.readFileSync(path.join(projectRoot, file), 'utf8');
+		for (const table of disabledChoiceTables(projectRoot, file, text)) ids.add(`choices:${table}`);
 		const wholeFile = text.includes('@fluent-disable-sync-for-file');
 		const re = /Now\.ID\[\s*['"]([^'"]+)['"]\s*\]/g;
 		let m: RegExpExecArray | null;
@@ -558,6 +562,10 @@ function disableSyncIds(projectRoot: string): Set<string> {
 }
 
 function generatedReason(table: string, xml: string, sysId: string, disableSync: Set<string>): string | undefined {
+	if (isChoiceSet(xml)) {
+		const fields = choiceSetFields(xml);
+		if (disableSync.has('choices:*') || disableSync.has(`choices:${fields.get('name')}`) || disableSync.has(`choices:${fields.get('name')}.${fields.get('element')}`)) return 'marked @fluent-disable-sync in your source';
+	}
 	if (xml.includes('@fluent-import-html')) return 'built from your UI source';
 	if (table === 'sys_module') return 'compiled from your server source';
 	if (NOT_CONVERTED.has(table) || table.startsWith('sys_aix_')) return 'regenerated from your source on every build';
@@ -680,6 +688,12 @@ export function deployConflicts(projectRoot: string, instanceName: string, packa
 	const built = readBuiltRecords(appOutputDir);
 	const disableSync = disableSyncIds(projectRoot);
 	const same = (a: Map<string, string>, b: Map<string, string>, key: string) => (a.get(key) ?? '') === (b.get(key) ?? '');
+	const lostFields = (was: string | undefined, current: string, build: string, fields: string[]) => {
+		const fi = recordFields(current), fb = recordFields(build);
+		return fields.filter((field) => field === 'choices' && isChoiceSet(current) && isChoiceSet(build)
+			? choicesWouldBeOverwritten(was, current, build)
+			: !same(fi, fb, field));
+	};
 	for (const file of new Set([...now.keys(), ...before.keys()])) {
 		const was = before.get(file);
 		const is = now.get(file);
@@ -690,7 +704,7 @@ export function deployConflicts(projectRoot: string, instanceName: string, packa
 				continue;
 			}
 			const fi = recordFields(is), fb = recordFields(build);
-			const differing = [...new Set([...fi.keys(), ...fb.keys()])].filter((k) => !same(fi, fb, k));
+			const differing = lostFields(undefined, is, build, [...new Set([...fi.keys(), ...fb.keys()])]);
 			if (differing.length) overwritten.push({ ...describeRecord(file, is, 'new', disableSync), fields: differing });
 			continue;
 		}
@@ -699,9 +713,9 @@ export function deployConflicts(projectRoot: string, instanceName: string, packa
 			continue;
 		}
 		if (is === undefined || was === undefined || build === undefined) continue;
-		const fw = recordFields(was), fi = recordFields(is), fb = recordFields(build);
+		const fw = recordFields(was), fi = recordFields(is);
 		const changed = [...new Set([...fw.keys(), ...fi.keys()])].filter((k) => !same(fw, fi, k));
-		const lost = changed.filter((k) => !same(fi, fb, k));
+		const lost = lostFields(was, is, build, changed);
 		if (lost.length) overwritten.push({ ...describeRecord(file, is, 'changed', disableSync), fields: lost });
 	}
 	const byLabel = (a: InstanceChange, b: InstanceChange) => a.label.localeCompare(b.label);

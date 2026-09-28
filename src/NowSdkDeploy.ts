@@ -30,6 +30,8 @@ const FEEDBACK_URL = 'https://snutils.com/contact?utm_source=scriptsync&utm_medi
 
 export interface NowSdkDeployDeps {
 	isRunning(): boolean;
+	/** Helper connection, license or instance session changed. */
+	onConnectionChanged?: vscode.Event<void>;
 	/** Instance folders ScriptSync knows (folders with a valid _settings.json). */
 	listInstances(): Array<{ name: string; url: string }>;
 	getInstanceSettings(name: string): any;
@@ -503,8 +505,8 @@ export async function pullNowSdkApp(deps: NowSdkDeployDeps, resource?: vscode.Ur
 			vscode.window.showInformationMessage(`Applied ${chosen.length} change${chosen.length === 1 ? '' : 's'} from ${instance.name} to ${project.name}.${notPulledNote}`);
 		} else {
 			changed.fire(project.root);
-			log(`Left out: ${skipped.map((c) => c.path).join(', ')}. The instance changes stay listed until a complete pull, a deploy or Dismiss.`);
-			vscode.window.showInformationMessage(`Applied ${chosen.length} of ${toApply.length} files from ${instance.name} to ${project.name}. The instance changes stay listed in the NOW SDK App view until you pull the rest, deploy or dismiss them.`);
+			log(`Left out: ${skipped.map((c) => c.path).join(', ')}. The instance changes stay listed until a complete pull, a deploy or Keep local version.`);
+			vscode.window.showInformationMessage(`Applied ${chosen.length} of ${toApply.length} files from ${instance.name} to ${project.name}. The instance changes stay listed in the NOW SDK App view until you pull the rest, deploy or choose Keep local version.`);
 		}
 		return;
 	}

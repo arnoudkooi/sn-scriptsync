@@ -10,8 +10,9 @@ import {
 	NOW_CONFIG_FILE, NowSdkProject, assertSupportedSdk, findNowSdkProjectRoot, readDeployLink, readNowSdkProject,
 } from './NowSdkProject';
 import {
-	InstanceChange, changedFieldNames, dismissInstanceChange, fieldsBuiltDifferently, hasBaseline, instanceChangesFromRecords, readBaselineRecord, readBuiltRecord, readSyncMarkers, recordForReading,
+	InstanceChange, changedFieldNames, dismissInstanceChange, fieldsBuiltDifferently, hasBaseline, instanceChangesFromRecords, readBaselineRecord, readBuiltRecord, readRecordFields, readSyncMarkers, recordForReading,
 } from './NowSdkPull';
+import { isChoiceSet } from './NowSdkChoices';
 import { loadTypeScript, planAccept } from './NowSdkAccept';
 import { SourceLocation, SourceRecord, indexSourceDefinitions, readKeysFile, recordAtOffset, recordFileName, recordsInSource } from './NowSdkCursor';
 import { AppRecordGroup, filesEditedSince, readAppContents, relativeTime } from './NowSdkInsight';
@@ -28,7 +29,7 @@ const RECENT_DOWNLOAD_MS = 60 * 1000;
 
 type InstanceCheck =
 	| { state: 'checking' }
-	| { state: 'done'; changes: InstanceChange[]; records: Map<string, string>; at: number }
+	| { state: 'done'; changes: InstanceChange[]; records: Map<string, string>; at: number; stale?: boolean }
 	| { state: 'error'; message: string; at: number; session?: boolean };
 
 class Node extends vscode.TreeItem {
@@ -74,6 +75,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 	private checks = new Map<string, InstanceCheck>();
 	private disposables: vscode.Disposable[] = [];
 	private refreshTimer?: NodeJS.Timeout;
+	private connectionRevision = 0;
 	private readonly lensEmitter = new vscode.EventEmitter<void>();
 	/** sys_id -> where the record is defined, built when "In the app" is expanded. */
 	private sourceIndex?: { root: string; map: Map<string, SourceLocation> };
@@ -139,6 +141,17 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 			}),
 			vscode.window.onDidChangeActiveTextEditor(() => this.updateEditorContext()),
 		);
+		const connectionChanged = this.deps().onConnectionChanged;
+		if (connectionChanged) this.disposables.push(connectionChanged(() => {
+			this.connectionRevision++;
+			for (const check of this.checks.values()) if (check.state === 'done') check.stale = true;
+			this.emitter.fire(undefined);
+			// Let requests from the old session finish before checking again.
+			// Their results remain cached until a check on this session succeeds.
+			void Promise.allSettled([...this.inflight.values()]).then(() => {
+				if (this.view?.visible) return this.checkInstance(true);
+			});
+		}));
 		// Show the view only in workspaces that hold a NOW SDK project.
 		const watcher = vscode.workspace.createFileSystemWatcher(`**/${NOW_CONFIG_FILE}`);
 		watcher.onDidCreate(() => this.updateVisibility());
@@ -210,6 +223,13 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		const m = /^([a-z0-9_]+?)_([0-9a-f]{32})\.xml$/.exec(ctx.change.file!);
 		const settings = this.deps().getInstanceSettings(ctx.instance);
 		const base = (settings?.url || ctx.url || '').replace(/\/$/, '');
+		const xml = ctx.records?.get(ctx.change.file!) || readBaselineRecord(ctx.root, ctx.instance, ctx.change.file!);
+		if (base && xml && isChoiceSet(xml)) {
+			const fields = readRecordFields(xml);
+			const query = encodeURIComponent(`name=${fields.get('name')}^element=${fields.get('element')}`);
+			vscode.env.openExternal(vscode.Uri.parse(`${base}/sys_choice_list.do?sysparm_query=${query}`));
+			return;
+		}
 		if (m && base) vscode.env.openExternal(vscode.Uri.parse(`${base}/${m[1]}.do?sys_id=${m[2]}`));
 	}
 
@@ -317,7 +337,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		if (verifyError) parts.push(`The build to check the edit failed (${verifyError}), so the change stays listed.`);
 		if (unverified.length) parts.push(`Check the edit: the build does not produce the instance version of ${unverified.join(', ')} yet, so the change stays listed.`);
 		if (!parts.length) parts.push('Nothing to accept: the instance version matches the last sync.');
-		const message = `${ctx.change.label}: ${parts.join(' ')}${plan.edits.length ? ' Deploy to keep it on the instance.' : ''}`;
+		const message = `${ctx.change.label}: ${parts.join(' ')}${verified ? ' Your next deploy will preserve the accepted change.' : ''}`;
 		const buttons = plan.edits.length ? ['Open', 'Show changes'] : ['Show what changed'];
 		const show = plan.unresolved.length || unsaved.length || verifyError || unverified.length ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
 		const choice = await show(message, ...buttons);
@@ -331,10 +351,10 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		const ctx = this.changeContext(node);
 		if (!ctx) return;
 		const choice = await vscode.window.showWarningMessage(
-			`Dismiss the change to ${ctx.change.label} on ${ctx.instance}? The next deploy overwrites it with your source version.`,
-			{ modal: true }, 'Dismiss',
+			`Keep your source version of ${ctx.change.label}? This acknowledges the change on ${ctx.instance}. The next deploy applies your source version to records included in the package.`,
+			{ modal: true }, 'Keep local version',
 		);
-		if (choice !== 'Dismiss') return;
+		if (choice !== 'Keep local version') return;
 		dismissInstanceChange(ctx.root, ctx.instance, ctx.change.file!, ctx.records?.get(ctx.change.file!));
 		const check = this.checks.get(this.checkKey(ctx.instance));
 		if (check?.state === 'done') {
@@ -388,7 +408,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		vscode.commands.executeCommand('setContext', 'sn-scriptsync.nowSdkFileHasChanges', has);
 	}
 
-	/** Above each definition that changed on the instance: what changed, Accept, Keep mine. */
+	/** Above each definition that changed on the instance: what changed, Accept, Keep local version. */
 	private codeLenses(doc: vscode.TextDocument): vscode.CodeLens[] {
 		const root = findNowSdkProjectRoot(doc.uri.fsPath);
 		const current = root ? this.currentChanges(root) : null;
@@ -406,7 +426,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 			lenses.push(
 				new vscode.CodeLens(range, { title: `$(warning) Changed on ${current.instance}${what ? `: ${what}` : ''}`, tooltip: 'Compare the last sync with the instance', command: 'sn-scriptsync.nowSdkEditor.compare', arguments: args }),
 				new vscode.CodeLens(range, { title: 'Accept', tooltip: 'Bring the instance change into your source (beta)', command: 'sn-scriptsync.nowSdkEditor.accept', arguments: args }),
-				new vscode.CodeLens(range, { title: 'Keep mine', tooltip: 'Keep your source version; the next deploy overwrites the instance change', command: 'sn-scriptsync.nowSdkEditor.dismiss', arguments: args }),
+				new vscode.CodeLens(range, { title: 'Keep local version', tooltip: 'Keep your source version; the next deploy overwrites the instance change', command: 'sn-scriptsync.nowSdkEditor.dismiss', arguments: args }),
 			);
 		}
 		return lenses;
@@ -457,7 +477,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		const key = this.checkKey(link.instance);
 		const cached = this.checks.get(key);
 		// Recent enough to trust, or check again: the change may have just been made.
-		if (!(cached?.state === 'done' && Date.now() - cached.at < 60 * 1000)) {
+		if (!(cached?.state === 'done' && !cached.stale && Date.now() - cached.at < 60 * 1000)) {
 			await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Checking ${link.instance} for changes` }, () => this.checkInstance(true));
 		}
 		const check = this.checks.get(key);
@@ -525,7 +545,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		const link = readDeployLink(root);
 		const deps = this.deps();
 		if (!link || !hasBaseline(root, link.instance) || !/^[0-9a-f]{32}$/.test(project.scopeId)) return;
-		if (deps.helperCapabilities()?.sdkPull !== 1 || deps.helperProFeatures() === false) return;
+		if (!deps.isRunning() || deps.helperCapabilities()?.sdkPull !== 1 || deps.helperProFeatures() === false) return;
 		const settings = deps.getInstanceSettings(link.instance);
 		const key = this.checkKey(link.instance);
 		if (!settings?.url || !settings?.g_ck) {
@@ -535,15 +555,16 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		}
 		const previous = this.checks.get(key);
 		if (previous?.state === 'checking') return;
-		if (!force && previous && Date.now() - previous.at < CHECK_STALE_MS) return;
+		if (!force && previous && !(previous.state === 'done' && previous.stale) && Date.now() - previous.at < CHECK_STALE_MS) return;
+		const revision = this.connectionRevision;
 
 		this.checks.set(key, { state: 'checking' });
 		this.emitter.fire(undefined);
 		try {
 			// Refresh (force) asks the instance; otherwise a download made moments
 			// ago by a deploy, pull or earlier check is reused.
-			const records = await downloadInstanceRecords(deps, project, { name: link.instance, url: settings.url, g_ck: settings.g_ck }, force ? 0 : RECENT_DOWNLOAD_MS);
-			this.checks.set(key, { state: 'done', changes: instanceChangesFromRecords(root, link.instance, records), records, at: Date.now() });
+			const records = await downloadInstanceRecords(deps, project, { name: link.instance, url: settings.url, g_ck: settings.g_ck }, force || (previous?.state === 'done' && previous.stale) ? 0 : RECENT_DOWNLOAD_MS);
+			this.checks.set(key, { state: 'done', changes: instanceChangesFromRecords(root, link.instance, records), records, at: Date.now(), stale: revision !== this.connectionRevision });
 		} catch (e: any) {
 			const message = e?.message || String(e);
 			this.checks.set(key, { state: 'error', message, at: Date.now(), session: isSessionProblem(message) });
@@ -632,6 +653,9 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		// Changes on the instance since the last sync
 		if (link) {
 			const check = this.checks.get(this.checkKey(link.instance));
+			const settings = deps.getInstanceSettings(link.instance);
+			const cached = (check?.state === 'done' && check.stale) || !deps.isRunning() || capabilities?.sdkPull !== 1 || deps.helperProFeatures() === false || !settings?.url || !settings?.g_ck;
+			const checked = check && check.state !== 'checking' ? `checked ${relativeTime(new Date(check.at).toISOString())}` : '';
 			if (!hasBaseline(project.root, link.instance)) {
 				nodes.push(new Node('Instance changes not tracked yet', { icon: 'eye-closed', description: 'after the next deploy or pull', tooltip: `After a deploy or pull, ScriptSync notices when someone changes ${project.name} on ${link.instance}.` }));
 			} else if (!check) {
@@ -650,17 +674,22 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 			} else if (check.state === 'error') {
 				nodes.push(new Node('Could not check the instance', { icon: 'warning', color: 'list.warningForeground', description: 'click to retry', tooltip: check.message, command: { command: 'sn-scriptsync.nowSdkView.check', title: 'Retry' } }));
 			} else if (check.changes.length === 0) {
-				nodes.push(new Node(`No changes on ${link.instance}`, { icon: 'pass', color: 'testing.iconPassed', description: `checked ${relativeTime(new Date(check.at).toISOString())}`, command: { command: 'sn-scriptsync.nowSdkView.check', title: 'Check again' } }));
+				nodes.push(new Node(cached ? `Last check: no changes on ${link.instance}` : `No changes on ${link.instance}`, {
+					icon: cached ? 'history' : 'pass', color: cached ? undefined : 'testing.iconPassed',
+					description: `${cached ? 'cached · ' : ''}${checked}`,
+					tooltip: cached ? 'This is a saved result. Connect the helper with a current instance session and refresh to check again.' : undefined,
+					command: { command: 'sn-scriptsync.nowSdkView.check', title: 'Check again' },
+				}));
 			} else {
 				const changes = check.changes;
 				const allGenerated = changes.every((c) => c.generated);
-				nodes.push(new Node(`${changes.length} record${changes.length === 1 ? '' : 's'} changed on ${link.instance}`, {
+				nodes.push(new Node(`${cached ? 'Last check: ' : ''}${changes.length} record${changes.length === 1 ? '' : 's'} changed on ${link.instance}`, {
 					icon: 'warning',
 					color: 'list.warningForeground',
-					description: allGenerated ? 'copy into your source by hand' : 'pull before you deploy',
+					description: cached ? `cached · ${checked}` : 'review before you deploy',
 					tooltip: allGenerated
-						? `Someone changed ${project.name} on ${link.instance}, in records that come from your source in a way a pull cannot write back to. The next deploy overwrites them: copy the changes into your source by hand.`
-						: `Someone changed ${project.name} on ${link.instance} since your last deploy or pull. Pull the changes in, or a deploy overwrites them.`,
+						? `The last check found changes to generated records in ${project.name}. Try Accept to apply supported changes to your source; changes it cannot place need a manual edit.${cached ? ' Connect the helper and refresh for a current check.' : ''}`
+						: `The last check found changes to ${project.name} on ${link.instance} since your last deploy or pull. Review them and choose Accept or Keep local version.${cached ? ' Connect the helper and refresh for a current check.' : ''}`,
 					contextValue: allGenerated ? 'nowSdkInstanceChangedGenerated' : 'nowSdkInstanceChanged',
 					expanded: true,
 					children: () => changes.map((c) => {
@@ -668,7 +697,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 							icon: c.status === 'new' ? 'diff-added' : c.status === 'removed' ? 'diff-removed' : 'diff-modified',
 							description: c.generated ? `${c.status} · ${c.reason}` : c.status,
 							tooltip: c.generated
-								? `${c.label}: ${c.reason}. A pull cannot bring this change in, and the next deploy overwrites it: copy the change into your source by hand. Click to see what changed.`
+								? `${c.label}: ${c.reason}. A pull cannot bring this change in. Try Accept to apply it to your source; if it cannot be placed, edit the source by hand. Click to see what changed.`
 								: 'Click to see what changed on the instance.',
 							change: c,
 							contextValue: 'nowSdkChange',

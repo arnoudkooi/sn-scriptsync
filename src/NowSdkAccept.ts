@@ -14,8 +14,10 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { createRequire } from 'module';
+import { loadTypeScript } from './NowSdkSource';
+export { loadTypeScript } from './NowSdkSource';
 import { InstanceChange, listProjectFiles, readKeyNames, readRecordFields } from './NowSdkPull';
+import { isChoiceSet } from './NowSdkChoices';
 
 export interface AcceptEdit {
 	/** Project-relative path. */
@@ -177,19 +179,6 @@ function literal(value: string): string {
 	return JSON.stringify(value);
 }
 
-/**
- * The TypeScript compiler from the project (the ServiceNow SDK depends on it),
- * else the one next to this extension; null when neither is there.
- */
-export function loadTypeScript(projectRoot: string): typeof import('typescript') | null {
-	for (const from of [path.join(projectRoot, 'package.json'), __filename]) {
-		try {
-			return createRequire(from)('typescript');
-		} catch {}
-	}
-	return null;
-}
-
 function propertyName(ts: typeof import('typescript'), prop: import('typescript').ObjectLiteralElementLike): string | undefined {
 	const name = prop.name;
 	if (!name) return undefined;
@@ -279,6 +268,13 @@ export function planAccept(
 	const now = readRecordFields(instanceXml);
 	const built = builtXml ? readRecordFields(builtXml) : null;
 	const changed = [...new Set([...base.keys(), ...now.keys()])].filter((k) => (base.get(k) ?? '').trim() !== (now.get(k) ?? '').trim());
+	// A choice list is a composite record, not a field to add to $override.
+	// The SDK converts its nested choices back into the column's choices map.
+	if (isChoiceSet(instanceXml)) {
+		if (change.generated) plan.unresolved = changed.map((field) => ({ field, why: change.reason || 'the SDK cannot convert this choice list into your source' }));
+		else plan.pullFields = changed;
+		return plan;
+	}
 
 	const files = new Map<string, string>();
 	for (const f of sourceFiles(projectRoot)) {
