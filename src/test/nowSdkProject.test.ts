@@ -6,7 +6,7 @@ import * as path from 'path';
 import {
 	findNowSdkProjectRoot, findNowSdkProjects, findNewestZip, listFlowRecordIds, parsePackOutput,
 	readDeployLink, readNowSdkProject, resolveNowSdkProjectRoot, writeDeployLink, NowSdkProjectError,
-	assertSupportedProject, assertSupportedSdk,
+	assertSupportedProject, assertSupportedSdk, isPathInside,
 } from '../NowSdkProject';
 import { summarizeDeployResult } from '../NowSdkBuild';
 
@@ -153,4 +153,21 @@ test('accepts ServiceNow SDK 4.1 up to 4.x only', () => {
 	assert.throws(() => assertSupportedSdk(withSdk('3.0.3')), /supports 4.1.0/);
 	assert.throws(() => assertSupportedSdk(withSdk('5.0.0')), /supports 4.1.0/);
 	assert.throws(() => assertSupportedSdk(withSdk()), /npm install/);
+});
+
+// A drive letter in a different case is the same folder on Windows: VS Code
+// reports the workspace as c:\ while an agent may pass C:\ (issue #162).
+test('isPathInside ignores drive-letter and path case on Windows only', () => {
+	const w = path.win32;
+	assert.ok(isPathInside('C:\\Users\\me\\ws\\app', 'c:\\Users\\me\\ws', w));
+	assert.ok(isPathInside('c:\\users\\ME\\WS', 'C:\\Users\\me\\ws', w));
+	assert.ok(!isPathInside('C:\\Users\\me\\wsx', 'c:\\Users\\me\\ws', w));
+	assert.ok(!isPathInside('D:\\Users\\me\\ws', 'c:\\Users\\me\\ws', w));
+	assert.ok(!isPathInside('c:\\Users\\me', 'c:\\Users\\me\\ws', w));
+	const p = path.posix;
+	assert.ok(isPathInside('/ws/app', '/ws', p));
+	assert.ok(isPathInside('/ws/..app', '/ws', p), 'a folder named ..app is still inside');
+	assert.ok(!isPathInside('/WS/app', '/ws', p), 'posix stays case-sensitive');
+	assert.ok(!isPathInside('/wsx', '/ws', p));
+	assert.ok(!isPathInside('/', '/ws', p));
 });

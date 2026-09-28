@@ -270,6 +270,16 @@ export function findNowSdkProjects(root: string, maxDepth = 3): string[] {
 }
 
 /**
+ * Whether `p` is `root` or below it. path.relative compares case-insensitively
+ * on Windows, so `C:\proj` is inside a workspace VS Code reports as `c:\`
+ * (issue #162 follow-up); on macOS and Linux the compare stays exact.
+ */
+export function isPathInside(p: string, root: string, pathImpl: typeof path = path): boolean {
+	const rel = pathImpl.relative(root, p);
+	return rel === '' || (rel !== '..' && !rel.startsWith('..' + pathImpl.sep) && !pathImpl.isAbsolute(rel));
+}
+
+/**
  * The project an agent asked for. `projectPath` (relative to `root`, or
  * absolute) must stay inside `root`, symlinks included. Without it, `root`
  * must contain exactly one project.
@@ -280,13 +290,12 @@ export function resolveNowSdkProjectRoot(root: string, projectPath?: string): st
 	try { realBase = fs.realpathSync(base); } catch {}
 	if (projectPath) {
 		const target = path.resolve(base, projectPath);
-		const inside = (p: string, r: string) => p === r || p.startsWith(r + path.sep);
-		if (!inside(target, base)) throw new NowSdkProjectError(`projectPath must be inside ${base}.`);
+		if (!isPathInside(target, base)) throw new NowSdkProjectError(`projectPath must be inside ${base}.`);
 		let realTarget = target;
 		try { realTarget = fs.realpathSync(target); } catch {
 			throw new NowSdkProjectError(`projectPath not found: ${projectPath}`);
 		}
-		if (!inside(realTarget, realBase)) throw new NowSdkProjectError(`projectPath must be inside ${base}.`);
+		if (!isPathInside(realTarget, realBase)) throw new NowSdkProjectError(`projectPath must be inside ${base}.`);
 		const dir = fs.statSync(realTarget).isDirectory() ? realTarget : path.dirname(realTarget);
 		if (!dirHasNowConfig(dir)) throw new NowSdkProjectError(`No ${NOW_CONFIG_FILE} in ${projectPath}.`);
 		return dir;

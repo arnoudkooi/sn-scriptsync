@@ -3,6 +3,11 @@
 ## `@snutils/snu` 0.3.8 (2026-09-28)
 
 - `snu sdk pull` on Windows no longer empties the project's `node_modules` when it cleans up, also with `--dry-run` (#161).
+- `snu sdk deploy` and `snu sdk pull` on Windows accept a project path whose drive letter differs in case from the workspace, like `C:\` versus `c:\`.
+
+## 4.9.11 (2026-09-28)
+
+- **NOW SDK agent commands on Windows accept a project path with a differently cased drive letter.** `C:\Users\...` no longer fails with "projectPath must be inside c:\Users\...".
 
 ## 4.9.10 (2026-09-28)
 
