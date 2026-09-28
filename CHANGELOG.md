@@ -1,5 +1,13 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.8 (2026-09-28)
+
+- `snu sdk pull` on Windows no longer empties the project's `node_modules` when it cleans up, also with `--dry-run` (#161).
+
+## 4.9.10 (2026-09-28)
+
+- **Pulling a NOW SDK app on Windows no longer empties the project's `node_modules`,** also with a dry run. Before, the SDK could disappear until you ran `npm rebuild` or `npm install` (#161).
+
 ## `@snutils/snu` 0.3.7 (2026-09-28)
 
 - `snu_sdk_deploy` under an **Approve** gate asks for confirmation once, in the helper's install modal, instead of showing a review card first (#162).

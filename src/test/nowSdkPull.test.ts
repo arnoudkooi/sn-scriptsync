@@ -87,6 +87,42 @@ test('stagePull converts in a copy and never touches the project', async () => {
 	assert.ok(!fs.existsSync(staged.tempDir));
 });
 
+// Issue #161: under VS Code's Electron runtime on Windows a recursive rmSync
+// follows the staging junction and empties the project's node_modules. Plain
+// Node does not reproduce that, so assert the precondition instead: every link
+// is gone before the recursive delete runs, and the target is untouched.
+test('cleanupPull removes the node_modules link before deleting, leaving the project intact', () => {
+	const project = tmp('snu-pullproj-');
+	fs.mkdirSync(path.join(project, 'node_modules', '.bin'), { recursive: true });
+	fs.writeFileSync(path.join(project, 'node_modules', '.bin', 'now-sdk'), 'x');
+	const tempDir = tmp('snu-pull-');
+	const stagingRoot = path.join(tempDir, 'proj');
+	fs.mkdirSync(path.join(stagingRoot, 'src'), { recursive: true });
+	fs.symlinkSync(path.join(project, 'node_modules'), path.join(stagingRoot, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+
+	const linksLeft = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+		e.isSymbolicLink() ? [path.join(dir, e.name)] : e.isDirectory() ? linksLeft(path.join(dir, e.name)) : []);
+	// The module object, not the read-only namespace import, so the patch is
+	// what NowSdkPull sees.
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const fsModule = require('fs');
+	const realRmSync = fsModule.rmSync;
+	let seen: string[] | null = null;
+	fsModule.rmSync = (target: fs.PathLike, opts?: fs.RmOptions) => {
+		if (String(target) === tempDir) seen = linksLeft(tempDir);
+		return realRmSync(target, opts);
+	};
+	try {
+		cleanupPull(tempDir);
+	} finally {
+		fsModule.rmSync = realRmSync;
+	}
+
+	assert.deepStrictEqual(seen, [], 'no link was left for the recursive delete to follow');
+	assert.ok(!fs.existsSync(tempDir));
+	assert.ok(fs.existsSync(path.join(project, 'node_modules', '.bin', 'now-sdk')), 'project node_modules intact');
+});
+
 test('stagePull refuses a project without the SDK installed', async () => {
 	const project = tmp('snu-pullproj-');
 	fs.writeFileSync(path.join(project, 'now.config.json'), JSON.stringify({ scope: 'x_1_app', scopeId: 'f'.repeat(32) }));
