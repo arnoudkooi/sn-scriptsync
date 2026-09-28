@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.7 (2026-09-28)
+
+- `snu_sdk_deploy` under an **Approve** gate asks for confirmation once, in the helper's install modal, instead of showing a review card first (#162).
+
+## 4.9.9 (2026-09-28)
+
+- **`sdk_deploy` under an Approve gate asks once.** The helper's install modal is the only confirmation; the extra review card is gone. The gate still has to be granted (#162).
+- **A long-running approved command no longer loses its result.** `get_review_result` keeps the result for 10 minutes after the command finishes, reports "approved, running" while it executes, and no longer tells the agent to re-issue a write it cannot find (#162).
+
 ## `@snutils/snu` 0.3.6 (2026-09-28)
 
 - Detect platform choice additions, edits and removals when checking a NOW SDK deploy, including separately packaged choice lists, translations and dependent choices. Respect the SDK's replace versus merge behavior when deciding which changes a deploy would overwrite.

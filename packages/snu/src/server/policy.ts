@@ -40,6 +40,12 @@ export interface CommandPolicy {
   gates: Array<keyof SecurityGates>;
   review: 'never' | 'optional' | 'required';
   reviewKind?: 'background_script' | 'record_delete' | 'rest_delete' | 'ui_action' | 'bulk_delete';
+  /**
+   * The helper tab asks the user to confirm this command in its own modal, so
+   * an 'approve' gate does not add a command review on top. The gate still has
+   * to be granted ('auto' or 'approve') for the command to run at all.
+   */
+  selfConfirmed?: boolean;
 }
 
 export function getCommandPolicy(req: AgentRequest): CommandPolicy {
@@ -98,7 +104,7 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
     // tab always asks the user to confirm in its own modal, so there is no
     // separate command review on top.
     case 'sdk_deploy':
-      return { risk: 'write', gates: ['createArtifacts'], review: 'never' };
+      return { risk: 'write', gates: ['createArtifacts'], review: 'never', selfConfirmed: true };
 
     // A pull only writes the local project, like pull_records.
     case 'sdk_pull':

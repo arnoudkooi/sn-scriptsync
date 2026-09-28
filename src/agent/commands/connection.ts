@@ -13,7 +13,7 @@ import {
 	AuthState,
 } from '../sessionHealth';
 import { AGENT_API_VERSION } from '../portFile';
-import { hasReview, waitForReview, getReviewCommand } from '../reviewRegistry';
+import { hasReview, waitForReview, getReviewCommand, isReviewRunning } from '../reviewRegistry';
 
 const eu = new ExtensionUtils();
 
@@ -440,11 +440,18 @@ const get_review_result: CommandHandler = {
 			throw new AgentError('E_INVALID_PARAMS', 'Missing required param: reviewId (from the E_REVIEW_PENDING response)');
 		}
 		if (!hasReview(reviewId)) {
-			throw new AgentError('E_NOT_FOUND', 'Unknown or expired reviewId. Settled results are kept ~10 minutes; re-issue the original command to start a new review.');
+			throw new AgentError('E_NOT_FOUND', 'Unknown or expired reviewId (results are kept ~10 minutes after the review settles). If the review may have been approved, the command may already have run: check the instance before re-issuing it, and never re-issue a write such as sdk_deploy without confirming it did not happen.');
 		}
 		const waitSeconds = Math.min(Math.max(Number(params?.waitSeconds) || 30, 0), 55);
 		const resp = await waitForReview(reviewId, waitSeconds * 1000);
 		if (!resp) {
+			if (isReviewRunning(reviewId)) {
+				throw new AgentError(
+					'E_REVIEW_PENDING',
+					'Approved: the command is running now. Call get_review_result again to collect the outcome; do not re-issue the command.',
+					{ reviewId, running: true },
+				);
+			}
 			throw new AgentError(
 				'E_REVIEW_PENDING',
 				'Still awaiting developer approval in the SN Utils helper tab Review Queue. Remind the user to approve, then call get_review_result again.',

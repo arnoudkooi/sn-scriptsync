@@ -251,3 +251,28 @@ test('a delete UI verb still escalates to deleteRecords, not updateRecords', asy
 	assert.strictEqual(resp.code, 'E_DISABLED');
 	assert.match(resp.error, /Delete Records/);
 });
+
+// ---------------------------------------------------------------------------
+// Issue #162: sdk_deploy is confirmed in the helper's own install modal, so an
+// 'approve' gate must not add a command review card in front of it. The gate
+// still has to be granted.
+// ---------------------------------------------------------------------------
+
+test('sdk_deploy under an approve gate skips the command review', async () => {
+	useRuntime({ gates: { ...ALL_OFF, createArtifacts: 'approve' } });
+
+	const resp = await dispatchAgentCommand(request('sdk_deploy'));
+
+	assert.notStrictEqual(resp.code, 'E_REVIEW_PENDING');
+	assert.notStrictEqual(resp.code, 'E_DISABLED');
+	assert.ok(!harness.sent.some((m) => m.action === 'reviewRequest'), 'no review card was sent');
+});
+
+test('sdk_deploy is still refused when the instance does not allow creates', async () => {
+	useRuntime({ gates: { ...ALL_OFF } });
+
+	const resp = await dispatchAgentCommand(request('sdk_deploy'));
+
+	assert.strictEqual(resp.code, 'E_DISABLED');
+	assert.strictEqual(harness.sent.length, 0, 'nothing reached the instance');
+});
