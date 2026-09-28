@@ -775,5 +775,30 @@ export function markPulled(projectRoot: string, instanceName: string): void {
 }
 
 export function cleanupPull(tempDir: string): void {
-	try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+	// The staging copy links the project's real node_modules. Under VS Code's
+	// Electron runtime a recursive rmSync follows a Windows junction and empties
+	// the target (issue #161), so every link is removed on its own first and the
+	// recursive delete only ever sees real folders.
+	try {
+		unlinkLinks(tempDir);
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	} catch (err: any) {
+		console.warn('[sn-scriptsync] could not remove NOW SDK temp folder', tempDir, err?.message || err);
+	}
+}
+
+/** Remove symlinks and junctions under dir without following them. */
+function unlinkLinks(dir: string): void {
+	let entries: fs.Dirent[];
+	try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+	for (const entry of entries) {
+		const full = path.join(dir, entry.name);
+		if (entry.isSymbolicLink()) {
+			// unlink removes a junction or symlink itself; rmdir is the Windows
+			// fallback for a directory junction. Neither touches the target.
+			try { fs.unlinkSync(full); } catch { fs.rmdirSync(full); }
+		} else if (entry.isDirectory()) {
+			unlinkLinks(full);
+		}
+	}
 }
