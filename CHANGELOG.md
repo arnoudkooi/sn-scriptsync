@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.9.13 (2026-09-30)
+
+- **Background scripts stop promptly when automatic token refresh is declined.** With SN Utils 10.2.5.5, an agent's token refresh follows the helper's per-instance setting and 20-hour window after a manual `/token`, and only ever targets the script's own instance.
+
 ## `@snutils/snu` 0.3.9 (2026-09-29)
 
 - **An approved command gets its own 5 minutes to run,** counted from the approval, instead of what was left of the review window.
