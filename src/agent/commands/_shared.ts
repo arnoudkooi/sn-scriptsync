@@ -100,8 +100,8 @@ function codeForRest(status: number | undefined, msg: string): AgentErrorCode {
  * `sys.scripts.do` answers a bare "not authorized" when the posted `g_ck` no
  * longer matches the session (reads keep working, so the stored token can go
  * stale unnoticed). That is indistinguishable from a real permissions problem,
- * so on that exact output we refresh the token via the `/token` slash command
- * and retry once before giving up with E_ACL.
+ * so on that exact output we ask the helper for an automatic token refresh
+ * under its per-instance policy, then retry once before giving up.
  */
 export async function runBackgroundScript(ctx: AgentContext, instance: any, script: string): Promise<string> {
 	let output = '';
@@ -175,11 +175,15 @@ async function postBackgroundScript(ctx: AgentContext, instance: any, script: st
 }
 
 /**
- * Ask the helper tab to run `/token` for this instance, then wait for the
+ * Ask the helper to refresh under its per-instance automatic refresh policy,
+ * using the existing `/token` wire request for compatibility. Then wait for the
  * rewritten `_settings.json` to land a different `g_ck`. Returns the fresh
  * instance settings, or null when no new token shows up in time.
  */
 async function refreshSessionToken(ctx: AgentContext, instance: any): Promise<any | null> {
+	// The helper refuses an automatic refresh without an exact instance, so
+	// never fall back to a wildcard that could match another instance's tab.
+	if (typeof instance?.url !== 'string' || !instance.url || instance.url.includes('*')) return null;
 	const oldCk = instance?.g_ck;
 	const correlationId = nextCorrelationId(ctx);
 	const pending = ctx.waitForBrowserResponse<any>(correlationId);
@@ -187,11 +191,12 @@ async function refreshSessionToken(ctx: AgentContext, instance: any): Promise<an
 		action: 'runSlashCommand',
 		agentRequestId: correlationId,
 		command: '/token',
-		url: (instance?.url || 'https://*.service-now.com') + '/*',
+		url: instance.url + '/*',
 		autoRun: true,
 	});
 	try {
-		await pending;
+		const response = await pending;
+		if (response?.success !== true) return null;
 	} catch {
 		return null;
 	}
