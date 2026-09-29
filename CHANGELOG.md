@@ -1,9 +1,18 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.3.9 (2026-09-29)
+
+- **An approved command gets its own 5 minutes to run,** counted from the approval, instead of what was left of the review window.
+
 ## `@snutils/snu` 0.3.8 (2026-09-28)
 
 - `snu sdk pull` on Windows no longer empties the project's `node_modules` when it cleans up, also with `--dry-run` (#161).
 - `snu sdk deploy` and `snu sdk pull` on Windows accept a project path whose drive letter differs in case from the workspace, like `C:\` versus `c:\`.
+
+## 4.9.12 (2026-09-29)
+
+- **`get_review_result` reports "approved, running" for every approved command,** such as a background script or record update, instead of still saying it awaits approval while the command runs (#163).
+- **An approved command gets its own 5 minutes to run,** counted from the approval. A script approved near the end of the review window no longer times out while it runs.
 
 ## 4.9.11 (2026-09-28)
 

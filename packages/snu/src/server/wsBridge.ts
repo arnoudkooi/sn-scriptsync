@@ -3,7 +3,7 @@ import { VERSION } from '../version.js';
 import * as crypto from 'crypto';
 import { HelperConnection } from './helperConnection.js';
 import { WebSocketServer, WebSocket } from 'ws';
-import { defaultPendingRegistry, PendingRegistry } from './pendingRegistry.js';
+import { defaultPendingRegistry, PendingRegistry, APPROVED_EXECUTION_TIMEOUT_MS } from './pendingRegistry.js';
 import { resolveGateMode } from './policy.js';
 import { HelperCapabilities, InstanceGateSnapshot, SecurityGates, ReviewEnvelope } from '../types.js';
 
@@ -322,7 +322,9 @@ export class StandaloneWsBridge {
         return;
       }
 
-      // Approved! Authorize execution on helper
+      // Approved! Authorize execution on helper. The review window was spent
+      // on the decision; the approved command gets a fresh window to run in.
+      this.pending.extend(active.correlationId, APPROVED_EXECUTION_TIMEOUT_MS);
       try {
         this.sendToBrowser({
           action: 'executeApproved',
