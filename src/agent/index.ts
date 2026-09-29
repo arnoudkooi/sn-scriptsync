@@ -7,6 +7,7 @@ export { AGENT_API_VERSION, AGENT_API_FIXED_PORT, getPortFilePath, setGlobalPort
 export { startAgentHttpServer, stopAgentHttpServer, HttpServerState, AGENT_CONNECT_SNIPPET } from './transport/http';
 export { findPortListener, classifyListener, terminateListener, isPortFree } from './portReclaim';
 export * as pendingRegistry from './pendingRegistry';
+export { markReviewRunning } from './reviewRegistry';
 export { AgentError, AgentErrorCode, httpStatusForCode, inferCodeFromMessage } from './errors';
 export { listCommands, commandNames } from './commands';
 export { BridgeLifecycle } from './lifecycle';

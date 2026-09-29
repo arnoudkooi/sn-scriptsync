@@ -11,6 +11,9 @@ export interface PendingEntry {
 	timer: NodeJS.Timeout;
 }
 
+/** Time an approved command gets to run, counted from the approval. */
+export const APPROVED_EXECUTION_TIMEOUT_MS = 300_000;
+
 const pending = new Map<string, PendingEntry>();
 
 export interface RegisterOptions {
@@ -78,6 +81,23 @@ export function cancel(id: string, reason = 'CANCELLED'): boolean {
 		}
 	}
 	return cancelled;
+}
+
+/**
+ * Restart a pending request's timeout with a fresh window. Used when a review
+ * is approved: the review window covered the human decision, and the approved
+ * command gets its own time to run (issue #163 follow-up).
+ */
+export function extend(id: string, timeoutMs: number): boolean {
+	const entry = pending.get(id);
+	if (!entry) return false;
+	clearTimeout(entry.timer);
+	entry.timer = setTimeout(() => {
+		if (pending.delete(id)) {
+			entry.reject(new AgentError('E_TIMEOUT', `Timed out waiting for the approved command to finish (${timeoutMs}ms)`));
+		}
+	}, timeoutMs);
+	return true;
 }
 
 export function has(id: string): boolean {

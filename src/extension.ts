@@ -39,6 +39,7 @@ import {
 	stopAgentHttpServer,
 	dispatchAgentCommand,
 	pendingRegistry,
+	markReviewRunning,
 	inferCodeFromMessage,
 	AGENT_API_VERSION,
 	HttpServerState,
@@ -2868,6 +2869,13 @@ async function startBridgeTransports(): Promise<void> {
 						{ userFeedback: messageJson.userFeedback, reviewId: messageJson.reviewId }
 					);
 				} else {
+					// From here the helper runs the command (or hands it back with
+					// approvedNotExecuted), so get_review_result stops saying it
+					// awaits approval (issue #163).
+					markReviewRunning(messageJson.reviewId);
+					// The review window was spent on the decision; the approved
+					// command gets a fresh window to run in.
+					pendingRegistry.extend(messageJson.agentRequestId, pendingRegistry.APPROVED_EXECUTION_TIMEOUT_MS);
 					broadcastToHelperTab({
 						action: 'executeApproved',
 						reviewId: messageJson.reviewId,

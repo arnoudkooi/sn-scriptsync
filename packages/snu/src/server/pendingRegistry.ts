@@ -8,6 +8,9 @@ export interface PendingEntry<T = any> {
   reject: (err: any) => void;
 }
 
+/** Time an approved command gets to run, counted from the approval. */
+export const APPROVED_EXECUTION_TIMEOUT_MS = 300_000;
+
 export class PendingRegistry {
   private entries = new Map<string, PendingEntry>();
 
@@ -36,6 +39,25 @@ export class PendingRegistry {
         reject,
       });
     });
+  }
+
+  /**
+   * Restart a pending request's timeout with a fresh window. Used when a
+   * review is approved, so the approved command gets its own time to run
+   * instead of what was left of the review window.
+   */
+  extend(id: string, timeoutMs: number): boolean {
+    const entry = this.entries.get(id);
+    if (!entry) return false;
+    clearTimeout(entry.timer);
+    entry.timeoutMs = timeoutMs;
+    entry.timer = setTimeout(() => {
+      if (!this.entries.delete(id)) return;
+      const err = new Error(`Command '${entry.command}' timed out after ${timeoutMs / 1000}s waiting for the approved command to finish`);
+      (err as any).code = 'E_TIMEOUT';
+      entry.reject(err);
+    }, timeoutMs);
+    return true;
   }
 
   resolve(id: string, value: any): boolean {
