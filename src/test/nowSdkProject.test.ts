@@ -8,7 +8,7 @@ import {
 	readDeployLink, readNowSdkProject, resolveNowSdkProjectRoot, writeDeployLink, NowSdkProjectError,
 	assertSupportedProject, assertSupportedSdk, isPathInside,
 } from '../NowSdkProject';
-import { summarizeDeployResult } from '../NowSdkBuild';
+import { quoteForWindowsShell, summarizeDeployResult } from '../NowSdkBuild';
 
 const SCOPE_ID = 'f64ef56e39704a9e80aee2ece02d22e1';
 
@@ -246,4 +246,13 @@ test('isPathInside ignores drive-letter and path case on Windows only', () => {
 	assert.ok(!isPathInside('/WS/app', '/ws', p), 'posix stays case-sensitive');
 	assert.ok(!isPathInside('/wsx', '/ws', p));
 	assert.ok(!isPathInside('/', '/ws', p));
+});
+
+test('Windows shell arguments are quoted so paths with spaces stay one argument', () => {
+	assert.strictEqual(quoteForWindowsShell('C:\\Users\\Jane Doe\\AppData\\Local\\Temp\\snu-pull-ab\\package'), '"C:\\Users\\Jane Doe\\AppData\\Local\\Temp\\snu-pull-ab\\package"');
+	assert.strictEqual(quoteForWindowsShell('build'), '"build"');
+	assert.strictEqual(quoteForWindowsShell('C:\\a&b\\x'), '"C:\\a&b\\x"');
+	for (const unsafe of ['C:\\a"b', 'C:\\%TEMP%\\x', 'a\nb']) {
+		assert.throws(() => quoteForWindowsShell(unsafe), /cannot pass safely/);
+	}
 });
