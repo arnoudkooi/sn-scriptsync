@@ -1,6 +1,11 @@
 # CHANGELOG.md
 
-## Unreleased
+## `@snutils/snu` 0.3.10 (2026-10-01)
+
+- **`snu sdk pull` and `snu sdk deploy` work on Windows when your user name contains a space.** The paths passed to the ServiceNow SDK are now quoted.
+- Updated `ip-address` and `fast-uri` to versions without known vulnerabilities.
+
+## 4.9.14 (2026-10-01)
 
 - **Saving a synced file works again when a NOW SDK project sits above it.** A `now.config.json` in your workspace, instance or scope folder no longer makes ScriptSync skip your Script Includes, Business Rules and other synced files without a word (SNU0000010187).
 - **Saving a NOW SDK source file tells you once that it is not synced field by field,** with a Deploy button, instead of doing nothing.
