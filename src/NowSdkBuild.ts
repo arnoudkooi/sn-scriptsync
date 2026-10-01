@@ -59,15 +59,38 @@ function localCli(root: string): string {
 	return bin;
 }
 
+/**
+ * Quote a command or argument for the Windows shell (cmd.exe), which has to
+ * run the .cmd shim. Inside double quotes, spaces, `&`, `|`, `<`, `>` and `^`
+ * are literal, so a path like C:\Users\Jane Doe\AppData\Local\Temp stays one
+ * argument. `"` cannot be escaped there and `%` still expands variables, so
+ * both are refused instead.
+ */
+export function quoteForWindowsShell(value: string): string {
+	if (/["%\r\n]/.test(value)) {
+		throw new NowSdkProjectError(`Cannot run the ServiceNow SDK with "${value}": the path contains a character the Windows shell cannot pass safely (" or %). Move the project or temp folder to a path without it.`);
+	}
+	return `"${value}"`;
+}
+
 /** Run the project's own `now-sdk` with fixed arguments; resolves with its output. */
 export function runNowSdk(root: string, args: string[], onOutput?: (text: string) => void): Promise<string> {
 	const bin = localCli(root);
 	return new Promise((resolve, reject) => {
 		onOutput?.(`> now-sdk ${args.join(' ')}\n`);
 		const isWin = process.platform === 'win32';
-		// .cmd shims can only be spawned through a shell on Windows; the
-		// arguments are fixed literals, never user input.
-		const child = cp.spawn(isWin ? `"${bin}"` : bin, args, { cwd: root, shell: isWin, env: process.env });
+		// .cmd shims can only be spawned through a shell on Windows. The shell
+		// joins the arguments with spaces, so each one is quoted: a temp folder
+		// under a user name with a space must stay a single argument.
+		let child: cp.ChildProcess;
+		try {
+			child = isWin
+				? cp.spawn(quoteForWindowsShell(bin), args.map(quoteForWindowsShell), { cwd: root, shell: true, env: process.env })
+				: cp.spawn(bin, args, { cwd: root, env: process.env });
+		} catch (e) {
+			reject(e);
+			return;
+		}
 		let out = '';
 		const timer = setTimeout(() => {
 			child.kill();
@@ -78,8 +101,8 @@ export function runNowSdk(root: string, args: string[], onOutput?: (text: string
 			out += text;
 			onOutput?.(text);
 		};
-		child.stdout.on('data', collect);
-		child.stderr.on('data', collect);
+		child.stdout?.on('data', collect);
+		child.stderr?.on('data', collect);
 		child.on('error', (e) => { clearTimeout(timer); reject(e); });
 		child.on('close', (code) => {
 			clearTimeout(timer);
