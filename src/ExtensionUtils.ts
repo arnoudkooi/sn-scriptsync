@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import { open } from 'fs';
 import { Constants } from "./constants";
 import { getWorkspaceRoot, assertPathUnderRoot } from "./workspaceRoot";
-import { findNowSdkProjectRoot } from "./NowSdkProject";
+import { findNowSdkSourceProjectRoot } from "./NowSdkProject";
 
 let idx = 0;
 
@@ -518,10 +518,11 @@ export class ExtensionUtils {
             return true;
         }
 
-        // Files of a NOW SDK (Fluent) project are compiled into an app package
-        // and deployed as a whole, never synced field by field.
+        // Sources of a NOW SDK (Fluent) project are compiled into an app package
+        // and deployed as a whole, never synced field by field. Field files
+        // synced below a now.config.json are not sources and still sync.
         const syncRoot = getWorkspaceRoot();
-        if (syncRoot && findNowSdkProjectRoot(fileName, syncRoot)) {
+        if (syncRoot && findNowSdkSourceProjectRoot(fileName, syncRoot)) {
             return true;
         }
 

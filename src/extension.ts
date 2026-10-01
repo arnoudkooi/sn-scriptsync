@@ -12,6 +12,7 @@ import { NowSdkTreeViewProvider } from "./NowSdkTreeView";
 import { QueueTreeViewProvider } from "./QueueTreeViewProvider";
 import { ExtensionUtils } from "./ExtensionUtils";
 import { changeNowSdkInstance, deployNowSdkApp, nowSdkMenu, pullNowSdkApp, registerNowSdkStatusBar, NowSdkDeployDeps } from "./NowSdkDeploy";
+import { NOW_CONFIG_FILE, findNowSdkSourceProjectRoot } from "./NowSdkProject";
 import { Constants } from "./constants";
 import {
 	getWorkspaceRoot,
@@ -3839,6 +3840,20 @@ function broadcastToHelperTab(messageObj: any) {
 	helperConnection.send(message);
 }
 
+// Saving a NOW SDK source never syncs it field by field. Say so once per
+// project per session, so a skipped save is never silent.
+const nowSdkSkipNoticeShown = new Set<string>();
+function notifyNowSdkSourceSkipped(sdkRoot: string) {
+	if (nowSdkSkipNoticeShown.has(sdkRoot)) return;
+	nowSdkSkipNoticeShown.add(sdkRoot);
+	vscode.window.showInformationMessage(
+		`This file belongs to the NOW SDK project in ${path.basename(sdkRoot)}, so saving it does not sync it to the instance. Deploy the project to update the instance.`,
+		'Deploy'
+	).then(choice => {
+		if (choice === 'Deploy') vscode.commands.executeCommand('extension.nowSdkDeploy', vscode.Uri.file(path.join(sdkRoot, NOW_CONFIG_FILE)));
+	});
+}
+
 function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCode:boolean): boolean {
 	const runId = buildRunId();
 
@@ -3861,6 +3876,13 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 	const ignoredFiles = ['.DS_Store', 'Thumbs.db', '.env'];
 	if (fileName.startsWith('.') || fileName.startsWith('_') || ignoredFiles.includes(fileName)) {
 		auditLog('sync_candidate_ignored', { reason: 'hidden_or_system_file', filePath }, runId);
+		return true;
+	}
+
+	const sdkRoot = findNowSdkSourceProjectRoot(filePath, getWorkspaceRoot() || undefined);
+	if (sdkRoot) {
+		auditLog('sync_candidate_ignored', { reason: 'now_sdk_source', filePath, sdkRoot }, runId);
+		if (fromVsCode) notifyNowSdkSourceSkipped(sdkRoot);
 		return true;
 	}
 

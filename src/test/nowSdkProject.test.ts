@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
-	findNowSdkProjectRoot, findNowSdkProjects, findNewestZip, listFlowRecordIds, parsePackOutput,
+	findNowSdkProjectRoot, findNowSdkSourceProjectRoot, findNowSdkProjects, findNewestZip, listFlowRecordIds, parsePackOutput,
 	readDeployLink, readNowSdkProject, resolveNowSdkProjectRoot, writeDeployLink, NowSdkProjectError,
 	assertSupportedProject, assertSupportedSdk, isPathInside,
 } from '../NowSdkProject';
@@ -37,6 +37,82 @@ test('a file outside stopAt never matches', () => {
 	const root = makeProject();
 	const other = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-other-'));
 	assert.strictEqual(findNowSdkProjectRoot(path.join(root, 'src', 'fluent', 'index.now.ts'), other), null);
+});
+
+test('field files synced below a now.config.json are not NOW SDK sources (SNU0000010187)', () => {
+	// now.config.json at the workspace root, with ScriptSync field files below it.
+	const root = makeProject();
+	const table = path.join(root, 'myinstance', 'x_app', 'sys_script_include');
+	fs.mkdirSync(table, { recursive: true });
+	fs.writeFileSync(path.join(table, '_map.json'), '{}');
+	const file = path.join(table, 'MyInclude.script.js');
+	assert.strictEqual(findNowSdkSourceProjectRoot(file, root), null);
+	// Widget files sit one folder below their table folder's _map.json.
+	const widget = path.join(root, 'myinstance', 'x_app', 'sp_widget', 'my-widget');
+	fs.mkdirSync(widget, { recursive: true });
+	fs.writeFileSync(path.join(root, 'myinstance', 'x_app', 'sp_widget', '_map.json'), '{}');
+	assert.strictEqual(findNowSdkSourceProjectRoot(path.join(widget, 'script.js'), root), null);
+	// The project's own sources still belong to it.
+	assert.strictEqual(findNowSdkSourceProjectRoot(path.join(root, 'src', 'fluent', 'index.now.ts'), root), root);
+});
+
+test('a NOW SDK project nested in a scope folder still owns its sources', () => {
+	const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-ws-'));
+	fs.mkdirSync(path.join(workspace, 'myinstance', 'x_app', 'sys_script'), { recursive: true });
+	fs.writeFileSync(path.join(workspace, 'myinstance', 'x_app', 'sys_script', '_map.json'), '{}');
+	const project = path.join(workspace, 'myinstance', 'fluent-app');
+	fs.mkdirSync(path.join(project, 'src', 'server'), { recursive: true });
+	fs.writeFileSync(path.join(project, 'now.config.json'), JSON.stringify({ scope: 'x_1849902_flspk', scopeId: SCOPE_ID }));
+	assert.strictEqual(findNowSdkSourceProjectRoot(path.join(project, 'src', 'server', 'util.js'), workspace), project);
+	assert.strictEqual(findNowSdkSourceProjectRoot(path.join(workspace, 'myinstance', 'x_app', 'sys_script', 'BR.script.js'), workspace), null);
+});
+
+function makeSyncWorkspace(): string {
+	const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-ws-'));
+	fs.mkdirSync(path.join(workspace, 'myinstance'), { recursive: true });
+	fs.writeFileSync(path.join(workspace, 'myinstance', '_settings.json'), JSON.stringify({ name: 'myinstance', url: 'https://myinstance.service-now.com' }));
+	return workspace;
+}
+
+function addSdkConfig(dir: string, config: any = {}) {
+	fs.mkdirSync(path.join(dir, 'src', 'fluent'), { recursive: true });
+	fs.writeFileSync(path.join(dir, 'now.config.json'), JSON.stringify({ scope: 'x_1849902_flspk', scopeId: SCOPE_ID, ...config }));
+}
+
+test('a new artifact in a table without _map.json is not a NOW SDK source', () => {
+	for (const level of ['', 'myinstance', path.join('myinstance', 'global')]) {
+		const workspace = makeSyncWorkspace();
+		const projectRoot = path.join(workspace, level);
+		addSdkConfig(projectRoot);
+		const table = path.join(workspace, 'myinstance', 'global', 'sys_script_include');
+		fs.mkdirSync(table, { recursive: true });
+		assert.strictEqual(findNowSdkSourceProjectRoot(path.join(table, 'NewInclude.script.js'), workspace), null, `project at "${level || 'workspace'}"`);
+		assert.strictEqual(findNowSdkSourceProjectRoot(path.join(projectRoot, 'src', 'fluent', 'index.now.ts'), workspace), projectRoot, `sources of project at "${level || 'workspace'}"`);
+	}
+});
+
+test('project folders are never read as a scope or table, configured output folders included', () => {
+	const workspace = makeSyncWorkspace();
+	const projectRoot = path.join(workspace, 'myinstance', 'x_app');
+	addSdkConfig(projectRoot, { appOutputDir: 'build/app' });
+	for (const dir of ['src', 'dist', 'build', 'metadata']) {
+		const file = path.join(projectRoot, dir, 'server', 'util.js');
+		assert.strictEqual(findNowSdkSourceProjectRoot(file, workspace), projectRoot, dir);
+	}
+});
+
+test('without instance settings the layout alone does not make a field file', () => {
+	const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-ws-'));
+	addSdkConfig(workspace);
+	const file = path.join(workspace, 'notaninstance', 'scope', 'table', 'x.script.js');
+	assert.strictEqual(findNowSdkSourceProjectRoot(file, workspace), workspace);
+});
+
+test('a project deeper than the scope folder owns files below it without a map', () => {
+	const workspace = makeSyncWorkspace();
+	const projectRoot = path.join(workspace, 'myinstance', 'global', 'apps', 'todo');
+	addSdkConfig(projectRoot);
+	assert.strictEqual(findNowSdkSourceProjectRoot(path.join(projectRoot, 'lib', 'helper.js'), workspace), projectRoot);
 });
 
 test('reads scope, scopeId, version and default output folders', () => {
