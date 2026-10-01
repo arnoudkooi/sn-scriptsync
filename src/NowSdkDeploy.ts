@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
-	NOW_CONFIG_FILE, NowSdkProject, NowSdkProjectError, assertSupportedProject, assertSupportedSdk, findNowSdkProjectRoot, readDeployLink,
+	NOW_CONFIG_FILE, NowSdkProject, NowSdkProjectError, assertSupportedProject, assertSupportedSdk, findNowSdkProjectRoot, findNowSdkSourceProjectRoot, readDeployLink,
 	readNowSdkProject, writeDeployLink,
 } from './NowSdkProject';
 import { DEPLOY_TIMEOUT_MS, DeployOutcome, buildDeployMessage, buildNowSdkPackage, summarizeDeployResult } from './NowSdkBuild';
@@ -19,6 +19,7 @@ import {
 	deployConflicts, instanceChangesFromPackage, markDeployed, markPulled, readPackageRecords, saveBaselineFromPackage, stagePull, undoPull,
 } from './NowSdkPull';
 import { describeChange } from './NowSdkFlows';
+import { getWorkspaceRoot } from './workspaceRoot';
 
 const TRIAL_URL = 'https://snutils.com/trial?utm_source=scriptsync&utm_medium=referral&utm_campaign=sdk_deploy';
 
@@ -286,8 +287,12 @@ function forgetDownload(root: string, instance: string): void {
 	recentDownloads.delete(downloadKey(root, instance));
 }
 
-/** Download the app package from the instance through the helper tab. */
-async function downloadInstancePackage(deps: NowSdkDeployDeps, project: NowSdkProject, target: { name: string; url: string; g_ck: string }): Promise<Buffer> {
+/**
+ * Download the app package from the instance through the helper tab.
+ * `background` marks a check nobody asked for (view shown, reconnect): the
+ * helper then reports a failure only to us, not as an error in its log.
+ */
+async function downloadInstancePackage(deps: NowSdkDeployDeps, project: NowSdkProject, target: { name: string; url: string; g_ck: string }, background = false): Promise<Buffer> {
 	const requestId = `sdkpull_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 	const pending = deps.waitForHelper(requestId, PULL_TIMEOUT_MS, target.name);
 	deps.sendToHelper({
@@ -295,6 +300,7 @@ async function downloadInstancePackage(deps: NowSdkDeployDeps, project: NowSdkPr
 		agentRequestId: requestId,
 		appName: 'VS Code',
 		initiatedBy: 'editor',
+		...(background ? { background: true } : {}),
 		instance: target,
 		app: { name: project.name, scope: project.scope, scopeId: project.scopeId },
 	});
@@ -312,10 +318,10 @@ async function downloadInstancePackage(deps: NowSdkDeployDeps, project: NowSdkPr
  * The app's records on the instance (for the view's change check): from a
  * download made in the last `maxAgeMs`, else downloaded now.
  */
-export async function downloadInstanceRecords(deps: NowSdkDeployDeps, project: NowSdkProject, target: { name: string; url: string; g_ck: string }, maxAgeMs = 0): Promise<Map<string, string>> {
+export async function downloadInstanceRecords(deps: NowSdkDeployDeps, project: NowSdkProject, target: { name: string; url: string; g_ck: string }, maxAgeMs = 0, background = false): Promise<Map<string, string>> {
 	const recent = recentDownloads.get(downloadKey(project.root, target.name));
 	if (recent && Date.now() - recent.at <= maxAgeMs) return readPackageRecords(recent.zip);
-	return readPackageRecords(await downloadInstancePackage(deps, project, target));
+	return readPackageRecords(await downloadInstancePackage(deps, project, target, background));
 }
 
 async function saveBaselineFrom(project: NowSdkProject, instanceName: string, zip: Buffer): Promise<void> {
@@ -599,13 +605,17 @@ async function whileBusy<T>(root: string, text: string, work: () => Thenable<T>)
 	}
 }
 
-/** The NOW SDK project of the active editor, ignoring the baseline copies in .snu. */
+/**
+ * The NOW SDK project of the active editor, ignoring the baseline copies in
+ * .snu. A ScriptSync field file below a now.config.json is not a project
+ * source, so it keeps the normal ScriptSync commands.
+ */
 function activeProjectRoot(): string | null {
 	const file = vscode.window.activeTextEditor?.document.uri;
 	if (!file || file.scheme !== 'file') return null;
 	const parts = file.fsPath.split(path.sep);
 	if (parts.includes('.snu') || parts.includes('node_modules')) return null;
-	return findNowSdkProjectRoot(file.fsPath);
+	return findNowSdkSourceProjectRoot(file.fsPath, getWorkspaceRoot() || undefined);
 }
 
 function updateStatusBar(): void {

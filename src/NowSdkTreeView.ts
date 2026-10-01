@@ -106,7 +106,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 			}),
 			run('sn-scriptsync.nowSdkView.refresh', () => {
 				this.checks.clear();
-				this.refresh(true);
+				this.refresh(true, true);
 			}),
 			run('sn-scriptsync.nowSdkView.deploy', () => deployNowSdkApp(this.deps(), this.configUri())),
 			run('sn-scriptsync.nowSdkView.pull', () => pullNowSdkApp(this.deps(), this.configUri())),
@@ -149,7 +149,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 			// Let requests from the old session finish before checking again.
 			// Their results remain cached until a check on this session succeeds.
 			void Promise.allSettled([...this.inflight.values()]).then(() => {
-				if (this.view?.visible) return this.checkInstance(true);
+				if (this.view?.visible) return this.checkInstance(true, true);
 			});
 		}));
 		// Show the view only in workspaces that hold a NOW SDK project.
@@ -507,14 +507,15 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		this.refreshTimer = setTimeout(() => this.refresh(), 800);
 	}
 
-	private async refresh(checkInstance = false) {
+	/** `userInitiated`: the Refresh button; every other refresh checks quietly. */
+	private async refresh(checkInstance = false, userInitiated = false) {
 		const root = await this.resolveRoot();
 		if (root !== this.root) {
 			this.root = root;
 			checkInstance = true;
 		}
 		this.emitter.fire(undefined);
-		if (checkInstance && this.view?.visible) this.checkInstance(false);
+		if (checkInstance && this.view?.visible) this.checkInstance(false, !userInitiated);
 	}
 
 	private checkKey(instance: string) {
@@ -524,16 +525,17 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 	private inflight = new Map<string, Promise<void>>();
 
 	/** Download the app and compare it with the baseline of the last sync. */
-	private checkInstance(force: boolean): Promise<void> {
+	/** `background`: started by the view itself, not by the user (see downloadInstanceRecords). */
+	private checkInstance(force: boolean, background = false): Promise<void> {
 		const key = this.root ? this.checkKey(readDeployLink(this.root)?.instance || '') : '';
 		const running = this.inflight.get(key);
 		if (running) return running;
-		const work = this.runCheck(force).finally(() => this.inflight.delete(key));
+		const work = this.runCheck(force, background).finally(() => this.inflight.delete(key));
 		this.inflight.set(key, work);
 		return work;
 	}
 
-	private async runCheck(force: boolean) {
+	private async runCheck(force: boolean, background: boolean) {
 		const root = this.root;
 		if (!root) return;
 		let project: NowSdkProject;
@@ -563,7 +565,7 @@ export class NowSdkTreeViewProvider implements vscode.TreeDataProvider<Node>, vs
 		try {
 			// Refresh (force) asks the instance; otherwise a download made moments
 			// ago by a deploy, pull or earlier check is reused.
-			const records = await downloadInstanceRecords(deps, project, { name: link.instance, url: settings.url, g_ck: settings.g_ck }, force || (previous?.state === 'done' && previous.stale) ? 0 : RECENT_DOWNLOAD_MS);
+			const records = await downloadInstanceRecords(deps, project, { name: link.instance, url: settings.url, g_ck: settings.g_ck }, force || (previous?.state === 'done' && previous.stale) ? 0 : RECENT_DOWNLOAD_MS, background);
 			this.checks.set(key, { state: 'done', changes: instanceChangesFromRecords(root, link.instance, records), records, at: Date.now(), stale: revision !== this.connectionRevision });
 		} catch (e: any) {
 			const message = e?.message || String(e);

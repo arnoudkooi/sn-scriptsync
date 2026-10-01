@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+## Unreleased
+
+- **Saving a synced file works again when a NOW SDK project sits above it.** A `now.config.json` in your workspace, instance or scope folder no longer makes ScriptSync skip your Script Includes, Business Rules and other synced files without a word (SNU0000010187).
+- **Saving a NOW SDK source file tells you once that it is not synced field by field,** with a Deploy button, instead of doing nothing.
+- **The NOW SDK view checks the instance quietly:** a change check it starts by itself (view shown, reconnect) no longer shows as a failed download in the helper tab.
+
 ## 4.9.13 (2026-09-30)
 
 - **Background scripts stop promptly when automatic token refresh is declined.** With SN Utils 10.2.5.5, an agent's token refresh follows the helper's per-instance setting and 20-hour window after a manual `/token`, and only ever targets the script's own instance.

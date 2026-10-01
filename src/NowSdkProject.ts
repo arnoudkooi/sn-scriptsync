@@ -79,6 +79,79 @@ export function findNowSdkProjectRoot(filePath: string, stopAt?: string): string
 	}
 }
 
+// ScriptSync writes `_map.json` into every table folder it syncs records into
+// (<instance>/<scope>/<table>/_map.json). A NOW SDK project never has one.
+const FIELD_SYNC_MAP_FILE = '_map.json';
+// An instance folder holds the instance settings ScriptSync wrote on /token.
+const INSTANCE_SETTINGS_FILES = ['_settings.json', 'settings.json'];
+// Folders of a NOW SDK project itself, never a ScriptSync scope or table.
+const SDK_PROJECT_DIRS = new Set(['src', 'node_modules', 'dist', 'target', 'metadata', '.snu', '.now']);
+
+function isFile(file: string): boolean {
+	try {
+		return fs.statSync(file).isFile();
+	} catch {
+		return false;
+	}
+}
+
+/** Top-level folders of the project: the defaults plus configured output folders. */
+function sdkProjectDirs(root: string): Set<string> {
+	const dirs = new Set(SDK_PROJECT_DIRS);
+	try {
+		const config = JSON.parse(fs.readFileSync(path.join(root, NOW_CONFIG_FILE), 'utf8'));
+		for (const configured of [config?.appOutputDir, config?.packOutputDir]) {
+			if (typeof configured !== 'string' || !configured.trim()) continue;
+			const first = path.normalize(configured.trim()).split(/[\\/]/).filter(Boolean)[0];
+			if (first && first !== '..') dirs.add(first);
+		}
+	} catch {
+		// Unreadable config: the defaults still apply.
+	}
+	return dirs;
+}
+
+/**
+ * Whether `filePath` has ScriptSync's field file layout below `syncRoot`:
+ * <instance>/<scope>/<table>/<file>, with instance settings in the instance
+ * folder, and the project at the workspace, instance or scope folder so that
+ * the project's own folders (src, dist, ...) are not mistaken for a scope or table.
+ */
+function isFieldFileLayout(filePath: string, projectRoot: string, syncRoot: string): boolean {
+	const rel = path.relative(syncRoot, filePath);
+	if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+	const parts = rel.split(path.sep);
+	if (parts.length < 4) return false;
+	const instanceDir = path.join(syncRoot, parts[0]);
+	if (!INSTANCE_SETTINGS_FILES.some(name => isFile(path.join(instanceDir, name)))) return false;
+	const scopeDir = path.join(instanceDir, parts[1]);
+	const fromProjectToScope = path.relative(projectRoot, scopeDir);
+	if (fromProjectToScope.startsWith('..') || path.isAbsolute(fromProjectToScope)) return false;
+	const firstBelowProject = path.relative(projectRoot, filePath).split(path.sep)[0];
+	return !sdkProjectDirs(projectRoot).has(firstBelowProject);
+}
+
+/**
+ * The NOW SDK project that owns `filePath` as one of its sources, or null.
+ * A `now.config.json` higher up (workspace, instance or scope folder) does not
+ * claim the field files ScriptSync syncs below it, so they keep syncing per
+ * field: files with a `_map.json` between them and the project root, and new
+ * files in the <instance>/<scope>/<table> layout whose table has no map yet.
+ */
+export function findNowSdkSourceProjectRoot(filePath: string, stopAt?: string): string | null {
+	const root = findNowSdkProjectRoot(filePath, stopAt);
+	if (!root) return null;
+	if (stopAt && isFieldFileLayout(path.resolve(filePath), root, path.resolve(stopAt))) return null;
+	let dir = path.dirname(path.resolve(filePath));
+	while (true) {
+		if (isFile(path.join(dir, FIELD_SYNC_MAP_FILE))) return null;
+		if (dir === root) return root;
+		const parent = path.dirname(dir);
+		if (parent === dir) return root;
+		dir = parent;
+	}
+}
+
 function readJson(file: string): any {
 	try {
 		return JSON.parse(fs.readFileSync(file, 'utf8'));
