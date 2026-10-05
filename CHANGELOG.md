@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## 4.9.15 (2026-10-06)
+
+- **Only Ctrl+S / Cmd+S with focus in the file editor syncs it to the instance.** Saves from Save All, a rename across files, VS Code auto save or another extension now wait in Pending Saves until you sync them there, and are never auto-synced or flushed by an agent. A rename touching files of several instances no longer pushes them all (SNU0000010184).
+- **Keep Ctrl+S / Cmd+S local if you prefer:** turn off "Ctrl+S / Cmd+S syncs the file" in Settings to save locally and sync only from Pending Saves. Rebound your Save key or use a Vim extension? Bind it to **sn-scriptsync: Save & Sync**.
+
 ## `@snutils/snu` 0.3.10 (2026-10-01)
 
 - **`snu sdk pull` and `snu sdk deploy` work on Windows when your user name contains a space.** The paths passed to the ServiceNow SDK are now quoted.

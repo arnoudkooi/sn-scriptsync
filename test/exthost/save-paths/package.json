@@ -1,0 +1,9 @@
+{
+	"name": "snu-save-paths-probe",
+	"displayName": "ScriptSync save-path probe (test only)",
+	"version": "0.0.1",
+	"private": true,
+	"engines": { "vscode": "^1.96.0" },
+	"main": "./probe.js",
+	"activationEvents": []
+}

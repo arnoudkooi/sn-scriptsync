@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.9.14",
+	"version": "4.9.15",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -82,6 +82,14 @@
 			{
 				"command": "extension.createArtifact",
 				"title": "sn-scriptsync: Create a new artifact in ServiceNow"
+			},
+			{
+				"command": "extension.saveAndSync",
+				"title": "sn-scriptsync: Save & Sync"
+			},
+			{
+				"command": "extension.saveWithoutFormattingAndSync",
+				"title": "sn-scriptsync: Save Without Formatting & Sync"
 			},
 			{
 				"command": "extension.syncNow",
@@ -222,6 +230,18 @@
 			}
 		],
 		"keybindings": [
+			{
+				"command": "extension.saveAndSync",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "editorTextFocus && sn-scriptsync.serverRunning && sn-scriptsync.syncableFileActive && config.sn-scriptsync.save.pushOnSaveShortcut"
+			},
+			{
+				"command": "extension.saveWithoutFormattingAndSync",
+				"key": "ctrl+k ctrl+shift+s",
+				"mac": "cmd+k s",
+				"when": "editorTextFocus && sn-scriptsync.serverRunning && sn-scriptsync.syncableFileActive && config.sn-scriptsync.save.pushOnSaveShortcut"
+			},
 			{
 				"command": "extension.nowSdkDeploy",
 				"key": "ctrl+alt+u",
@@ -553,6 +573,12 @@
 					"order": 10,
 					"description": "Scripts folder (Extension will auto activate when folder path ends with this name)"
 				},
+				"sn-scriptsync.save.pushOnSaveShortcut": {
+					"type": "boolean",
+					"default": true,
+					"order": 15,
+					"description": "Ctrl+S / Cmd+S in a synced file saves it and syncs it to the instance (the sn-scriptsync: Save & Sync command). Other saves, such as Save All, a rename across files, auto save or another extension's save, wait in Pending Saves. Turn off to only save locally with Ctrl+S / Cmd+S and sync from Pending Saves."
+				},
 				"sn-scriptsync.externalChanges.monitorFileChanges": {
 					"type": "boolean",
 					"default": true,
@@ -563,7 +589,7 @@
 					"type": "integer",
 					"default": 0,
 					"order": 21,
-					"description": "Seconds to wait before auto-syncing monitored external changes. Default is 0 (monitor-only). Use Sync Now or manual save to push changes, or set a value > 0 to enable auto-sync."
+					"description": "Seconds to wait before auto-syncing monitored external changes. Default is 0 (monitor-only). Use Sync Now or Ctrl+S / Cmd+S in the file to push changes, or set a value > 0 to enable auto-sync. Saves made without Ctrl+S / Cmd+S are never auto-synced."
 				},
 				"sn-scriptsync.agentApi.reviewWrites": {
 					"type": "boolean",

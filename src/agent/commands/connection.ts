@@ -246,7 +246,7 @@ const sync_now: CommandHandler = {
 	name: 'sync_now',
 	noInstance: true,
 	docs: {
-		summary: 'Flush every pending file in the sync queue immediately. Disabled while review mode (sn-scriptsync.agentApi.reviewWrites) is on — the user approves the queue in VS Code instead.',
+		summary: 'Flush the pending files in the sync queue immediately. Saves the user made without Ctrl+S / Cmd+S stay held for them and are not listed or synced. Disabled while review mode (sn-scriptsync.agentApi.reviewWrites) is on: the user approves the queue in VS Code instead.',
 	},
 	async handle(ctx) {
 		const state = getSyncState();

@@ -30,6 +30,7 @@ import nodePath = require('path');
 import * as fs from 'fs';
 import * as os from 'os';
 import { readErrorInstance, instanceFolderMatchesError } from './agent/errorRelay';
+import { ExplicitSaveIntents, SyncIntent, decideEditorSave, filesForSync } from './saveIntent';
 import {
 	setRuntime as setAgentRuntime,
 	setSyncStateProvider,
@@ -50,6 +51,7 @@ import {
 	terminateListener,
 	isPortFree,
 	AGENT_API_FIXED_PORT,
+	BROWSER_SAVE_PORT,
 	BridgeLifecycle,
 	LifecycleState,
 	evaluateLease,
@@ -157,6 +159,9 @@ function updateContextMenuVisibility() {
 	const config = vscode.workspace.getConfiguration('sn-scriptsync', editor?.document);
 	const showMenu = config.get<boolean>('showContextMenu', true);
 	vscode.commands.executeCommand('setContext', 'sn-scriptsync.showContextMenu', showMenu);
+	// Routes Ctrl+S / Cmd+S to Save & Sync (package.json keybindings).
+	const syncable = !!editor && !editor.document.isUntitled && isSyncableFile(editor.document.fileName);
+	vscode.commands.executeCommand('setContext', 'sn-scriptsync.syncableFileActive', syncable);
 }
 
 // Update server running context
@@ -164,6 +169,8 @@ function setServerRunningContext(running: boolean) {
 	serverRunning = running;
 	nowSdkConnectionChanged.fire();
 	vscode.commands.executeCommand('setContext', 'sn-scriptsync.serverRunning', running);
+	// An instance folder can appear on connect; re-check the active file.
+	updateContextMenuVisibility();
 }
 let eu = new ExtensionUtils();
 let watcher: vscode.FileSystemWatcher | undefined;
@@ -171,17 +178,19 @@ let queueProvider: QueueTreeViewProvider;
 
 let lastSave = Math.floor(+new Date() / 1000); 
 
-// Use a map to track which documents were manually saved #105
-const manualSaveMap: Map<string, boolean> = new Map();
-// Track all documents that went through onWillSaveTextDocument (any reason).
-// "Save without formatting" skips this event entirely, so its absence signals a manual save. #119
-const willSaveSeenMap: Map<string, boolean> = new Map();
-// Track timestamps of manual saves to ignore subsequent watcher events
+// Documents Save & Sync is saving right now (see src/saveIntent.ts). Only a save
+// carrying this mark pushes; every other save of a synced file is held.
+const explicitSaveIntents = new ExplicitSaveIntents();
+// Track timestamps of editor saves to ignore subsequent watcher events
 const recentManualSaves: Map<string, number> = new Map();
 
 // Global debounce state
 let globalDebounceTimer: NodeJS.Timeout | undefined;
 const pendingFiles = new Set<string>();
+// Pending files saved without Save & Sync (Save All, refactoring auto-save,
+// another extension's save). Never pushed by the queue timer or an agent's
+// sync_now; only the user syncs them from Pending Saves.
+const heldSaves = new Set<string>();
 
 // Agent API writes staged for manual review (sn-scriptsync.agentApi.reviewWrites).
 // When the setting is on, update_record / update_record_batch / create_artifact
@@ -575,8 +584,17 @@ function discardReviewFile(filePath: string) {
 		return;
 	}
 	pendingFiles.delete(filePath);
+	heldSaves.delete(filePath);
 	queueProvider?.removeFromQueue(filePath);
 	undoReviewFile(filePath);
+}
+
+// Pending files only the user may push: saves made without Save & Sync, and
+// staged agent review files. The queue timer and sync_now skip them.
+function isHeldPendingFile(filePath: string): boolean {
+	return heldSaves.has(filePath)
+		|| agentCreateFilesByPath.has(filePath)
+		|| reviewBaselines.has(reviewKey(filePath));
 }
 
 function clearStagedCreates() {
@@ -631,13 +649,14 @@ function syncQueuedFile(filePath: string) {
 		return;
 	}
 	pendingFiles.delete(filePath);
+	heldSaves.delete(filePath);
 	queueProvider?.removeFromQueue(filePath);
 	acceptReviewBaseline(filePath);
 	if (pendingFiles.size === 0 && globalDebounceTimer) {
 		clearTimeout(globalDebounceTimer);
 		globalDebounceTimer = undefined;
 	}
-	saveFieldsToServiceNow(filePath, true);
+	saveFieldsToServiceNow(filePath, true, 'queue_sync');
 }
 
 // Pending artifact creations (waiting for name check)
@@ -645,18 +664,20 @@ const pendingCreations: Map<string, any> = new Map();
 const NON_SYNC_FOLDER_NAMES = new Set(['.vscode', '.cursor', '.git', 'node_modules', 'profiles', 'profile']);
 
 // Process all pending files - extracted for reuse by Sync Now
-function processPendingFiles() {
+function processPendingFiles(intent: SyncIntent) {
 	const runId = buildRunId();
-	auditLog('pending_processing_started', { pendingCount: pendingFiles.size }, runId);
+	// The timer and agents push only what is not held; Sync Now pushes all.
+	const files = filesForSync(pendingFiles, intent, isHeldPendingFile);
+	auditLog('pending_processing_started', { pendingCount: pendingFiles.size, syncCount: files.length, intent }, runId);
 	// Group files by record (same instance/scope/table/sys_id)
 	const recordGroups = new Map<string, { scriptObj: any, fields: Map<string, string> }>();
 	
-	pendingFiles.forEach(file => {
+	files.forEach(file => {
 		const scriptObj = eu.fileNameToObject(file);
 		if (scriptObj === true || !scriptObj?.sys_id) {
 			// Can't group, save individually
 			auditLog('pending_file_individual_dispatch', { filePath: file, reason: 'invalid_or_missing_sys_id' }, runId);
-			saveFieldsToServiceNow(file, true);
+			saveFieldsToServiceNow(file, true, intent);
 			return;
 		}
 		
@@ -671,6 +692,7 @@ function processPendingFiles() {
 		}
 		
 		const group = recordGroups.get(recordKey)!;
+		group.scriptObj.syncIntent = intent;
 		group.fields.set(scriptObj.fieldName, scriptObj.content);
 	});
 	
@@ -707,9 +729,16 @@ function processPendingFiles() {
 	
 	// These files were just pushed (approved) — forget their staging snapshots so
 	// a later Clear All / re-stage never tries to "undo" an already-synced file.
-	pendingFiles.forEach(file => acceptReviewBaseline(file));
-	pendingFiles.clear();
-	queueProvider?.clearQueue();
+	files.forEach(file => {
+		acceptReviewBaseline(file);
+		pendingFiles.delete(file);
+		heldSaves.delete(file);
+	});
+	if (pendingFiles.size === 0) {
+		queueProvider?.clearQueue();
+	} else {
+		queueProvider?.updateQueue(pendingFiles, 0);
+	}
 	vscode.commands.executeCommand('setContext', 'sn-scriptsync.queuePaused', false);
 	
 	if (globalDebounceTimer) {
@@ -934,9 +963,7 @@ function enqueuePendingFile(
 	// writes AND files an agent edited directly on disk must wait for the user's
 	// explicit approval in VS Code, even when auto-sync (syncDelay) is otherwise on.
 	// (The user's own in-editor saves still go through onDidSaveTextDocument.)
-	const holdForReview = reviewWritesEnabled()
-		|| agentCreateFilesByPath.has(filePath)
-		|| reviewBaselines.has(reviewKey(filePath));
+	const holdForReview = reviewWritesEnabled() || isHeldPendingFile(filePath);
 
 	// Monitor-only: update queue/badge but don't schedule auto sync.
 	if (debounceSeconds <= 0 || holdForReview) {
@@ -959,7 +986,7 @@ function enqueuePendingFile(
 
 	globalDebounceTimer = setTimeout(() => {
 		auditLog('queue_debounce_elapsed', { pendingCount: pendingFiles.size, debounceDelayMs: debounceDelay }, runId);
-		processPendingFiles();
+		processPendingFiles('queue_auto_sync');
 	}, debounceDelay);
 
 	// Update UI
@@ -1206,50 +1233,128 @@ function setupWatcher() {
 		});
 }
 
-// Listen for the "will save" event and mark the document if the reason was manual.
-// Also track that onWillSaveTextDocument fired at all — "Save without formatting" skips it. #119
+// Saves VS Code reports as Manual. That reason also covers Save All, saves by
+// other extensions and refactoring auto-save, so it never authorizes a push; it
+// only decides whether a held save is worth a notice (autoSave saves are not).
+const manualReasonSaves = new Set<string>();
 vscode.workspace.onWillSaveTextDocument((event) => {
-	const key = event.document.uri.toString();
-	willSaveSeenMap.set(key, true);
 	if (event.reason === vscode.TextDocumentSaveReason.Manual) {
-		manualSaveMap.set(key, true);
+		manualReasonSaves.add(event.document.uri.toString());
 	}
 });
 
-// In the did-save handler, only process files that were flagged as manually saved. #105
-// Also handle "Save without formatting" which skips onWillSaveTextDocument entirely. #119
+// A save pushes only when Save & Sync marked it (#105, #119, SNU0000010184).
+// Every other save of a synced file goes to Pending Saves, held from auto sync.
 vscode.workspace.onDidSaveTextDocument(document => {
 	const key = document.uri.toString();
-	const wasManual = manualSaveMap.get(key);
-	const wasSeenByWillSave = willSaveSeenMap.get(key);
+	const explicit = explicitSaveIntents.take(key);
+	const manualReason = manualReasonSaves.delete(key);
+	if (!serverRunning) return;
+	// Save & Sync already pushed exactly this version (its save event arrived
+	// after the command finished): nothing left to hold.
+	const pushed = explicitPushes.get(key);
+	if (!explicit && pushed && pushed.version === document.version && Date.now() - pushed.at < 5000) return;
 
-	manualSaveMap.delete(key);
-	willSaveSeenMap.delete(key);
+	const filePath = document.fileName;
+	const decision = decideEditorSave({
+		syncable: isSyncableFile(filePath),
+		// A staged agent review file (reviewWrites is on) is only synced via the
+		// per-file ✓ / Sync Now, never because the user saved while reviewing it.
+		// Creates are tracked in agentCreateFilesByPath (and must be replayed from
+		// the original payload so non-code config fields survive); updates are
+		// tracked in reviewBaselines.
+		reviewStaged: agentCreateFilesByPath.has(filePath) || reviewBaselines.has(reviewKey(filePath)),
+		explicit,
+	});
+	auditLog('editor_save_decision', { filePath, decision, manualReason }, buildRunId());
 
-	// Treat as manual save if: explicitly flagged as manual, OR onWillSaveTextDocument
-	// never fired (which means "Save without formatting" was used). #119
-	if (wasManual || !wasSeenByWillSave) {
-		// A staged agent review file (reviewWrites is on): hold it in the queue on
-		// manual save so the change is only synced via the per-file ✓ / Sync Now —
-		// never pushed straight to the instance just because the user saved while
-		// reviewing it. Creates are tracked in agentCreateFilesByPath (and must be
-		// replayed from the original payload so non-code config fields survive);
-		// updates are tracked in reviewBaselines.
-		if (agentCreateFilesByPath.has(document.fileName) || reviewBaselines.has(reviewKey(document.fileName))) {
-			recentManualSaves.set(document.fileName, Date.now());
-			return;
-		}
-
-		pendingFiles.delete(document.fileName);
-		queueProvider?.removeFromQueue(document.fileName);
-
-		recentManualSaves.set(document.fileName, Date.now());
-
-		if (!saveFieldsToServiceNow(document, true)) {
-			markFileAsDirty(document);
-		}
+	if (decision === 'ignore') return;
+	recentManualSaves.set(filePath, Date.now());
+	if (decision === 'push') {
+		pushEditorSave(document);
+	} else if (decision === 'queue_held') {
+		heldSaves.add(filePath);
+		enqueuePendingFile(filePath, 'editor_save_without_sync', buildRunId(), 0, 0);
+		if (manualReason) noteHeldSave();
 	}
 });
+
+const explicitPushes = new Map<string, { version: number; at: number }>();
+function pushEditorSave(document: TextDocument) {
+	explicitPushes.set(document.uri.toString(), { version: document.version, at: Date.now() });
+	pendingFiles.delete(document.fileName);
+	heldSaves.delete(document.fileName);
+	queueProvider?.removeFromQueue(document.fileName);
+	recentManualSaves.set(document.fileName, Date.now());
+	if (!saveFieldsToServiceNow(document, true, 'save_command')) {
+		markFileAsDirty(document);
+	}
+}
+
+/**
+ * A file below a synced instance folder that a save could push: not hidden or
+ * internal, not an agent or background script file, not a NOW SDK source.
+ * Path checks only, so it is cheap enough to run on every editor change.
+ */
+function isSyncableFile(filePath: string): boolean {
+	const workspaceRoot = getWorkspaceRoot();
+	if (!workspaceRoot || !filePath.startsWith(workspaceRoot + path.sep)) return false;
+	const fileName = path.basename(filePath);
+	if (fileName.startsWith('.') || fileName.startsWith('_')) return false;
+	const parts = filePath.slice(workspaceRoot.length).split(path.sep).filter(Boolean);
+	// instance/table/file at minimum, as the watcher requires.
+	if (parts.length < 3 || parts.includes('agent') || parts[1] === 'background') return false;
+	if (!isValidInstanceRoot(path.join(workspaceRoot, parts[0]))) return false;
+	return !findNowSdkSourceProjectRoot(filePath, workspaceRoot);
+}
+
+/**
+ * Save & Sync: Ctrl+S / Cmd+S in a synced file (package.json keybindings).
+ * Marks the active document, runs VS Code's own save (so format on save and
+ * other participants still run), and the did-save handler pushes the saved
+ * contents. A file without changes raises no save event; it is pushed as is,
+ * as Ctrl+S always did.
+ */
+async function saveAndSync(withoutFormatting: boolean) {
+	const saveCommand = withoutFormatting ? 'workbench.action.files.saveWithoutFormatting' : 'workbench.action.files.save';
+	const document = vscode.window.activeTextEditor?.document;
+	if (!document || document.isUntitled || !isSyncableFile(document.fileName)) {
+		await vscode.commands.executeCommand(saveCommand);
+		return;
+	}
+	const key = document.uri.toString();
+	explicitSaveIntents.mark(key);
+	try {
+		await vscode.commands.executeCommand(saveCommand);
+	} finally {
+		if (explicitSaveIntents.take(key) && !document.isDirty && serverRunning) {
+			pushEditorSave(document);
+		}
+	}
+}
+
+// One notice per burst of held saves (a rename can save hundreds of files).
+let heldNoticeTimer: NodeJS.Timeout | undefined;
+let heldNoticeCount = 0;
+function noteHeldSave() {
+	// With the shortcut push turned off, holding is what the user asked for.
+	if (!vscode.workspace.getConfiguration('sn-scriptsync').get<boolean>('save.pushOnSaveShortcut', true)) return;
+	heldNoticeCount++;
+	if (heldNoticeTimer) clearTimeout(heldNoticeTimer);
+	heldNoticeTimer = setTimeout(async () => {
+		const count = heldNoticeCount;
+		heldNoticeCount = 0;
+		heldNoticeTimer = undefined;
+		const files = count === 1 ? '1 saved file was' : `${count} saved files were`;
+		const choice = await vscode.window.showInformationMessage(
+			`sn-scriptsync: ${files} not synced. Only Ctrl+S / Cmd+S in a file syncs it; saves from Save All, a rename across files or another extension wait in Pending Saves.`,
+			'Show Pending Saves'
+		);
+		if (choice === 'Show Pending Saves') {
+			vscode.commands.executeCommand('queueTreeView.focus');
+		}
+	}, 800);
+}
 
 // Build/license handshake of the currently connected helper tab (from its
 // helperBuildInfo / helperLicenseInfo messages). Module-level so the Agent API
@@ -1311,9 +1416,10 @@ export function activate(context: vscode.ExtensionContext) {
 		bridgeState: () => bridgeLifecycle.state,
 	});
 	setSyncStateProvider(() => ({
-		pendingFiles: Array.from(pendingFiles),
+		// Agents see and flush only what is not held for the user.
+		pendingFiles: filesForSync(pendingFiles, 'agent_sync', isHeldPendingFile),
 		isPaused: !!queueProvider && queueProvider.isPaused,
-		processPendingFiles: () => processPendingFiles(),
+		processPendingFiles: () => processPendingFiles('agent_sync'),
 	}));
 
 	// Serve pre-stage baselines for native QuickDiff gutter bars on review files.
@@ -1321,6 +1427,14 @@ export function activate(context: vscode.ExtensionContext) {
 	// open editor (VS Code won't retroactively attach an original otherwise).
 	registerReviewBaselineProvider(context);
 	if (reviewWritesEnabled()) ensureReviewSourceControl();
+
+	// Ctrl+S / Cmd+S in a synced file while ScriptSync runs (package.json
+	// keybindings). Registered here, not with the servers, so the shortcut never
+	// points at a missing command.
+	context.subscriptions.push(
+		vscode.commands.registerCommand('extension.saveAndSync', () => saveAndSync(false)),
+		vscode.commands.registerCommand('extension.saveWithoutFormattingAndSync', () => saveAndSync(true))
+	);
 
 	//initialize statusbaritem and click events
 	const toggleSyncID = 'sample.toggleScriptSync';
@@ -1662,6 +1776,14 @@ const WELCOME_SETTINGS: WelcomeSetting[] = [
 		default: 'scriptsync',
 	},
 	{
+		key: 'save.pushOnSaveShortcut',
+		label: 'Ctrl+S / Cmd+S syncs the file',
+		description: 'Ctrl+S / Cmd+S in a synced file saves it and syncs it to the instance. Other saves (Save All, a rename across files, auto save, another extension) wait in Pending Saves. Turn off to only save locally and sync from Pending Saves.',
+		group: GROUP_WORKSPACE,
+		type: 'boolean',
+		default: true,
+	},
+	{
 		key: 'externalChanges.monitorFileChanges',
 		label: 'Monitor external file changes',
 		description: 'Watch for edits made by AI agents, git or other tools and list them in the Pending Saves queue. Turn off to disable monitoring entirely.',
@@ -1672,7 +1794,7 @@ const WELCOME_SETTINGS: WelcomeSetting[] = [
 	{
 		key: 'externalChanges.syncDelay',
 		label: 'Auto-sync delay (seconds)',
-		description: 'Seconds to wait before auto-syncing monitored external changes. 0 means monitor only: push with Sync Now or a manual save. Any value above 0 enables auto-sync.',
+		description: 'Seconds to wait before auto-syncing monitored external changes. 0 means monitor only: push with Sync Now or Ctrl+S / Cmd+S in the file. Any value above 0 enables auto-sync. Saves made without Ctrl+S / Cmd+S are never auto-synced.',
 		group: GROUP_WORKSPACE,
 		type: 'number',
 		default: 0,
@@ -2337,10 +2459,10 @@ async function requestOwnerStandDown(owner: OwnerLease, timeoutMs = 8_000): Prom
 	// Wait for the ports to actually free up before we try to bind them.
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		if (await isPortFree(1978)) return true;
+		if (await isPortFree(BROWSER_SAVE_PORT)) return true;
 		await new Promise((resolve) => setTimeout(resolve, 150));
 	}
-	return isPortFree(1978);
+	return isPortFree(BROWSER_SAVE_PORT);
 }
 
 /**
@@ -2497,7 +2619,7 @@ async function ensureBridgePortsAvailable(): Promise<void> {
 	// spawned by Claude Desktop) or a foreign process still holds the port at
 	// this point. Identify it and ask the user to take the port over instead of
 	// failing with "port 1978 is still in use".
-	const holder = await findPortListener(1978);
+	const holder = await findPortListener(BROWSER_SAVE_PORT);
 	if (holder) {
 		const kind = classifyListener(holder.command);
 		if (kind === 'vscode') {
@@ -2531,7 +2653,7 @@ async function ensureBridgePortsAvailable(): Promise<void> {
 					true
 				);
 			}
-			const editorFreed = await terminateListener(holder.pid, 1978);
+			const editorFreed = await terminateListener(holder.pid, BROWSER_SAVE_PORT);
 			if (!editorFreed) {
 				throw new BridgeStartAborted(`Could not free port 1978 — PID ${holder.pid} did not stop.`);
 			}
@@ -2549,7 +2671,7 @@ async function ensureBridgePortsAvailable(): Promise<void> {
 		if (pick !== 'Stop and Take Over') {
 			throw new BridgeStartAborted('Start cancelled: port 1978 is still held by another process.', true);
 		}
-		const freed = await terminateListener(holder.pid, 1978);
+		const freed = await terminateListener(holder.pid, BROWSER_SAVE_PORT);
 		if (!freed) {
 			throw new BridgeStartAborted(`Could not free port 1978 — PID ${holder.pid} did not stop.`);
 		}
@@ -2609,7 +2731,7 @@ async function startBridgeTransports(): Promise<void> {
 		wss = undefined;
 	}
 
-	wss = new WebSocket.Server({ port: 1978 , host : '127.0.0.1'});
+	wss = new WebSocket.Server({ port: BROWSER_SAVE_PORT, host: '127.0.0.1' });
 
 	// The constructor binds asynchronously. Without awaiting the outcome the
 	// start resolved before 1978 was known to be listening, so an EADDRINUSE
@@ -3015,7 +3137,7 @@ function registerQueueViewsAndCommands(context: vscode.ExtensionContext): void {
 	// rather than processed as lossy file-creates.
 	queueProvider.setSyncNowCallback(() => {
 		flushStagedCreates();
-		processPendingFiles();
+		processPendingFiles('queue_sync');
 	});
 
 	// Register Sync Now command
@@ -3074,7 +3196,7 @@ function registerQueueViewsAndCommands(context: vscode.ExtensionContext): void {
 		const DEBOUNCE_DELAY = debounceSeconds * 1000;
 		
 		globalDebounceTimer = setTimeout(() => {
-			processPendingFiles();
+			processPendingFiles('queue_auto_sync');
 		}, DEBOUNCE_DELAY);
 		
 		vscode.window.showInformationMessage('Queue resumed. Files will sync when timer expires.');
@@ -3143,6 +3265,7 @@ function registerQueueViewsAndCommands(context: vscode.ExtensionContext): void {
 		// on disk untouched.
 		for (const fp of Array.from(pendingFiles)) undoReviewFile(fp);
 		pendingFiles.clear();
+		heldSaves.clear();
 		clearStagedCreates();
 		queueProvider.clearQueue();
 
@@ -3854,7 +3977,7 @@ function notifyNowSdkSourceSkipped(sdkRoot: string) {
 	});
 }
 
-function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCode:boolean): boolean {
+function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCode:boolean, syncIntent?: SyncIntent): boolean {
 	const runId = buildRunId();
 
 	if (!serverRunning) return true;
@@ -3948,6 +4071,7 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 	try {
 		
 		scriptObj.saveSource = (fromVsCode) ? "VS Code" : "FileWatcher";
+		if (syncIntent) scriptObj.syncIntent = syncIntent;
 		if(scriptObj.tableName == 'background') return true; // do not save bg scripts to SN.
 
 		if (scriptObj.fieldName.startsWith('variable-')) {
@@ -3965,7 +4089,8 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 			tableName: scriptObj.tableName,
 			fieldName: scriptObj.fieldName,
 			sys_id: scriptObj.sys_id,
-			saveSource: scriptObj.saveSource
+			saveSource: scriptObj.saveSource,
+			syncIntent: scriptObj.syncIntent
 		}, runId);
 		broadcastToHelperTab(scriptObj);
 

@@ -203,7 +203,7 @@ sn-scriptsync is designed to work seamlessly with AI coding assistants. Changes 
 ### How It Works
 1. **Automatic detection**: File changes are detected via file system watcher
 2. **Debounced sync**: Changes are batched and synced after a configurable delay
-   - Default behavior is monitor-only (`syncDelay = 0`), so changes stay in queue until manual save or Sync Now
+   - Default behavior is monitor-only (`syncDelay = 0`), so changes stay in queue until Ctrl+S / Cmd+S in the file or Sync Now
 3. **Queue management**: View pending syncs in the "Pending Saves" panel, pause/resume, or sync immediately
 4. **Multi-field batching**: Multiple changes to the same record are combined into one API call
 
@@ -212,7 +212,8 @@ sn-scriptsync is designed to work seamlessly with AI coding assistants. Changes 
 - `externalChanges.syncDelay`: Seconds to wait before auto-syncing monitored changes (default: 0 monitor-only, set to `> 0` to enable auto-sync)
 - `createArtifacts.enabled` / `updateRecords.enabled` and the other permission gates: see [Agent permissions](#agent-permissions) below.
 - `agentInstructions.autoUpdate`: Add/refresh the managed sn-scriptsync reference block inside *your own* agent instruction files (`CLAUDE.md` / `AGENTS.md` / `.cursorrules` / `.windsurfrules` / `.clinerules` / `.github/copilot-instructions.md`) on start (default: true). Turn off if you maintain your own agent instructions and don't want those files touched. Either way `agentinstructions.md` and the `agentrules/skills` folder are always kept current — opting out only stops the block being injected into your files, so you can still reference the docs on demand (e.g. `@agentinstructions.md`, or a specific `agentrules/skills/<name>/SKILL.md`).
-- Manual saves (Ctrl+S) always sync immediately, bypassing the queue
+- `save.pushOnSaveShortcut`: Ctrl+S / Cmd+S in a synced file saves it and syncs it immediately, bypassing the queue (default: true). Turn off to only save locally and sync from Pending Saves.
+- Only Ctrl+S / Cmd+S with focus in the file editor syncs it. Pressing Save with focus in the terminal, Search or Explorer does not push the active file. Saves from Save All, a rename across files (F2 with `files.refactoring.autoSave`), VS Code auto save or another extension wait in Pending Saves, and are never auto-synced or flushed by an agent's `sync_now`. If you rebound Save or use a Vim extension, bind your save key to **sn-scriptsync: Save & Sync**.
 
 ### Agent permissions
 
