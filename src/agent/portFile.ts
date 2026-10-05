@@ -4,6 +4,7 @@ import * as path from 'path';
 import { getWorkspaceRoot } from '../workspaceRoot';
 import { AgentPortFile } from './types';
 import { resolveBridgeOwnership, PortDescriptor } from './bridgeOwnership';
+import { parseTestPorts } from './testPorts';
 
 // v2 -> v3: added get_record, delete_record, create_application, add_column,
 // get_served_url, navigate_and_screenshot, rest_request; await:true write
@@ -26,9 +27,14 @@ import { resolveBridgeOwnership, PortDescriptor } from './bridgeOwnership';
 // scope to canonical local files, paged past the Table API limits.
 export const AGENT_API_VERSION = 10;
 
+const TEST_PORTS = parseTestPorts(process.env.SN_SCRIPTSYNC_TEST_PORTS);
+
 /** Preferred fixed port for the Agent API. If it's taken the server falls back
  * to an ephemeral port — the port files below always carry the actual port. */
-export const AGENT_API_FIXED_PORT = 1977;
+export const AGENT_API_FIXED_PORT = TEST_PORTS?.agent ?? 1977;
+
+/** Browser save channel: the helper tab connects here. */
+export const BROWSER_SAVE_PORT = TEST_PORTS?.browser ?? 1978;
 
 function workspacePortFilePath(): string | undefined {
 	const root = getWorkspaceRoot();
