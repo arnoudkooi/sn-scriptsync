@@ -12,6 +12,7 @@ export interface HelperState {
   proFeatures: boolean;
   cdp: { available: boolean; reason: string | null };
   capabilities: HelperCapabilities;
+  build: { extensionName?: string; extensionVersion?: string; debuggerAvailable?: boolean } | null;
   sessionEpoch: string;
   instanceGates: Map<string, InstanceGateSnapshot>;
   liveInstances: Map<string, LiveInstance>;
@@ -34,6 +35,7 @@ export interface ActiveReview {
   params: any;
   instanceOrigin: string;
   createdAt: number;
+  onApproved?: () => void;
 }
 
 export class StandaloneWsBridge {
@@ -51,6 +53,7 @@ export class StandaloneWsBridge {
     proFeatures: false,
     cdp: { available: false, reason: null },
     capabilities: { protocolVersion: 1 },
+    build: null,
     sessionEpoch: '',
     instanceGates: new Map(),
     liveInstances: new Map(),
@@ -156,6 +159,7 @@ export class StandaloneWsBridge {
       proFeatures: false,
       cdp: { available: false, reason: null },
       capabilities: { protocolVersion: 1 },
+      build: null,
       sessionEpoch: '',
       instanceGates: new Map(),
       liveInstances: new Map(),
@@ -211,6 +215,13 @@ export class StandaloneWsBridge {
 
     // 1. Immutable merge for license / build info
     if (msg.action === 'helperLicenseInfo' || msg.action === 'helperBuildInfo' || msg.action === 'helperHello') {
+      if (msg.action !== 'helperLicenseInfo') {
+        this.state.build = {
+          extensionName: typeof msg.extensionName === 'string' ? msg.extensionName : undefined,
+          extensionVersion: typeof msg.extensionVersion === 'string' ? msg.extensionVersion : undefined,
+          debuggerAvailable: typeof msg.debuggerAvailable === 'boolean' ? msg.debuggerAvailable : undefined,
+        };
+      }
       if (msg.tier) this.state.tier = msg.tier;
       if (typeof msg.proFeatures === 'boolean') this.state.proFeatures = msg.proFeatures;
       if (typeof msg.debuggerAvailable === 'boolean') this.debuggerAvailable = msg.debuggerAvailable;
@@ -324,6 +335,7 @@ export class StandaloneWsBridge {
 
       // Approved! Authorize execution on helper. The review window was spent
       // on the decision; the approved command gets a fresh window to run in.
+      active.onApproved?.();
       this.pending.extend(active.correlationId, APPROVED_EXECUTION_TIMEOUT_MS);
       try {
         this.sendToBrowser({

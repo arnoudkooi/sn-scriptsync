@@ -25,7 +25,7 @@ export async function resolveContentInput(options: {
   const { value, filePath, allowStdin = true } = options;
 
   if (value !== undefined && filePath !== undefined) {
-    throw new Error('Conflicting arguments: provide either a direct value or --file <path>, not both.');
+    throw Object.assign(new Error('Conflicting arguments: provide either a direct value or --file <path>, not both.'), { code: 'E_INVALID_PARAMS' });
   }
 
   if (value !== undefined) {
@@ -35,7 +35,7 @@ export async function resolveContentInput(options: {
   if (filePath !== undefined) {
     const resolved = path.resolve(process.cwd(), filePath);
     if (!fs.existsSync(resolved)) {
-      throw new Error(`File not found: ${resolved}`);
+      throw Object.assign(new Error(`File not found: ${resolved}`), { code: 'E_INVALID_PARAMS' });
     }
     return fs.readFileSync(resolved, 'utf8');
   }

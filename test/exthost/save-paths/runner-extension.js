@@ -147,6 +147,28 @@ exports.run = async function () {
 		], async () => {
 			await vscode.commands.executeCommand('extension.syncNow');
 		});
+
+		// A build tool writing synced files on disk, outside VS Code.
+		await record('disk_write_closed', 'A build writes a closed file on disk (Sync Delay 0): held', [], async () => {
+			await vscode.workspace.getConfiguration('sn-scriptsync').update('externalChanges.syncDelay', 0, vscode.ConfigurationTarget.Workspace);
+			await wait(500);
+			fs.appendFileSync(file('inst_a/global/sys_script/s2.script.js'), '// built\n');
+		});
+
+		await record('disk_write_open', 'A build writes a file open in the editor (Sync Delay 0): held', [], async () => {
+			await open('inst_a/global/sys_script/s3.script.js');
+			await wait(500);
+			fs.appendFileSync(file('inst_a/global/sys_script/s3.script.js'), '// built\n');
+		});
+
+		await record('disk_write_auto_sync', 'A build writes a file with Sync Delay 1: auto-synced, labeled queue_auto_sync', [
+			'inst_a/s2:queue_auto_sync', 'inst_a/s3:queue_auto_sync', 'inst_b/t1:queue_auto_sync',
+		], async () => {
+			await vscode.workspace.getConfiguration('sn-scriptsync').update('externalChanges.syncDelay', 1, vscode.ConfigurationTarget.Workspace);
+			await wait(500);
+			fs.appendFileSync(file('inst_b/global/sys_script/t1.script.js'), '// built\n');
+			await wait(2500);
+		});
 	} catch (e) {
 		report.error = String(e && e.stack || e);
 	} finally {

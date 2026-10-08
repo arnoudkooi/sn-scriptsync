@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.9.15",
+	"version": "4.9.16",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -671,6 +671,7 @@
 		"build:agent-docs": "tsx scripts/build-agent-docs.ts",
 		"compile": "npm run build:agent-docs && tsc -p ./",
 		"test": "tsc -p ./ && node --test out/test/*.test.js",
+		"test:bridge-parity": "tsc -p ./ && npm run build --prefix packages/snu && node --test scripts/test-bridge-parity.mjs",
 		"package": "vsce package",
 		"publish:marketplace": "vsce publish",
 		"release": "node scripts/publish.mjs",

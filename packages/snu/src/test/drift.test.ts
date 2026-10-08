@@ -16,6 +16,8 @@ const BRIDGE_COMMANDS = new Set([
   'get_instance_info',
   'list_instances',
   'get_capabilities',
+  'negotiate',
+  'get_review_result',
   'update_record',
   'update_record_batch',
   'create_artifact',

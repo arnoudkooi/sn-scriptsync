@@ -13,6 +13,7 @@ import {
   AGENT_API_VERSION,
 } from './types.js';
 import { getCommandPolicy, resolveGateMode } from './server/policy.js';
+import { VERSION } from './version.js';
 
 export const MIN_API_VERSION = 7;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 70_000;
@@ -445,6 +446,9 @@ export class ScriptSyncClient {
         );
       }
 
+      if (mapped.command === 'negotiate' && json.result && typeof json.result === 'object') {
+        Object.assign(json.result, { clientVersion: VERSION });
+      }
       return json;
     } catch (err: any) {
       if (err instanceof ScriptSyncClientError) throw err;

@@ -3,6 +3,7 @@ import { VERSION } from '../version.js';
 import { StandaloneDispatcher } from './dispatcher.js';
 import { AgentRequest, AgentResponse } from '../types.js';
 import { AGENT_API_VERSION } from '../types.js';
+import { STANDALONE_COMMANDS } from './commands.js';
 
 export interface StandaloneHttpBridgeOptions {
   port?: number;
@@ -46,6 +47,8 @@ export function httpStatusForCode(code?: string): number {
       return 424;
     case 'E_PARTIAL_FAILURE':
       return 207;
+    case 'E_REVIEW_PENDING':
+      return 202;
     case 'E_SCREENSHOT_PERMISSION':
       return 502;
     case 'E_TIMEOUT':
@@ -97,34 +100,11 @@ export class StandaloneHttpBridge {
             JSON.stringify({
               status: 'success',
               apiVersion: AGENT_API_VERSION,
+              transportApiVersion: AGENT_API_VERSION,
               hostKind: 'standalone',
               bridgeVersion: VERSION,
               pid: process.pid,
-              commands: [
-                'check_connection',
-                'get_instance_info',
-                'list_instances',
-                'get_capabilities',
-                'query_records',
-                'get_record',
-                'update_record',
-                'create_artifact',
-                'delete_record',
-                'get_table_metadata',
-                'pull_records',
-                'pull_artifacts',
-                'pull_scope',
-                'code_search',
-                'run_background_script',
-                'get_form_state',
-                'set_field',
-                'run_ui_action',
-                'navigate',
-                'take_screenshot',
-                'switch_context',
-                'sdk_deploy',
-                'sdk_pull',
-              ],
+              commands: STANDALONE_COMMANDS,
             })
           );
           return;

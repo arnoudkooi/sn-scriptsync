@@ -101,7 +101,7 @@ test('TwoPhaseReview: full happy path approval and execution', async () => {
     const res = await dispatcher.dispatch({
       id: 'bg_1',
       command: 'run_background_script',
-      params: { script: "gs.print('Hello from Phase 4 Review Queue');" },
+      params: { awaitReview: true, script: "gs.print('Hello from Phase 4 Review Queue');" },
     });
 
     assert.strictEqual(res.status, 'success');
@@ -196,7 +196,7 @@ test('TwoPhaseReview: user rejection with feedback returns E_USER_REJECTED and p
     const res = await dispatcher.dispatch({
       id: 'bg_2',
       command: 'run_background_script',
-      params: { script: 'gr.deleteMultiple();' },
+      params: { awaitReview: true, script: 'gr.deleteMultiple();' },
     });
 
     assert.strictEqual(res.status, 'error');
@@ -277,7 +277,7 @@ test('TwoPhaseReview: approved execution failure is E_COMMAND_FAILED, not E_USER
     const response = await dispatcher.dispatch({
       id: 'delete_execution_failure',
       command: 'delete_record',
-      params: { table: 'sys_script_include', sys_id: '0123456789abcdef0123456789abcdef' },
+      params: { awaitReview: true, table: 'sys_script_include', sys_id: '0123456789abcdef0123456789abcdef' },
     });
 
     assert.strictEqual(response.status, 'error');
@@ -361,7 +361,7 @@ test('TwoPhaseReview: timed out review cannot execute later (stale approval is d
     const dispatchPromise = dispatcher.dispatch({
       id: 'bg_timeout',
       command: 'run_background_script',
-      params: { script: 'gs.sleep(100);' },
+      params: { awaitReview: true, script: 'gs.sleep(100);' },
     });
 
     await new Promise((r) => setTimeout(r, 50));
@@ -457,7 +457,7 @@ test('TwoPhaseReview: client cancellation triggers cancelReview on helper', asyn
     const dispatchPromise = dispatcher.dispatch({
       id: 'bg_cancel_test',
       command: 'run_background_script',
-      params: { script: 'gs.print(1);' },
+      params: { awaitReview: true, script: 'gs.print(1);' },
     });
 
     await new Promise((r) => setTimeout(r, 50));
@@ -709,7 +709,7 @@ test('TwoPhaseReview: legacy helper without commandReview executes directly via 
     const res = await dispatcher.dispatch({
       id: 'legacy_bg_1',
       command: 'run_background_script',
-      params: { script: "gs.print('Legacy Helper Executed Directly');" },
+      params: { awaitReview: true, script: "gs.print('Legacy Helper Executed Directly');" },
     });
 
     assert.strictEqual(res.status, 'success');
