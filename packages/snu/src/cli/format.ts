@@ -372,6 +372,9 @@ export function outputError(err: any, isJsonMode = false): void {
       process.stderr.write(
         `\n${ANSI.red}${ANSI.bold}✕ Execution rejected by developer:${ANSI.reset} "${feedback}" ${ANSI.gray}(E_USER_REJECTED)${ANSI.reset}\n`
       );
+    } else if (err?.code === 'E_REVIEW_PENDING') {
+      process.stderr.write(`\n${ANSI.yellow}${message}${ANSI.reset}\n` +
+        (err.details?.reviewId ? `Collect the outcome: snu review result ${err.details.reviewId}\n` : ''));
     } else if (err?.code === 'E_BROWSER_DISCONNECTED') {
       // Setup state, not a tool failure: guide instead of alarming.
       const steps: string[] = Array.isArray(err.details?.guidance) && err.details.guidance.length

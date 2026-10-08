@@ -2,6 +2,7 @@ import { CommandHandler } from '../types';
 import { getRuntime } from '../runtime';
 import { AGENT_API_VERSION } from '../portFile';
 import { commandNames } from './index';
+import * as vscode from 'vscode';
 
 /**
  * One answer to "what am I talking to, and can it do what I need?"
@@ -38,12 +39,14 @@ const negotiate: CommandHandler = {
 	async handle(ctx) {
 		const runtime = getRuntime();
 		const helper = ctx.getHelperBuildInfo();
+		const extensionVersion = vscode.extensions?.getExtension('arnoudkooicom.sn-scriptsync')?.packageJSON?.version ?? null;
 
 		return {
 			transportApiVersion: AGENT_API_VERSION,
 			/** @deprecated Use transportApiVersion. Kept so older CLIs keep working. */
 			apiVersion: AGENT_API_VERSION,
 			hostKind: 'vscode' as const,
+			extensionVersion,
 			bridgeState: runtime.bridgeState ? runtime.bridgeState() : undefined,
 			helper: helper
 				? {

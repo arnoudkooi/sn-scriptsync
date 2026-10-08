@@ -6,6 +6,7 @@ import { ScriptSyncClient, discoverBridge, checkHealth } from '../client.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { reclaimPort } from '../cli/portReclaim.js';
 import { resolveBridgeAttachment } from '../cli/attachment.js';
+import { VERSION } from '../version.js';
 
 // Surfaced verbatim by MCP clients. This is the only guidance an agent that
 // reaches the bridge over MCP ever sees: it has no access to the ScriptSync
@@ -22,11 +23,17 @@ const SERVER_INSTRUCTIONS = [
   'Choosing a write tool:',
   '- Plain data row (incident, task, sys_user, sys_user_group, cmdb_ci, sc_request, ...) -> snu_create_record.',
   '- Scriptable artifact (Script Include, Business Rule, Client Script, UI Action, widget) -> snu_create_artifact,',
-  '  which also tracks the record in the local workspace. Pass scope when the user has said which',
-  '  application they are working in — you cannot see their application picker. Omitting it creates the',
-  '  record in whatever application their session is in; the result reports effectiveScope, so check it.',
+  '  which also tracks the record locally when connected to VS Code. Pass scope when the user has said',
+  '  which application they are working in. Omitting it uses the session\'s current application;',
+  '  check the inserted record\'s sys_scope in the result.',
   '- Changing a field on an existing record -> snu_update_record.',
-  '- Anything the typed tools do not cover (Attachment API, Aggregate API, scripted REST) -> snu_rest_request.',
+  '- Changing several fields on one record -> snu_update_record_batch.',
+  '- Attaching a file to a record -> snu_upload_attachment.',
+  '- Anything the typed tools do not cover (Aggregate API, scripted REST) -> snu_rest_request.',
+  '- Check snu_negotiate for supported commands before relying on a capability.',
+  '',
+  'E_REVIEW_PENDING means the user must approve in the helper tab, or the approved command is still',
+  'running. Use snu_get_review_result with the returned reviewId. Never repeat the original write.',
   '',
   'Do not create or edit records by driving the browser UI. snu_navigate, snu_set_form_field and',
   'snu_run_ui_action exist to exercise real form behaviour (client scripts, UI policies, mandatory-field',
@@ -45,7 +52,7 @@ export async function createMcpServer(): Promise<McpServer> {
   const server = new McpServer(
     {
       name: 'sn-utils',
-      version: '0.1.0',
+      version: VERSION,
     },
     { instructions: SERVER_INSTRUCTIONS }
   );
@@ -76,6 +83,12 @@ export async function createMcpServer(): Promise<McpServer> {
         content: [{ type: 'text' as const, text: JSON.stringify(resp.result, null, 2) }],
       };
     } catch (err: any) {
+      if (err?.code === 'E_REVIEW_PENDING') {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({
+          status: 'pending', code: err.code, message: err.message, ...err.details,
+          next: 'Call snu_get_review_result with this reviewId; do not re-issue the original command.',
+        }, null, 2) }] };
+      }
       // Not a tool failure: the browser helper tab simply is not open. Return
       // a normal result with instructions so the agent guides the user
       // instead of surfacing (or retry-looping on) a raw error.
@@ -108,6 +121,38 @@ export async function createMcpServer(): Promise<McpServer> {
         ],
       };
     }
+  }
+
+  const paritySchemas = {
+    snu_negotiate: {},
+    snu_auth_status: { instance: z.string().optional() },
+    snu_pull_records: {
+      table: z.string(), query: z.string().optional(), sys_id: z.string().optional(),
+      fields: z.string().optional(), limit: z.number().int().min(1).max(500).optional(),
+      instance: z.string().optional(),
+    },
+    snu_pull_scope: {
+      scope: z.string(), tables: z.string().optional(),
+      limit: z.number().int().min(1).max(10000).optional(), includeRecords: z.boolean().optional(),
+      instance: z.string().optional(),
+    },
+    snu_update_record_batch: {
+      table: z.string(), sys_id: z.string(), fields: z.record(z.any()).optional(),
+      fieldsFile: z.string().optional().describe('JSON file inside the local MCP workspace, alternative to fields'),
+      instance: z.string().optional(),
+    },
+    snu_upload_attachment: {
+      table: z.string(), sys_id: z.string(), filePath: z.string().optional(),
+      imageData: z.string().optional(), fileName: z.string().optional(), contentType: z.string().optional(),
+      instance: z.string().optional(),
+    },
+    snu_get_review_result: {
+      reviewId: z.string(), waitSeconds: z.number().min(0).max(55).optional(),
+    },
+  };
+  for (const [name, schema] of Object.entries(paritySchemas)) {
+    const tool = getToolByName(name)!;
+    server.tool(name, tool.description, schema, async (args: Record<string, any>) => executeTool(name, args));
   }
 
   // 1. Code Search
@@ -176,11 +221,12 @@ export async function createMcpServer(): Promise<McpServer> {
   // 6. Create Artifact
   server.tool(
     'snu_create_artifact',
-    'Create a new scriptable artifact (Script Include, Business Rule, etc.) in ServiceNow and track it locally. Requires fields.name and the createArtifacts.enabled gate. Pass scope to pin the application (its name, e.g. x_acme_app, or "global"); omit it and the record is created in whichever application the user\'s ServiceNow session is currently in. Prefer passing it when the user has told you which application they are working in — you cannot see their application picker. The result reports effectiveScope and warns when no scope was given: check it, because an artifact filed into the wrong application is invisible until commit time and then has to be deleted and recreated. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
+    getToolByName('snu_create_artifact')!.description,
     {
       table: z.string().describe('Target ServiceNow artifact table (e.g. sys_script_include)'),
       name: z.string().describe('Artifact name (will be mapped into fields.name)'),
       fields: z.record(z.any()).optional().describe('Additional field-value dictionary (e.g. script, description)'),
+      fieldsFile: z.string().optional().describe('JSON file inside the local MCP workspace, alternative to fields'),
       scope: z
         .string()
         .optional()

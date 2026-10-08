@@ -15,6 +15,11 @@ import { resolveCreateScope, ScopeResolution, ScopeRow } from './scopeResolver.j
 import { resolveNowSdkProjectRoot } from '../nowsdk/NowSdkProject.js';
 import { DEPLOY_TIMEOUT_MS, buildDeployMessage } from '../nowsdk/NowSdkBuild.js';
 import { NowSdkFlowError, NowSdkTransport, deployFlow, pullFlow } from '../nowsdk/NowSdkFlows.js';
+import { VERSION } from '../version.js';
+import { STANDALONE_COMMANDS } from './commands.js';
+import { ReviewRegistry } from './reviewRegistry.js';
+import { resolveAttachment } from './attachmentInput.js';
+import { parseFieldValues } from '../fieldInput.js';
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
 
@@ -235,6 +240,7 @@ export class StandaloneDispatcher {
   private pending: PendingRegistry;
   private config: StandaloneConfig;
   private pendingReviewRequests = new Map<string, string>(); // correlationId/requestId -> reviewId
+  private reviews = new ReviewRegistry();
   /** Pause before the single retry after E_SCREENSHOT_PERMISSION; tests shorten it. */
   screenshotRetryDelayMs = 10_000;
   private requestIdToCorrelationId = new Map<string, string>(); // requestId -> correlationId
@@ -920,11 +926,61 @@ export class StandaloneDispatcher {
   }
 
   async dispatch(req: AgentRequest): Promise<AgentResponse> {
-    const correlationId = `snu_req_${req.id}_${Date.now()}`;
+    return this.dispatchRequest(req);
+  }
+
+  private async dispatchRequest(req: AgentRequest, approved = false): Promise<AgentResponse> {
+    const correlationId = `snu_req_${req.id}_${crypto.randomUUID()}`;
     this.requestIdToCorrelationId.set(req.id, correlationId);
     const policy = getCommandPolicy(req);
 
     try {
+      if (!STANDALONE_COMMANDS.includes(req.command as any) || req.command === 'yield') {
+        throw Object.assign(new Error(`Unknown command: ${req.command}`), { code: 'E_UNKNOWN_COMMAND' });
+      }
+      if (req.command === 'negotiate') {
+        const state = this.ws.getHelperState();
+        return {
+          id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
+          result: {
+            transportApiVersion: AGENT_API_VERSION, apiVersion: AGENT_API_VERSION,
+            hostKind: 'standalone', bridgeVersion: VERSION,
+            commands: STANDALONE_COMMANDS,
+            serverRunning: this.ws.isServerRunning(), browserConnected: this.ws.hasBrowserClient(),
+            helper: this.ws.hasBrowserClient() ? {
+              ...state.build, tier: state.tier, proFeatures: state.proFeatures,
+              debuggerAvailable: state.build?.debuggerAvailable ?? null,
+              capabilities: state.capabilities,
+            } : null,
+          },
+        };
+      }
+      if (req.command === 'get_review_result') {
+        const reviewId = req.params?.reviewId;
+        const waitSeconds = req.params?.waitSeconds === undefined ? 30 : Number(req.params.waitSeconds);
+        if (typeof reviewId !== 'string' || !reviewId || !Number.isFinite(waitSeconds)) {
+          throw Object.assign(new Error('Provide reviewId and a finite waitSeconds value'), { code: 'E_INVALID_PARAMS' });
+        }
+        const review = await this.reviews.wait(reviewId, Math.min(Math.max(waitSeconds, 0), 55) * 1000);
+        if (!review) {
+          throw Object.assign(new Error('Unknown or expired reviewId. Results are kept for 10 minutes after completion. Check the instance before re-issuing a write; the command may already have run.'), { code: 'E_NOT_FOUND' });
+        }
+        if (!review.response) {
+          return {
+            id: req.id, command: req.command, status: 'error', timestamp: Date.now(), code: 'E_REVIEW_PENDING',
+            error: review.running
+              ? 'Approved: the command is running now. Call get_review_result again; do not re-issue the command.'
+              : 'Still awaiting developer approval in the SN Utils helper tab Review Queue. Call get_review_result again to collect the outcome.',
+            details: { reviewId, ...(review.running ? { running: true } : {}) },
+          };
+        }
+        if (review.response.status === 'error') return { ...review.response, id: req.id, command: req.command };
+        const result = review.response.result;
+        return {
+          id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
+          result: { reviewId, command: review.command, ...(result && typeof result === 'object' ? result : { result }) },
+        };
+      }
       // 1. Connection Commands
       if (req.command === 'check_connection') {
         const isRunning = this.ws.isServerRunning();
@@ -1203,7 +1259,7 @@ export class StandaloneDispatcher {
       // through to direct execution, still behind the fail-closed host gates.
       const hasCommandReview = this.ws.hasBrowserClient() && helperState.capabilities?.commandReview === 1;
 
-      if (isReviewRequired && hasCommandReview) {
+      if (isReviewRequired && hasCommandReview && !approved) {
         const reviewId = `rev_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
         const serverNonce = crypto.randomBytes(16).toString('hex');
         const payloadHash = computePayloadHash(1, instanceOrigin, req.command, req.params);
@@ -1216,7 +1272,9 @@ export class StandaloneDispatcher {
           command: req.command,
           params: req.params,
           instanceOrigin,
+          onApproved: () => this.reviews.markRunning(reviewId),
         });
+        this.reviews.register(reviewId, req.command);
         this.pendingReviewRequests.set(correlationId, reviewId);
         this.pendingReviewRequests.set(req.id, reviewId);
 
@@ -1224,7 +1282,28 @@ export class StandaloneDispatcher {
         const reviewTimeoutMs = 300_000; // 5 minutes
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: reviewTimeoutMs });
 
-        this.ws.sendToBrowser({
+        // Keep execution and its result alive after the initial transport returns.
+        // Only this private continuation can skip the already completed review.
+        const finalPromise = pendingPromise.then(async (res): Promise<AgentResponse> => {
+          if (res?.approvedNotExecuted === true) return this.dispatchRequest(req, true);
+          return {
+            id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
+            result: res.output !== undefined ? { output: res.output } : res.data || res.result || { success: true },
+          };
+        }).catch((err): AgentResponse => ({
+          id: req.id, command: req.command, status: 'error', timestamp: Date.now(),
+          code: err.code || 'E_COMMAND_FAILED', error: err.message || String(err), details: err.details,
+        })).then(response => {
+          this.reviews.settle(reviewId, response);
+          return response;
+        }).finally(() => {
+          this.pendingReviewRequests.delete(correlationId);
+          this.pendingReviewRequests.delete(req.id);
+          this.requestIdToCorrelationId.delete(req.id);
+          this.ws.cancelReview(reviewId, 'COMPLETED_OR_TIMED_OUT');
+        });
+
+        try { this.ws.sendToBrowser({
           action: 'reviewRequest',
           reviewId,
           nonce: serverNonce,
@@ -1237,33 +1316,24 @@ export class StandaloneDispatcher {
           instance: inst.settings,
           client: {
             name: 'SN Utils CLI',
-            version: '0.1.0',
+            version: VERSION,
             hostKind: 'standalone',
             pid: process.pid,
           },
           expiresIn: Math.floor(reviewTimeoutMs / 1000),
           agentRequestId: correlationId,
-        });
-
-        try {
-          const res = await pendingPromise;
-          // approvedNotExecuted: the helper approved but cannot run this
-          // command shape (bulk delete by query, REST DELETE, cascade) — fall
-          // through to the direct execution branches below.
-          if (res?.approvedNotExecuted !== true) {
-            return {
-              id: req.id,
-              command: req.command,
-              status: 'success',
-              timestamp: Date.now(),
-              result: res.output !== undefined ? { output: res.output } : res.data || res.result || { success: true },
-            };
-          }
-        } finally {
-          this.pendingReviewRequests.delete(correlationId);
-          this.pendingReviewRequests.delete(req.id);
-          this.ws.cancelReview(reviewId, 'COMPLETED_OR_TIMED_OUT');
+        }); } catch (error: any) {
+          this.pending.reject(correlationId, error.code || 'E_BROWSER_DISCONNECTED', error.message || String(error));
+          return await finalPromise;
         }
+
+        if (req.params?.awaitReview === true) return await finalPromise;
+        return {
+          id: req.id, command: req.command, status: 'error', timestamp: Date.now(),
+          code: 'E_REVIEW_PENDING',
+          error: 'Developer approval is required in the SN Utils helper tab Review Queue. Call get_review_result with the reviewId to collect the outcome; do not re-issue the command.',
+          details: { reviewId, instanceOrigin, expiresIn: reviewTimeoutMs / 1000 },
+        };
       }
 
       // 4. Standard Direct Execution (Unreviewed commands + legacy helper fallback)
@@ -1470,6 +1540,62 @@ export class StandaloneDispatcher {
             field,
             record: res.data?.result,
           },
+        };
+      }
+
+      if (req.command === 'update_record_batch') {
+        const { table, sys_id } = req.params || {};
+        const fields = parseFieldValues(req.params?.fields);
+        if (typeof table !== 'string' || !/^[a-zA-Z0-9_]+$/.test(table) ||
+            typeof sys_id !== 'string' || !/^[a-f0-9]{32}$/i.test(sys_id) || !Object.keys(fields).length ||
+            Object.keys(fields).some(field => !/^[a-zA-Z0-9_]+$/.test(field))) {
+          throw Object.assign(new Error('Provide a valid table, 32-character sys_id and non-empty fields object'), { code: 'E_INVALID_PARAMS' });
+        }
+        const writable = { ...fields };
+        const warnings: string[] = [];
+        if ('sys_scope' in writable) {
+          delete writable.sys_scope;
+          warnings.push("Field 'sys_scope' is read-only after insert and was not written. Use create_application/create_artifact to set scope at insert time.");
+        }
+        const fieldNames = Object.keys(writable);
+        if (!fieldNames.length) throw Object.assign(new Error('No writable fields were supplied'), { code: 'E_INVALID_PARAMS' });
+        const responsePromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: 'agentRestApi', agentRequestId: correlationId,
+          endpoint: `/api/now/table/${table}/${sys_id}`, method: 'PATCH', body: writable,
+          instance: inst.settings, appName: 'SN Utils CLI',
+        });
+        const response = await responsePromise;
+        if (response.success === false) throw Object.assign(new Error(response.error || 'Batch update failed'), { code: codeForRestStatus(response.status, response.error || '') });
+        const persisted = response.data?.result;
+        const pick: Record<string, any> = {};
+        const normalise = (value: any) => value == null ? '' : typeof value === 'object' ? String(value.value ?? '') : String(value);
+        for (const field of fieldNames) {
+          if (persisted && field in persisted) pick[field] = persisted[field];
+          if (persisted && normalise(writable[field]) && !normalise(persisted[field])) {
+            warnings.push(`Field '${field}' did not persist (came back empty) — likely read-only, protected, or dropped by an ACL/business rule.`);
+          }
+        }
+        return {
+          id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
+          result: { success: true, awaited: true, table, sys_id, fields: fieldNames, persisted: pick, warnings },
+        };
+      }
+
+      if (req.command === 'upload_attachment') {
+        const attachment = resolveAttachment(req.params || {}, this.cwd, path.join(this.cwd, inst.name));
+        const responsePromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: 'uploadAttachment', agentRequestId: correlationId, ...attachment,
+          instance: inst.settings, appName: 'SN Utils CLI',
+        });
+        const response = await responsePromise;
+        if (response.success === false) throw Object.assign(new Error(response.error || 'Attachment upload failed'), { code: response.code || 'E_COMMAND_FAILED' });
+        return {
+          id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
+          result: { uploaded: true, fileName: response.fileName ?? attachment.fileName,
+            table: response.tableName ?? attachment.tableName, recordSysId: response.recordSysId ?? attachment.recordSysId,
+            attachment: response.attachment },
         };
       }
 
@@ -1947,7 +2073,9 @@ export class StandaloneDispatcher {
         details: err.details,
       };
     } finally {
-      this.requestIdToCorrelationId.delete(req.id);
+      if (!this.pendingReviewRequests.has(req.id) && this.requestIdToCorrelationId.get(req.id) === correlationId) {
+        this.requestIdToCorrelationId.delete(req.id);
+      }
     }
   }
 }

@@ -1,8 +1,20 @@
 # CHANGELOG.md
 
-## `@snutils/snu` Unreleased
+## `@snutils/snu` 0.4.0 (Unreleased)
 
 - **`snu search` and the `snu_code_search` MCP tool find code again.** Every search failed with "Search term must be at least 2 characters", whatever the term (#164).
+- **`snu negotiate` reports what the connected host supports**, with client, bridge and helper versions. Standalone health and negotiation now share a complete command list.
+- **Update several fields on one record** with `snu record update-batch` / `snu_update_record_batch`, using one PATCH and returned field values. Read-only `sys_scope` is stripped with a warning.
+- **Attach a workspace file** with `snu attachment upload` / `snu_upload_attachment`. MIME types are inferred from file extensions; file input rejects paths outside the workspace and symbolic links.
+- **Collect approval outcomes** with `snu review result` / `snu_get_review_result`. Standalone reviews return immediately, report approved commands as running, and retain results for 10 minutes after completion. Direct API callers can keep blocking behavior with `params.awaitReview: true`.
+- **Create artifacts from a JSON file or stdin**, with scope documentation matching the current session behavior. MCP accepts `fieldsFile` for artifact creation and batch updates.
+- MCP now exposes the existing auth-status, pull-records and pull-scope tools as well, bringing the tool list to 26.
+- Added CLI, MCP, review lifecycle and cross-host request/permission regression checks.
+
+## 4.9.16 (Unreleased)
+
+- Attachment file input now checks directory boundaries and rejects symbolic links, matching the standalone host.
+- `negotiate` also returns the ScriptSync extension version.
 
 ## 4.9.15 (2026-10-06)
 

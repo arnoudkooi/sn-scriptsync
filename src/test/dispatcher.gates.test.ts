@@ -211,7 +211,7 @@ test('upload_attachment rides the createArtifacts grant', async () => {
 	useRuntime({ gates: { ...ALL_OFF, createArtifacts: 'auto' } });
 
 	const pending = dispatchAgentCommand(request('upload_attachment', {
-		table: 'incident', sys_id: 'abc', fileName: 'note.txt', imageData: 'aGk=',
+		table: 'incident', sys_id: '0123456789abcdef0123456789abcdef', fileName: 'note.txt', imageData: 'aGk=',
 	}));
 	await respondTo('uploadAttachment', { success: true, fileName: 'note.txt', attachment: { sys_id: 'att1' } });
 

@@ -9,7 +9,7 @@ Unified CLI and Model Context Protocol (MCP) server for ServiceNow development, 
 - **Zero Manual Credentials:** Connects to your live browser session via SN Utils, automatically inheriting authenticated SSO/MFA sessions, cookies, update set, and application scope.
 - **Dual Mode (CLI + MCP):** Use it as a terminal command tool (`snu query`, `snu search`, `snu schema`) or as a local stdio MCP server (`snu --mcp`) in any compatible AI client.
 - **Works Attached & Standalone:** Operates seamlessly when VS Code is open (Attached Mode), or completely standalone without VS Code (Standalone Mode with in-process bridge and auto-handover).
-- **14 Strictly-Typed Tools:** Fast GraphQL code search, schema dictionary inspection, record queries, CRUD operations, background script execution, and live form automation.
+- **26 Typed Tools:** Code search, schema inspection, record queries and writes, attachments, workspace pulls, NOW SDK deployment, background scripts, live form automation, negotiation, and review results.
 
 ---
 
@@ -19,6 +19,7 @@ Unified CLI and Model Context Protocol (MCP) server for ServiceNow development, 
 
 - Node.js 20 or newer.
 - Attached mode requires ScriptSync 4.8.0 or newer.
+- Run `snu negotiate` to check the connected host's command list and versions. For the complete 0.4 command set and attachment path checks, use ScriptSync 4.9.16 or newer, or a standalone 0.4 bridge.
 - A connected SN Utils helper tab is required for ServiceNow operations. In standalone mode, start the bridge first and then run `/token` on the ServiceNow instance you want to use. The live session remains in memory only and is cleared when the helper disconnects.
 
 ### Using `npx` (No Installation Needed)
@@ -50,7 +51,7 @@ snu run "gs.print('Hello from ' + gs.getUserName());"
 
 ## 2. Use as an MCP Server
 
-`@snutils/snu` exposes the same ServiceNow capabilities as 14 MCP tools. The MCP client starts `snu --mcp` as a local stdio process; no remote MCP endpoint or API key is required.
+`@snutils/snu` exposes the same ServiceNow capabilities as 26 MCP tools. The MCP client starts `snu --mcp` as a local stdio process; no remote MCP endpoint or API key is required.
 
 ### Configure your MCP client
 
@@ -90,7 +91,7 @@ If the package is installed globally, use the shorter command:
 }
 ```
 
-Restart or refresh the MCP client after changing its configuration. The server should appear as `sn-utils` with 14 tools. `@latest` with `--prefer-online` checks npm for a newer release each time the MCP process starts; a running MCP process is never replaced underneath an active session.
+Restart or refresh the MCP client after changing its configuration. The server should appear as `sn-utils` with 26 tools. `@latest` with `--prefer-online` checks npm for a newer release each time the MCP process starts; a running MCP process is never replaced underneath an active session.
 
 ### Connect a ServiceNow instance
 
@@ -124,16 +125,21 @@ When more than one instance is connected, tell the agent which instance to use o
 
 | Category | Tools | Purpose |
 | --- | --- | --- |
-| Connection | `snu_get_context` | Inspect the bridge, helper, instances, license, and permission gates. |
+| Connection | `snu_get_context`, `snu_auth_status`, `snu_negotiate` | Inspect connection and permissions, check the session, and report supported commands and versions. |
 | Schema and search | `snu_get_schema`, `snu_code_search` | Inspect table metadata and search server-side code. Code Search requires SN Utils Pro. |
 | Record reads | `snu_query_records`, `snu_get_record` | Query tables or fetch a record by `sys_id`. |
-| Record writes | `snu_create_record`, `snu_create_artifact`, `snu_update_record`, `snu_delete_record` | Create data rows or scriptable artifacts, update fields, or delete a record. |
+| Record writes | `snu_create_record`, `snu_create_artifact`, `snu_update_record`, `snu_update_record_batch`, `snu_delete_record`, `snu_upload_attachment` | Create records, update one or several fields on one record, delete, or attach a file. |
+| Workspace pulls | `snu_pull_records`, `snu_pull_scope` | Pull code fields from selected records or an application scope into local files. |
+| Reviews | `snu_get_review_result` | Collect the outcome of a write awaiting approval or still running. |
+| NOW SDK | `snu_sdk_deploy`, `snu_sdk_pull` | Build and install a Fluent app, or pull instance changes into its local project. |
 | Escape hatch | `snu_rest_request` | Call any ServiceNow REST endpoint through the authenticated browser session. |
 | Server execution | `snu_run_background_script` | Run server-side JavaScript and return its captured output. |
 | Browser and forms | `snu_get_form_state`, `snu_set_form_field`, `snu_run_ui_action`, `snu_navigate`, `snu_take_screenshot` | Inspect and operate the connected ServiceNow browser tab. |
 | Session context | `snu_switch_context` | Switch the current update set, application scope or domain by `sys_id` through the picker API, without driving a form. |
 
-**Choosing a write tool.** `snu_create_record` inserts a plain data row (incident, task, `sys_user`, CMDB CI) and returns the inserted record. `snu_create_artifact` is for scriptable artifacts (Script Include, Business Rule, widget) and also tracks the record in the local workspace. Both sit on the same Create Artifacts permission, which is on by default. The browser tools exist to exercise real form behaviour and to show something on screen; they are not a record-writing path.
+**Choosing a write tool.** `snu_create_record` inserts a plain data row (incident, task, `sys_user`, CMDB CI) and returns the inserted record. `snu_create_artifact` is for scriptable artifacts (Script Include, Business Rule, widget); the VS Code host also tracks the artifact locally, while standalone mode returns the inserted record. Both sit on the same Create Artifacts permission, which is on by default. Pass `scope` when the target application is known, or `global` explicitly. Omitting scope uses the session's current application; check the returned record's `sys_scope`.
+
+For artifact creation and batch field updates, MCP accepts a `fields` object or `fieldsFile`, a JSON object file inside the MCP process's working directory. These are alternatives. The CLI accepts `--fields`, `--file`, or piped JSON. File input preserves real newlines in script values.
 
 The MCP server also publishes routing instructions that most clients surface to the agent, so an agent that only ever sees the tool list still knows which tool creates a record.
 
@@ -144,6 +150,8 @@ The helper tab applies permissions per ServiceNow instance:
 - **Off** blocks that class of operation.
 - **Approve** sends high-risk operations to the helper's Review Queue for one-time approval.
 - **Auto** allows that operation without a review prompt.
+
+In 0.4, standalone review requests return `E_REVIEW_PENDING` immediately, matching the editor host. Poll with `snu review result <reviewId>` or `snu_get_review_result`; an approval changes the state to running before the final outcome arrives. Do not repeat the original write. Results remain available for 10 minutes after completion. Restarting the bridge clears them, so check the instance before retrying an unknown or expired review. MCP reports pending reviews as structured pending results; CLI JSON retains the error code and review ID on stderr with exit status 1. Direct HTTP callers can pass `params.awaitReview: true` to retain the previous blocking behavior.
 
 An actual Reject decision returns `E_USER_REJECTED`. If the user approves but
 ServiceNow then refuses or fails the operation, the result is
@@ -198,6 +206,9 @@ Interactive CLI commands check for a newer release at most once every 24 hours a
 # Show active connection, helper tab, and instance roster
 snu context
 
+# Report client, bridge and helper versions, plus supported bridge commands
+snu negotiate
+
 # Start a persistent standalone bridge daemon
 snu serve
 
@@ -244,13 +255,26 @@ snu record update incident <sys_id> short_description --value "Database latency 
 snu record update sys_script_include <sys_id> script --file ./my_script.js
 cat ./script.js | snu record update sys_script_include <sys_id> script
 
+# Update several fields on ONE record in one PATCH with returned field values
+snu record update-batch sp_widget <sys_id> --file ./widget-fields.json
+snu record update-batch incident <sys_id> --fields '{"priority":"2","short_description":"Resolved"}'
+
 # Create a scriptable artifact (Script Include, Business Rule, etc.)
 snu artifact create sys_script_include MyNewHelper --fields '{"script":"var MyNewHelper = Class.create();"}'
+snu artifact create sys_script_include MyNewHelper --file ./fields.json --scope x_acme_app
+
+# Attach a file inside the bridge's workspace (MIME type inferred from extension)
+snu attachment upload incident <sys_id> --file ./report.pdf
+
+# Collect a reviewed command's outcome; --wait 0 checks immediately (default: 30s)
+snu review result <reviewId> --wait 0
 
 # Delete record (--confirm required for safety, or --dry-run to inspect)
 snu record delete incident <sys_id> --dry-run
 snu record delete incident <sys_id> --confirm
 ```
+
+Attachments accept a workspace file or, through MCP/HTTP, base64 `imageData` plus `fileName`. CLI paths are resolved from your current directory; MCP relative `filePath` is resolved under the selected instance folder. Absolute paths must stay inside the bridge workspace. Both hosts reject symbolic links and paths outside that workspace. `update_record_batch` changes fields on a single record; it does not perform a bulk update across records. It strips read-only `sys_scope` and warns when a supplied non-empty field comes back empty.
 
 ### Generic REST Calls
 ```bash
@@ -298,6 +322,10 @@ snu screenshot
 Session credentials stay on your machine. The standalone bridge keeps the `/token` session in memory only, clears it when the helper disconnects, and never writes it to disk or sends it over the internet.
 
 ---
+
+## Development checks
+
+From the repository root, run `npm test` for the editor host, `npm run build --prefix packages/snu && npm test --prefix packages/snu` for the CLI/standalone package, and `npm run test:bridge-parity` to compare both hosts' helper requests, results and permission policies. The parity checks cover batch updates, binary attachments and the #164 search request contract.
 
 ## License
 

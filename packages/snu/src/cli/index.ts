@@ -5,6 +5,7 @@ import { TOOLS, getToolByCliCommand } from '../registry.js';
 import { ScriptSyncClient, ScriptSyncClientError, checkHealth } from '../client.js';
 import { HealthResponse } from '../types.js';
 import { resolveContentInput } from './stdin.js';
+import { parseFieldValues } from '../fieldInput.js';
 import { formatHumanOutput, outputJson, outputError } from './format.js';
 import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
@@ -146,8 +147,12 @@ export function printHelp(): void {
   record get <table> <sys_id>         Fetch a record by sys_id
   record create <table> [f=v ...]     Create a data row (incident, task, user) via the REST API
   record update <table> <sys_id> <f>  Update a record field (--value <v>, --file <p>, or stdin)
+  record update-batch <table> <id>    Update several fields on one record (--fields, --file, or stdin)
   record delete <table> <sys_id>      Delete a record (--confirm or --dry-run)
   artifact create <table> <name>      Create a scriptable artifact (Script Include, etc.)
+  attachment upload <table> <id>      Attach a workspace file (--file <path>)
+  review result <reviewId>            Collect a reviewed command's outcome (--wait 0..55)
+  negotiate                           Report bridge/helper versions and supported commands
   rest <endpoint>                     Call any REST endpoint (--method, --body, --query)
 
 \x1b[1mNOW SDK (FLUENT) APPS (Pro):\x1b[0m
@@ -812,6 +817,34 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         }
         inputData.table = positionals[0];
         inputData.name = positionals[1];
+        {
+          const content = await resolveContentInput({ value: values.fields, filePath: values.file });
+          if (content !== undefined && content !== '') inputData.fields = parseFieldValues(content);
+        }
+        break;
+
+      case 'record update-batch': {
+        if (!positionals[0] || !positionals[1]) throw new ScriptSyncClientError('Usage: snu record update-batch <table> <sys_id> (--fields <json> | --file <path> | stdin)', 'E_INVALID_PARAMS');
+        inputData.table = positionals[0];
+        inputData.sys_id = positionals[1];
+        const content = await resolveContentInput({ value: values.fields, filePath: values.file });
+        if (!content) throw new ScriptSyncClientError('Provide field values with --fields, --file or stdin', 'E_INVALID_PARAMS');
+        inputData.fields = parseFieldValues(content);
+        break;
+      }
+
+      case 'attachment upload':
+        if (!positionals[0] || !positionals[1] || !values.file) throw new ScriptSyncClientError('Usage: snu attachment upload <table> <sys_id> --file <path>', 'E_INVALID_PARAMS');
+        inputData.table = positionals[0];
+        inputData.sys_id = positionals[1];
+        inputData.filePath = path.resolve(String(values.file));
+        inputData.fileName = values.name;
+        inputData.contentType = values['content-type'];
+        break;
+
+      case 'review result':
+        if (!positionals[0]) throw new ScriptSyncClientError('Usage: snu review result <reviewId> [--wait <seconds>]', 'E_INVALID_PARAMS');
+        inputData.reviewId = positionals[0];
         break;
 
       case 'record create': {

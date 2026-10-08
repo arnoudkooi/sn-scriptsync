@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { assertPathUnderRoot, getWorkspaceRoot, safeJoinUnderRoot } from '../../workspaceRoot';
 import { CommandHandler, AgentContext } from '../types';
+import { resolveAttachment } from '../attachmentInput';
 import { AgentError, inferCodeFromMessage } from '../errors';
 import { mustGetInstanceSettings, readBackRecord, restRequest, getSetting } from './_shared';
 
@@ -503,70 +504,24 @@ const upload_attachment: CommandHandler = {
 		},
 	},
 	async handle(ctx, params) {
-		const table = params?.table;
-		const sysId = params?.sys_id;
-		let fileName = params?.fileName;
-		let imageData = params?.imageData;
-		let contentType = params?.contentType;
-		const filePath = params?.filePath;
-
-		if (!table || !sysId) throw new AgentError('E_INVALID_PARAMS', 'Missing required params: table, sys_id');
-
-		if (filePath && !imageData) {
-			const resolvedPath = path.isAbsolute(filePath)
-				? path.resolve(filePath)
-				: path.resolve(ctx.instanceFolder, filePath);
-			if (!resolvedPath.startsWith(getWorkspaceRoot() || '')) {
-				throw new AgentError('E_SECURITY', 'Security: File path outside workspace not allowed');
-			}
-			if (!fs.existsSync(resolvedPath)) {
-				throw new AgentError('E_INVALID_PARAMS', `File not found: ${resolvedPath}`);
-			}
-			imageData = fs.readFileSync(resolvedPath, 'base64');
-			if (!fileName) fileName = path.basename(resolvedPath);
-			if (!contentType) {
-				const ext = path.extname(resolvedPath).toLowerCase();
-				const mime: Record<string, string> = {
-					'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-					'.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
-					'.pdf': 'application/pdf', '.txt': 'text/plain', '.json': 'application/json',
-					'.xml': 'application/xml', '.html': 'text/html', '.css': 'text/css',
-					'.js': 'application/javascript', '.zip': 'application/zip',
-					'.doc': 'application/msword',
-					'.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-					'.xls': 'application/vnd.ms-excel',
-					'.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-				};
-				contentType = mime[ext] || 'application/octet-stream';
-			}
-			ctx.log(`Agent API: Read file from ${resolvedPath} (${contentType})`);
+		let attachment: ReturnType<typeof resolveAttachment>;
+		try {
+			attachment = resolveAttachment(params || {}, getWorkspaceRoot() || '', ctx.instanceFolder);
+		} catch (error: any) {
+			throw new AgentError(error.code || 'E_INVALID_PARAMS', error.message);
 		}
-
-		if (!contentType) contentType = 'image/png';
-		if (!fileName) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: fileName (or provide filePath)');
-		if (!imageData) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: imageData (base64) or filePath');
-
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
 		const correlationId = `agent_${ctx.request.id}`;
 		const pending = ctx.waitForBrowserResponse<any>(correlationId);
-
-		ctx.sendToBrowser({
-			action: 'uploadAttachment',
-			agentRequestId: correlationId,
-			tableName: table,
-			recordSysId: sysId,
-			fileName,
-			imageData,
-			contentType,
-			instance: instanceSettings,
-		});
-		ctx.log(`Agent API: Sent upload attachment request for ${fileName} to ${table}/${sysId}`);
+		ctx.sendToBrowser({ action: 'uploadAttachment', agentRequestId: correlationId, ...attachment, instance: instanceSettings });
+		ctx.log(`Agent API: Sent upload attachment request for ${attachment.fileName} to ${attachment.tableName}/${attachment.recordSysId}`);
 		const response = await pending;
+		if (response?.success === false) throw new AgentError(response.code || 'E_COMMAND_FAILED', response.error || 'Attachment upload failed');
 		return {
 			uploaded: true,
-			fileName: response?.fileName ?? fileName,
-			table: response?.tableName ?? table,
-			recordSysId: response?.recordSysId ?? sysId,
+			fileName: response?.fileName ?? attachment.fileName,
+			table: response?.tableName ?? attachment.tableName,
+			recordSysId: response?.recordSysId ?? attachment.recordSysId,
 			attachment: response?.attachment,
 		};
 	},

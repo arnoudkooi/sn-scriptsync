@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ToolDefinition, MappedCommand } from './types.js';
 import { findNowSdkProjects, readDeployLink } from './nowsdk/NowSdkProject.js';
+import { resolveFieldValues } from './fieldInput.js';
 
 /**
  * The instance a NOW SDK app is linked to (.snu/deploy.json), so deploy and
@@ -283,11 +284,12 @@ export const TOOLS: ToolDefinition[] = [
     name: 'snu_create_artifact',
     agentCommand: 'create_artifact',
     description:
-      'Create a new scriptable artifact (Script Include, Business Rule, UI Action, etc.) in ServiceNow and track it locally. Requires fields.name, an explicit scope, and the createArtifacts gate. The scope is mandatory and is NOT inferred from the application picker: pass the application name (e.g. x_acme_app) to create inside an application, or "global" to create a global artifact deliberately. An artifact filed into the wrong application is invisible until commit time, so this never guesses. NOT for plain data rows: to create an incident, task, sys_user, catalog request or any record whose display field is not "name", use snu_create_record instead. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
+      'Create a scriptable artifact (Script Include, Business Rule, UI Action, etc.) through the createArtifacts gate. Pass scope when the application is known, or "global" for Global; omitting scope uses the session\'s current application. Supply fields directly or read a JSON object from fieldsFile inside the local workspace. Use snu_create_record for ordinary data rows. The VS Code host also tracks the artifact locally and can stage the write for review.',
     cliCommand: 'artifact create',
-    cliUsage: 'snu artifact create <table> <name> [--fields <json>] [--scope <scope>] [--instance <i>] [--json]',
+    cliUsage: 'snu artifact create <table> <name> [--fields <json> | --file <json-file> | stdin] [--scope <scope>] [--instance <i>] [--json]',
     cliOptions: {
       fields: { type: 'string', short: 'f', description: 'JSON payload dictionary' },
+      file: { type: 'string', description: 'Read the field-value JSON object from a file' },
       scope: { type: 'string', short: 's', description: 'Application scope name or sys_id, or "global". Omit to use the session\'s current application.' },
     },
     inputSchema: {
@@ -296,17 +298,15 @@ export const TOOLS: ToolDefinition[] = [
         table: { type: 'string', description: 'Target ServiceNow artifact table (e.g. sys_script_include)' },
         name: { type: 'string', description: 'Artifact name (will be mapped into fields.name)' },
         fields: { type: 'object', description: 'Additional field-value dictionary' },
-        scope: { type: 'string', description: 'Application scope name or sys_id, or "global". Optional: omit to create in the session\'s current application. The result reports effectiveScope.' },
+        fieldsFile: { type: 'string', description: 'JSON file of field values inside the local CLI/MCP workspace; conflicts with fields' },
+        scope: { type: 'string', description: 'Application scope name or sys_id, or "global". Optional: omit to create in the session\'s current application. Check the inserted record\'s sys_scope in the result.' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['table', 'name'],
       additionalProperties: false,
     },
     mapInput: (input) => {
-      let fields: Record<string, any> = {};
-      if (input.fields) {
-        fields = typeof input.fields === 'string' ? JSON.parse(input.fields) : input.fields;
-      }
+      const fields = resolveFieldValues(input);
       return {
         command: 'create_artifact',
         instance: input.instance,
@@ -879,6 +879,79 @@ export const TOOLS: ToolDefinition[] = [
       instance: input.instance || linkedSdkInstance(sdkProjectPath(input)),
       params: { projectPath: sdkProjectPath(input), force: input.force === true, dryRun: input.dryRun === true || input['dry-run'] === true },
     }),
+  },
+  {
+    name: 'snu_negotiate', agentCommand: 'negotiate', cliCommand: 'negotiate',
+    description: 'Report bridge and helper versions, connection state and the authoritative supported command list. Works without a connected helper.',
+    cliUsage: 'snu negotiate [--json]',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    mapInput: () => ({ command: 'negotiate', params: {} }),
+  },
+  {
+    name: 'snu_update_record_batch', agentCommand: 'update_record_batch', cliCommand: 'record update-batch',
+    description: 'Update several fields on one record in one request with persistence verification. Requires updateRecords permission. This does not update multiple records.',
+    cliUsage: 'snu record update-batch <table> <sys_id> (--fields <json> | --file <json-file> | stdin) [--instance <i>] [--json]',
+    cliOptions: {
+      fields: { type: 'string', short: 'f', description: 'JSON field-value object' },
+      file: { type: 'string', description: 'Read field values from a JSON file' },
+    },
+    inputSchema: {
+      type: 'object', properties: {
+        table: { type: 'string', description: 'ServiceNow table name' },
+        sys_id: { type: 'string', description: '32-character record sys_id' },
+        fields: { type: 'object', description: 'Field values to update' },
+        fieldsFile: { type: 'string', description: 'JSON file inside the local CLI/MCP workspace; conflicts with fields' },
+        instance: { type: 'string', description: 'Target instance' },
+      }, required: ['table', 'sys_id'], anyOf: [{ required: ['fields'] }, { required: ['fieldsFile'] }], additionalProperties: false,
+    },
+    mapInput: input => {
+      const fields = resolveFieldValues(input);
+      if (!Object.keys(fields).length) throw Object.assign(new Error('Fields object cannot be empty'), { code: 'E_INVALID_PARAMS' });
+      return { command: 'update_record_batch', instance: input.instance,
+        params: { table: input.table, sys_id: input.sys_id, fields, await: true } };
+    },
+  },
+  {
+    name: 'snu_upload_attachment', agentCommand: 'upload_attachment', cliCommand: 'attachment upload',
+    description: 'Attach a local workspace file or base64 data to one ServiceNow record. Requires createArtifacts permission. Relative filePath is resolved under the instance folder on the bridge; absolute paths must stay inside its workspace.',
+    cliUsage: 'snu attachment upload <table> <sys_id> --file <path> [--name <file-name>] [--content-type <mime>] [--instance <i>] [--json]',
+    cliOptions: {
+      file: { type: 'string', short: 'f', description: 'Workspace file to attach' },
+      name: { type: 'string', description: 'Attachment name (default: file basename)' },
+      'content-type': { type: 'string', description: 'MIME type (default: inferred from file)' },
+    },
+    inputSchema: {
+      type: 'object', properties: {
+        table: { type: 'string', description: 'Table containing the target record' },
+        sys_id: { type: 'string', description: '32-character record sys_id' },
+        filePath: { type: 'string', description: 'Path to a file inside the bridge workspace' },
+        imageData: { type: 'string', description: 'Base64 attachment data, alternative to filePath' },
+        fileName: { type: 'string', description: 'Required for imageData; defaults to file basename for filePath' },
+        contentType: { type: 'string', description: 'Attachment MIME type' },
+        instance: { type: 'string', description: 'Target instance' },
+      }, required: ['table', 'sys_id'], anyOf: [{ required: ['filePath'] }, { required: ['imageData', 'fileName'] }], additionalProperties: false,
+    },
+    mapInput: input => ({ command: 'upload_attachment', instance: input.instance, params: {
+      table: input.table, sys_id: input.sys_id, filePath: input.filePath,
+      imageData: input.imageData, fileName: input.fileName, contentType: input.contentType,
+    } }),
+  },
+  {
+    name: 'snu_get_review_result', agentCommand: 'get_review_result', cliCommand: 'review result',
+    description: 'Collect a reviewed command\'s pending, running or completed outcome. Poll the same reviewId instead of repeating a write; completed results are retained for 10 minutes.',
+    cliUsage: 'snu review result <reviewId> [--wait <seconds>] [--json]',
+    cliOptions: { wait: { type: 'string', description: 'Long-poll time, 0 to 55 seconds (default: 30)' } },
+    inputSchema: { type: 'object', properties: {
+      reviewId: { type: 'string', description: 'ID returned with E_REVIEW_PENDING' },
+      waitSeconds: { type: 'number', minimum: 0, maximum: 55, description: 'Long-poll time in seconds (default: 30)' },
+    }, required: ['reviewId'], additionalProperties: false },
+    mapInput: input => {
+      const waitSeconds = input.waitSeconds ?? (input.wait === undefined ? undefined : Number(input.wait));
+      if (waitSeconds !== undefined && (typeof waitSeconds !== 'number' || !Number.isFinite(waitSeconds) || waitSeconds < 0 || waitSeconds > 55)) {
+        throw Object.assign(new Error('Wait must be a number from 0 to 55 seconds'), { code: 'E_INVALID_PARAMS' });
+      }
+      return { command: 'get_review_result', params: { reviewId: input.reviewId, waitSeconds } };
+    },
   },
 ];
 
