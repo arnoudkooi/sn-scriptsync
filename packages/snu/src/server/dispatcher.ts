@@ -1318,14 +1318,26 @@ export class StandaloneDispatcher {
 
       // Code Search (GraphQL)
       if (req.command === 'code_search') {
+        const term = String(req.params?.term ?? req.params?.query ?? '').trim();
+        if (term.length < 2) {
+          throw Object.assign(new Error('Missing/short required param: term (min 2 characters)'), { code: 'E_INVALID_PARAMS' });
+        }
+        // Same message shape as the VS Code host (src/agent/commands/search.ts):
+        // the helper tab reads searchTerm and an options object.
+        const limit = Number(req.params?.limit);
+        const options: Record<string, any> = {
+          activeOnly: req.params?.activeOnly === true,
+          limit: Number.isInteger(limit) && limit > 0 ? limit : 50,
+        };
+        if (typeof req.params?.tables === 'string' && req.params.tables.trim()) {
+          options.tables = req.params.tables.trim();
+        }
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({
           action: 'agentCodeSearch',
           agentRequestId: correlationId,
-          term: req.params?.term,
-          tables: req.params?.tables,
-          limit: req.params?.limit ?? 50,
-          activeOnly: req.params?.activeOnly === true,
+          searchTerm: term,
+          options,
           instance: inst.settings,
           appName: 'SN Utils CLI',
         });
@@ -1338,7 +1350,12 @@ export class StandaloneDispatcher {
           command: req.command,
           status: 'success',
           timestamp: Date.now(),
-          result: res,
+          result: {
+            term: res.searchTerm ?? term,
+            stats: res.stats ?? {},
+            words: res.words ?? [],
+            results: res.results ?? [],
+          },
         };
       }
 

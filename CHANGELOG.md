@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## `@snutils/snu` Unreleased
+
+- **`snu search` and the `snu_code_search` MCP tool find code again.** Every search failed with "Search term must be at least 2 characters", whatever the term (#164).
+
 ## 4.9.15 (2026-10-06)
 
 - **Only Ctrl+S / Cmd+S with focus in the file editor syncs it to the instance.** Saves from Save All, a rename across files, VS Code auto save or another extension now wait in Pending Saves until you sync them there, and are never auto-synced or flushed by an agent. A rename touching files of several instances no longer pushes them all (SNU0000010184).
