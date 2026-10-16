@@ -184,16 +184,20 @@ const get_sync_status: CommandHandler = {
 	noInstance: true,
 	docs: {
 		summary: 'Inspect the extension-wide pending-file queue.',
-		response: { status: 'success', result: { serverRunning: true, pendingFiles: [], pendingCount: 0, isPaused: false } },
+		response: { status: 'success', result: { serverRunning: true, pendingFiles: [], pendingCount: 0, syncingFiles: [], syncingCount: 0, isPaused: false } },
 	},
 	async handle(ctx) {
 		// The queue state lives in extension.ts. The runtime exposes it via the
 		// syncState shim to keep this module host-agnostic.
 		const state = getSyncState();
+		const syncingFiles = state.syncingFiles ?? [];
 		return {
 			serverRunning: ctx.isServerRunning(),
 			pendingFiles: state.pendingFiles,
 			pendingCount: state.pendingFiles.length,
+			// Sent and waiting for the instance's answer; never flushed twice.
+			syncingFiles,
+			syncingCount: syncingFiles.length,
 			isPaused: state.isPaused,
 		};
 	},
@@ -485,6 +489,8 @@ export const connectionCommands: CommandHandler[] = [
 // ---------------------------------------------------------------------------
 export interface SyncState {
 	pendingFiles: string[];
+	/** Files sent to the instance and waiting for the helper tab's confirmation. */
+	syncingFiles?: string[];
 	isPaused: boolean;
 	processPendingFiles(): void;
 }

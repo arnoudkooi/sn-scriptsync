@@ -1,11 +1,22 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { SyncFileState } from './syncTracker';
+
+/** What Pending Saves shows for a file that is not simply waiting. */
+export interface QueueFileStatus {
+    state: SyncFileState;
+    /** Why a save failed or was not confirmed; shown next to the file. */
+    detail?: string;
+}
 
 export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     private pendingFiles: Set<string> = new Set();
+    // Files that are syncing, failed or unconfirmed (see src/syncTracker.ts).
+    // Anything not in here is plainly pending.
+    private fileStatus: Map<string, QueueFileStatus> = new Map();
     private currentDeadline: number = 0;
     private view: vscode.TreeView<vscode.TreeItem>;
     private countdownInterval: NodeJS.Timeout | undefined;
@@ -72,6 +83,9 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
 
     updateQueue(files: Set<string>, delayMs: number) {
         this.pendingFiles = new Set(files);
+        for (const filePath of Array.from(this.fileStatus.keys())) {
+            if (!this.pendingFiles.has(filePath)) this.fileStatus.delete(filePath);
+        }
 
         // delayMs <= 0 means "monitor only": keep a queue/badge, but don't start a countdown.
         this.isMonitorOnly = delayMs <= 0;
@@ -94,6 +108,7 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
 
     clearQueue() {
         this.pendingFiles.clear();
+        this.fileStatus.clear();
         this._isPaused = false;
         this.pausedTimeRemaining = 0;
         this.isMonitorOnly = false;
@@ -108,7 +123,21 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
 
     removeFromQueue(filePath: string) {
         this.pendingFiles.delete(filePath);
+        this.fileStatus.delete(filePath);
         this.refresh();
+    }
+
+    /** Show a file as syncing, failed or unconfirmed; 'pending' clears the mark. */
+    setFileStatus(filePath: string, state: SyncFileState, detail?: string) {
+        if (state === 'pending') this.fileStatus.delete(filePath);
+        else this.fileStatus.set(filePath, { state, detail });
+        this.refresh();
+    }
+
+    private syncingCount(): number {
+        let count = 0;
+        this.fileStatus.forEach(status => { if (status.state === 'syncing') count++; });
+        return count;
     }
 
     private startCountdown() {
@@ -144,11 +173,14 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
                     };
                     this.view.description = `⏸ Paused (${remainingSeconds}s)`;
                 } else if (noCountdown) {
+                    const syncing = this.syncingCount();
                     this.view.badge = {
-                        tooltip: `${count} pending - manual sync (Sync Now)`,
+                        tooltip: syncing > 0
+                            ? `${count} pending - waiting for ${syncing} to be confirmed`
+                            : `${count} pending - manual sync (Sync Now)`,
                         value: count
                     };
-                    this.view.description = `Monitoring`;
+                    this.view.description = syncing > 0 ? `Syncing ${syncing}…` : `Monitoring`;
                 } else {
                     const remainingSeconds = Math.max(0, Math.ceil((this.currentDeadline - Date.now()) / 1000));
                     this.view.badge = {
@@ -181,7 +213,8 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
                 fileName,
                 relativePath,
                 filePath,
-                vscode.TreeItemCollapsibleState.None
+                vscode.TreeItemCollapsibleState.None,
+                this.fileStatus.get(filePath)
             );
         });
 
@@ -198,13 +231,31 @@ export class QueueItem extends vscode.TreeItem {
         public readonly label: string,
         public readonly relativePath: string,
         public readonly filePath: string,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState
+        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+        status?: QueueFileStatus
     ) {
         super(label, collapsibleState);
         this.tooltip = this.relativePath;
         this.description = this.relativePath;
         this.iconPath = new vscode.ThemeIcon('cloud-upload');
         this.contextValue = 'queueItem';
+
+        // A save in flight keeps its file here until the helper tab confirms it.
+        // Failed and unconfirmed saves stay, held for the user, with the reason.
+        if (status?.state === 'syncing') {
+            this.iconPath = new vscode.ThemeIcon('sync~spin');
+            this.description = `Syncing… ${this.relativePath}`;
+            this.tooltip = `${this.relativePath}\nWaiting for the instance to confirm this save.`;
+            this.contextValue = 'queueItemSyncing';
+        } else if (status?.state === 'failed') {
+            this.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
+            this.description = `Failed: ${status.detail || 'the instance refused the save'}`;
+            this.tooltip = `${this.relativePath}\nSync failed: ${status.detail || 'the instance refused the save'}\nFix the cause and sync it again with the check mark.`;
+        } else if (status?.state === 'unconfirmed') {
+            this.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
+            this.description = `Unconfirmed: ${status.detail || 'no answer from the helper tab'}`;
+            this.tooltip = `${this.relativePath}\nNot confirmed: ${status.detail || 'no answer from the helper tab'}\nCheck the helper tab log, then sync it again with the check mark.`;
+        }
 
         // Clicking a pending file should open/activate it in the editor.
         this.resourceUri = vscode.Uri.file(this.filePath);
