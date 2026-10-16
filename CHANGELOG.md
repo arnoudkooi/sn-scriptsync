@@ -1,6 +1,10 @@
 # CHANGELOG.md
 
-## `@snutils/snu` 0.4.0 (Unreleased)
+## `@snutils/snu` 0.4.1 (2026-10-16)
+
+- Released with sn-scriptsync 4.9.17. No changes to the CLI or MCP tools.
+
+## `@snutils/snu` 0.4.0 (2026-10-08)
 
 - **`snu search` and the `snu_code_search` MCP tool find code again.** Every search failed with "Search term must be at least 2 characters", whatever the term (#164).
 - **`snu negotiate` reports what the connected host supports**, with client, bridge and helper versions. Standalone health and negotiation now share a complete command list.
@@ -11,7 +15,12 @@
 - MCP now exposes the existing auth-status, pull-records and pull-scope tools as well, bringing the tool list to 26.
 - Added CLI, MCP, review lifecycle and cross-host request/permission regression checks.
 
-## 4.9.16 (Unreleased)
+## 4.9.17 (2026-10-16)
+
+- **Pending Saves keeps a file until the instance confirms the save.** A file now shows as syncing while the helper tab waits for the instance, and leaves the panel only on a confirmed save. A refused save (expired session, ACL, rejected in the helper tab) stays, held, with the reason; so does a save that gets no answer within 30 seconds or when the helper tab disconnects. An edit made while a save is in flight is never removed by that save's answer, and a second push of the same record waits for the first. Needs the SN Utils release after 10.2.7; an older helper tab cannot confirm saves and the panel says so once.
+- `get_sync_status` also returns `syncingFiles` and `syncingCount`.
+
+## 4.9.16 (2026-10-08)
 
 - Attachment file input now checks directory boundaries and rejects symbolic links, matching the standalone host.
 - `negotiate` also returns the ScriptSync extension version.

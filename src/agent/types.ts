@@ -39,6 +39,8 @@ export interface HelperCapabilities {
 	commandReview?: 1 | 0;
 	rejectionFeedback?: 1 | 0;
 	instanceSecurityGates?: 1 | 0;
+	/** The helper answers each editor save (syncId) with a saveResult. */
+	saveAck?: 1 | 0;
 	[key: string]: any;
 }
 

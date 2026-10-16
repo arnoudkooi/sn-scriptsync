@@ -31,6 +31,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { readErrorInstance, instanceFolderMatchesError } from './agent/errorRelay';
 import { ExplicitSaveIntents, SyncIntent, decideEditorSave, filesForSync } from './saveIntent';
+import { InFlightSave, SubmittedFile, SyncTarget, SyncTracker } from './syncTracker';
 import {
 	setRuntime as setAgentRuntime,
 	setSyncStateProvider,
@@ -79,6 +80,8 @@ let wss;
 const nowSdkConnectionChanged = new vscode.EventEmitter<void>();
 const helperConnection = new HelperConnection<WebSocket>(() => {
 	connectedHelperInfo = null;
+	legacyHelperSaveNoticeShown = false;
+	abandonInFlightSaves('the helper tab disconnected');
 	helperInstanceGates.clear();
 	helperInstanceGateRevisions.clear();
 	helperLiveInstances.clear();
@@ -648,6 +651,10 @@ function syncQueuedFile(filePath: string) {
 		replayStagedCreate(reviewId);
 		return;
 	}
+	// With a confirming helper the file stays, shown as syncing, until the
+	// instance answers (or follows an earlier unanswered save of the same file).
+	if (pushQueuedFile(filePath, 'queue_sync') || syncTracker.isInFlight(filePath)) return;
+	// Older helper: no answer will come, so the file leaves the queue now.
 	pendingFiles.delete(filePath);
 	heldSaves.delete(filePath);
 	queueProvider?.removeFromQueue(filePath);
@@ -656,7 +663,233 @@ function syncQueuedFile(filePath: string) {
 		clearTimeout(globalDebounceTimer);
 		globalDebounceTimer = undefined;
 	}
-	saveFieldsToServiceNow(filePath, true, 'queue_sync');
+}
+
+// --- Confirmed saves ---------------------------------------------------------
+// Every editor save carries a syncId and the helper tab (SN Utils with the
+// saveAck capability) answers it with a saveResult. Until then the file stays
+// in Pending Saves as syncing (src/syncTracker.ts). An older helper never
+// answers; with one, files leave the queue when they are sent, as before, and
+// the user is told once that confirmation needs an updated SN Utils.
+const SAVE_CONFIRM_TIMEOUT_MS = 30_000;
+const syncTracker = new SyncTracker();
+const saveConfirmTimers = new Map<string, NodeJS.Timeout>();
+// Files the user pushed again (Save & Sync, per-file check) while an earlier
+// revision was still unanswered; pushed as soon as that answer arrives.
+const deferredPushes = new Set<string>();
+let legacyHelperSaveNoticeShown = false;
+
+function helperConfirmsSaves(): boolean {
+	return Number(connectedHelperInfo?.capabilities?.saveAck) >= 1;
+}
+
+function saveTargetOf(scriptObj: any): SyncTarget {
+	const fields: string[] = scriptObj.fields && typeof scriptObj.fields === 'object'
+		? Object.keys(scriptObj.fields)
+		: String(scriptObj.fieldName || '').split(',').map((f: string) => f.trim()).filter(Boolean);
+	return {
+		instance: String(scriptObj.instance?.url || scriptObj.instance?.name || ''),
+		table: String(scriptObj.tableName || ''),
+		sysId: String(scriptObj.sys_id || ''),
+		fields,
+	};
+}
+
+/**
+ * Register a save that is about to go out and mark its files as syncing.
+ * Returns false with an older helper (no answer will come); the caller then
+ * keeps the old behaviour and removes the files when they are sent.
+ */
+function trackSave(scriptObj: any, files: SubmittedFile[], runId: string): boolean {
+	if (!helperConfirmsSaves()) {
+		if (!legacyHelperSaveNoticeShown) {
+			legacyHelperSaveNoticeShown = true;
+			vscode.window.showInformationMessage('This SN Utils version does not confirm saves, so files leave Pending Saves as soon as they are sent. Update SN Utils to keep each file there until the instance confirms it.');
+		}
+		return false;
+	}
+	const syncId = syncTracker.newSyncId();
+	scriptObj.syncId = syncId;
+	syncTracker.submit(syncId, saveTargetOf(scriptObj), files);
+	for (const file of files) {
+		if (!pendingFiles.has(file.filePath)) {
+			pendingFiles.add(file.filePath);
+			queueProvider?.addToQueue(file.filePath);
+		}
+		queueProvider?.setFileStatus(file.filePath, 'syncing');
+	}
+	const timer = setTimeout(() => abandonSave(syncId, `no answer from the helper tab within ${SAVE_CONFIRM_TIMEOUT_MS / 1000} seconds`), SAVE_CONFIRM_TIMEOUT_MS);
+	timer.unref?.();
+	saveConfirmTimers.set(syncId, timer);
+	auditLog('save_tracked', { syncId, files: files.map(f => f.filePath), tableName: scriptObj.tableName, sys_id: scriptObj.sys_id }, runId);
+	return true;
+}
+
+function clearSaveTimer(syncId: string) {
+	const timer = saveConfirmTimers.get(syncId);
+	if (timer) clearTimeout(timer);
+	saveConfirmTimers.delete(syncId);
+}
+
+function describeSaveError(msg: any): string {
+	const raw: string = typeof msg?.error === 'string' ? msg.error : String(msg?.error?.detail || msg?.error?.message || '');
+	const code = typeof msg?.code === 'string' && msg.code ? msg.code : inferCodeFromMessage(raw);
+	switch (code) {
+		case 'E_ACL':
+			return 'ACL Error, try changing scope in the browser.';
+		case 'E_TOKEN_EXPIRED':
+			return 'Could not sync file, no valid token. Try typing the slashcommand /token in a active browser session and retry.';
+		default:
+			return raw || 'the instance did not accept the save.';
+	}
+}
+
+// The helper tab answered a save. Confirmed files leave the queue; a file that
+// changed since it was sent stays pending with its newer change; failed files
+// stay, held, with the reason. Answers for unknown or already answered saves
+// change nothing.
+function handleSaveResult(msg: any) {
+	const syncId = typeof msg?.syncId === 'string' ? msg.syncId : '';
+	const ok = msg?.ok === true;
+	clearSaveTimer(syncId);
+	const result = syncTracker.resolve(syncId, ok, filePath => {
+		try { return fs.readFileSync(filePath, 'utf8'); } catch { return undefined; }
+	});
+	if (!result) {
+		auditLog('save_result_ignored', { syncId, ok, reason: 'unknown_or_answered' });
+		return;
+	}
+	const detail = ok ? '' : describeSaveError(msg);
+	auditLog('save_result', { syncId, ok, detail: detail || null, files: result.files.map(f => `${f.outcome}:${f.filePath}`) });
+	for (const file of result.files) {
+		if (file.outcome === 'confirmed') {
+			pendingFiles.delete(file.filePath);
+			heldSaves.delete(file.filePath);
+			acceptReviewBaseline(file.filePath);
+			queueProvider?.removeFromQueue(file.filePath);
+		} else if (file.outcome === 'superseded') {
+			// The instance now holds what was sent; a review file diffs and
+			// restores against that, not against the value from before the save.
+			rebaseReviewBaseline(file.filePath, file.submittedContent);
+			queueProvider?.setFileStatus(file.filePath, 'pending');
+		} else {
+			heldSaves.add(file.filePath);
+			queueProvider?.setFileStatus(file.filePath, 'failed', detail);
+		}
+	}
+	if (!ok) {
+		relayErrorToAgent(detail, msg);
+		pauseAutoSyncQuietly();
+		const names = result.files.map(f => path.basename(f.filePath)).join(', ');
+		vscode.window.showErrorMessage(`Sync failed for ${names}: ${detail} The file stays in Pending Saves.`, 'Retry').then(choice => {
+			if (choice === 'Retry') result.files.forEach(f => syncQueuedFile(f.filePath));
+		});
+	}
+	settleAfterSave(result.files.map(f => f.filePath));
+}
+
+// No answer will come for this save (timeout): keep its files, held, and say
+// why. Syncing again sends the current content.
+function abandonSave(syncId: string, reason: string) {
+	clearSaveTimer(syncId);
+	const save = syncTracker.expire(syncId);
+	if (save) reportUnconfirmed([save], reason);
+}
+
+// No answer will come for any save (helper disconnected, bridge stopped).
+function abandonInFlightSaves(reason: string) {
+	const saves = syncTracker.drain();
+	for (const save of saves) clearSaveTimer(save.syncId);
+	if (saves.length) reportUnconfirmed(saves, reason);
+}
+
+function reportUnconfirmed(saves: InFlightSave[], reason: string) {
+	const files: string[] = [];
+	for (const save of saves) {
+		for (const file of save.files) {
+			if (!pendingFiles.has(file.filePath)) continue;
+			heldSaves.add(file.filePath);
+			queueProvider?.setFileStatus(file.filePath, 'unconfirmed', reason);
+			files.push(file.filePath);
+		}
+	}
+	auditLog('save_unconfirmed', { reason, files });
+	if (!files.length) return;
+	const names = files.map(f => path.basename(f)).join(', ');
+	vscode.window.showWarningMessage(`Not confirmed: ${names} (${reason}). The file stays in Pending Saves; check the helper tab log and sync it again.`);
+	settleAfterSave(files);
+}
+
+// Pause the auto-sync timer after a failure, as the error path always did,
+// without a second message. A monitor-only queue has nothing to pause.
+function pauseAutoSyncQuietly() {
+	if (globalDebounceTimer) {
+		clearTimeout(globalDebounceTimer);
+		globalDebounceTimer = undefined;
+	}
+	if (queueProvider && !queueProvider.isPaused && queueProvider.togglePause()) {
+		vscode.commands.executeCommand('setContext', 'sn-scriptsync.queuePaused', true);
+	}
+}
+
+// After an answer (or none): push what the user asked for in the meantime,
+// then either empty the view or re-arm the auto-sync timer for what is left.
+function settleAfterSave(files: string[]) {
+	for (const filePath of files) {
+		if (!deferredPushes.has(filePath)) continue;
+		deferredPushes.delete(filePath);
+		if (!pendingFiles.has(filePath)) continue;
+		if (helperConnection.connected) pushQueuedFile(filePath, 'save_command');
+		else heldSaves.add(filePath);
+	}
+	if (pendingFiles.size === 0) {
+		queueProvider?.clearQueue();
+		if (globalDebounceTimer) {
+			clearTimeout(globalDebounceTimer);
+			globalDebounceTimer = undefined;
+		}
+		vscode.commands.executeCommand('setContext', 'sn-scriptsync.queuePaused', false);
+		return;
+	}
+	rearmAutoSync();
+}
+
+// Files that waited behind a busy destination get their timer back once the
+// earlier save is answered.
+function rearmAutoSync() {
+	if (globalDebounceTimer || !queueProvider || queueProvider.isPaused) return;
+	const settings = vscode.workspace.getConfiguration('sn-scriptsync');
+	const debounceSeconds = (settings.get('externalChanges.syncDelay') as number) ?? 0;
+	const monitorFileChanges = (settings.get('externalChanges.monitorFileChanges') as boolean) ?? true;
+	if (!monitorFileChanges || debounceSeconds <= 0 || reviewWritesEnabled()) return;
+	const waiting = filesForSync(pendingFiles, 'queue_auto_sync', isHeldPendingFile).filter(f => !syncTracker.isInFlight(f));
+	if (!waiting.length) return;
+	const delay = debounceSeconds * 1000;
+	globalDebounceTimer = setTimeout(() => processPendingFiles('queue_auto_sync'), delay);
+	queueProvider.updateQueue(pendingFiles, delay);
+}
+
+// Push one queued file now. With a confirming helper it stays in the queue,
+// shown as syncing, until the instance answers; a file whose earlier save is
+// still unanswered follows right after that answer. Returns true when the save
+// went out tracked.
+function pushQueuedFile(filePath: string, intent: SyncIntent): boolean {
+	if (syncTracker.isInFlight(filePath)) {
+		deferredPushes.add(filePath);
+		auditLog('save_deferred', { filePath, reason: 'earlier_save_in_flight' });
+		return false;
+	}
+	saveFieldsToServiceNow(filePath, true, intent);
+	return syncTracker.isInFlight(filePath);
+}
+
+// The instance holds `content` now. A review file keeps its diff and undo
+// against that; a plain queued file has no baseline and gets none.
+function rebaseReviewBaseline(filePath: string, content: string) {
+	const key = reviewKey(filePath);
+	if (!reviewBaselines.has(key)) return;
+	reviewBaselines.set(key, { existed: true, content });
+	notifyBaselineChanged(filePath);
 }
 
 // Pending artifact creations (waiting for name check)
@@ -667,10 +900,13 @@ const NON_SYNC_FOLDER_NAMES = new Set(['.vscode', '.cursor', '.git', 'node_modul
 function processPendingFiles(intent: SyncIntent) {
 	const runId = buildRunId();
 	// The timer and agents push only what is not held; Sync Now pushes all.
-	const files = filesForSync(pendingFiles, intent, isHeldPendingFile);
+	// A file still waiting for the helper's answer is never sent twice.
+	const files = filesForSync(pendingFiles, intent, isHeldPendingFile).filter(file => !syncTracker.isInFlight(file));
 	auditLog('pending_processing_started', { pendingCount: pendingFiles.size, syncCount: files.length, intent }, runId);
 	// Group files by record (same instance/scope/table/sys_id)
-	const recordGroups = new Map<string, { scriptObj: any, fields: Map<string, string> }>();
+	const recordGroups = new Map<string, { scriptObj: any, fields: Map<string, string>, files: SubmittedFile[] }>();
+	// Files sent without a confirmation to wait for; they leave the queue now.
+	const sentUntracked: string[] = [];
 	
 	files.forEach(file => {
 		const scriptObj = eu.fileNameToObject(file);
@@ -678,6 +914,7 @@ function processPendingFiles(intent: SyncIntent) {
 			// Can't group, save individually
 			auditLog('pending_file_individual_dispatch', { filePath: file, reason: 'invalid_or_missing_sys_id' }, runId);
 			saveFieldsToServiceNow(file, true, intent);
+			sentUntracked.push(file);
 			return;
 		}
 		
@@ -687,13 +924,15 @@ function processPendingFiles(intent: SyncIntent) {
 		if (!recordGroups.has(recordKey)) {
 			recordGroups.set(recordKey, { 
 				scriptObj: { ...scriptObj, fields: {} }, 
-				fields: new Map() 
+				fields: new Map(),
+				files: []
 			});
 		}
 		
 		const group = recordGroups.get(recordKey)!;
 		group.scriptObj.syncIntent = intent;
 		group.fields.set(scriptObj.fieldName, scriptObj.content);
+		group.files.push({ filePath: file, content: String(scriptObj.content ?? '') });
 	});
 	
 	// Process each record group
@@ -710,7 +949,6 @@ function processPendingFiles(intent: SyncIntent) {
 				tableName: group.scriptObj.tableName,
 				sys_id: group.scriptObj.sys_id
 			}, runId);
-			sendToServiceNow(group.scriptObj);
 		} else {
 			// Multiple fields - combine into single request
 			group.scriptObj.fields = Object.fromEntries(group.fields);
@@ -723,13 +961,27 @@ function processPendingFiles(intent: SyncIntent) {
 				tableName: group.scriptObj.tableName,
 				sys_id: group.scriptObj.sys_id
 			}, runId);
-			sendToServiceNow(group.scriptObj);
 		}
+		// An earlier save to the same record fields is still unanswered: this
+		// one waits in the queue and gets its timer back after that answer.
+		if (syncTracker.destinationBusy(saveTargetOf(group.scriptObj))) {
+			auditLog('pending_group_deferred', { recordKey: key, reason: 'destination_in_flight' }, runId);
+			return;
+		}
+		// Without a helper tab nothing is sent; the files stay pending.
+		if (!helperConnection.connected) {
+			sendToServiceNow(group.scriptObj);
+			return;
+		}
+		const tracked = trackSave(group.scriptObj, group.files, runId);
+		sendToServiceNow(group.scriptObj);
+		if (!tracked) sentUntracked.push(...group.files.map(f => f.filePath));
 	});
 	
-	// These files were just pushed (approved) — forget their staging snapshots so
-	// a later Clear All / re-stage never tries to "undo" an already-synced file.
-	files.forEach(file => {
+	// Files sent to an older helper (or creates) were just pushed with nothing
+	// to wait for: forget their staging snapshots so a later Clear All /
+	// re-stage never tries to "undo" an already-synced file, and drop them.
+	sentUntracked.forEach(file => {
 		acceptReviewBaseline(file);
 		pendingFiles.delete(file);
 		heldSaves.delete(file);
@@ -1282,12 +1534,23 @@ vscode.workspace.onDidSaveTextDocument(document => {
 const explicitPushes = new Map<string, { version: number; at: number }>();
 function pushEditorSave(document: TextDocument) {
 	explicitPushes.set(document.uri.toString(), { version: document.version, at: Date.now() });
-	pendingFiles.delete(document.fileName);
-	heldSaves.delete(document.fileName);
-	queueProvider?.removeFromQueue(document.fileName);
 	recentManualSaves.set(document.fileName, Date.now());
+	if (syncTracker.isInFlight(document.fileName)) {
+		// An earlier revision is still unanswered; this one follows right after.
+		deferredPushes.add(document.fileName);
+		auditLog('save_deferred', { filePath: document.fileName, reason: 'earlier_save_in_flight' });
+		return;
+	}
 	if (!saveFieldsToServiceNow(document, true, 'save_command')) {
 		markFileAsDirty(document);
+		return;
+	}
+	// With a confirming helper the file now sits in Pending Saves as syncing
+	// until the instance answers. Otherwise there is nothing to wait for.
+	if (!syncTracker.isInFlight(document.fileName)) {
+		pendingFiles.delete(document.fileName);
+		heldSaves.delete(document.fileName);
+		queueProvider?.removeFromQueue(document.fileName);
 	}
 }
 
@@ -1417,7 +1680,8 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	setSyncStateProvider(() => ({
 		// Agents see and flush only what is not held for the user.
-		pendingFiles: filesForSync(pendingFiles, 'agent_sync', isHeldPendingFile),
+		pendingFiles: filesForSync(pendingFiles, 'agent_sync', isHeldPendingFile).filter(file => !syncTracker.isInFlight(file)),
+		syncingFiles: syncTracker.busyFiles(),
 		isPaused: !!queueProvider && queueProvider.isPaused,
 		processPendingFiles: () => processPendingFiles('agent_sync'),
 	}));
@@ -2906,6 +3170,13 @@ async function startBridgeTransports(): Promise<void> {
 					sendCapabilityMessage();
 					return;
 				}
+				// The answer to an editor save (see trackSave). Handled before the
+				// generic error path so a failed save marks its own file in the
+				// queue instead of dirtying whatever editor happens to be active.
+				if (messageJson?.action === 'saveResult') {
+					handleSaveResult(messageJson);
+					return;
+				}
 				// Errors that belong to an Agent API round-trip carry an
 				// agentRequestId and are surfaced to the calling command via the
 				// pending registry below. Skip the global popup / queue-pause /
@@ -3205,6 +3476,10 @@ function registerQueueViewsAndCommands(context: vscode.ExtensionContext): void {
 	// Register Remove from Queue command
 	reg('extension.removeFromQueue', (item: any) => {
 		if (item && item.filePath) {
+			if (syncTracker.isInFlight(item.filePath)) {
+				vscode.window.showInformationMessage('This file is waiting for the instance to confirm its save.');
+				return;
+			}
 			// Reject: drop from the queue + staged-create bookkeeping AND undo the
 			// materialised file (delete a create we wrote; restore an update we
 			// overwrote). Ordinary user-queued files are only de-queued.
@@ -3267,6 +3542,11 @@ function registerQueueViewsAndCommands(context: vscode.ExtensionContext): void {
 		pendingFiles.clear();
 		heldSaves.clear();
 		clearStagedCreates();
+		// Answers for saves still in flight are ignored from here on.
+		syncTracker.clear();
+		saveConfirmTimers.forEach(timer => clearTimeout(timer));
+		saveConfirmTimers.clear();
+		deferredPushes.clear();
 		queueProvider.clearQueue();
 
 		// Reset paused context + timers
@@ -4083,6 +4363,9 @@ function saveFieldsToServiceNow(documentOrPath: TextDocument | string, fromVsCod
 			vscode.window.showErrorMessage("No WebSocket connection. Please open SN Utils helper tab in a browser via slashcommand /token");
 			auditLog('sync_dispatch_blocked', { reason: 'no_websocket_client', filePath, tableName: scriptObj.tableName, sys_id: scriptObj.sys_id }, runId);
 			success = false;
+		} else if (syncIntent) {
+			// Editor saves wait in Pending Saves for the helper tab's answer.
+			trackSave(scriptObj, [{ filePath, content: String(scriptObj.content ?? '') }], runId);
 		}
 		auditLog('sync_dispatch_sent', {
 			filePath,
