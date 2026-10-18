@@ -190,7 +190,13 @@ function bulkCommand(mode: BulkMode): CommandHandler {
 				? { command: name, id: 'crecs_1', params: { table: 'sys_choice', scope: 'x_acme_app', rows: [{ name: 'incident', element: 'category', label: 'Network', value: 'network' }] } }
 				: { command: name, id: 'urecs_1', params: { table: 'incident', rows: [{ sys_id: '0123456789abcdef0123456789abcdef', urgency: '2' }], continueOnError: true } },
 		},
-		prepare: (ctx, params) => prepareBatch(ctx, mode, params),
+		prepare: (ctx, params) => {
+			// Refuse an older helper before the probes and any review card. A dry
+			// run, or a batch staged in Pending Saves, does not reach the helper yet.
+			const staged = ctx.reviewWritesEnabled() && params?.__review_bypass !== true;
+			if (params?.dryRun !== true && !staged) requireRecordBatchHelper(ctx);
+			return prepareBatch(ctx, mode, params);
+		},
 		fromHelperResult: (reply, params) => {
 			const b = params?.__batch;
 			return batchResult(reply, { batchId: b?.batchId, total: b?.rows?.length, table: b?.table, mode, effectiveScope: b?.effectiveScope });

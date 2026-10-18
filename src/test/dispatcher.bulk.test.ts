@@ -164,6 +164,13 @@ test('an older helper without record batches is refused, not sent rows it would 
 	assert.ok(!harness.sent.some((m) => m.action === 'agentRecordBatch'));
 });
 
+test('an older helper behind an approve gate is refused before any review card', async () => {
+	useRuntime({ gates: { createArtifacts: 'approve' }, capabilities: { instanceSecurityGates: 1, commandReview: 1 } });
+	const resp = await dispatchAgentCommand(request('create_records', { table: 'sys_choice', rows: [{ label: 'a' }] }));
+	assert.strictEqual(resp.code, 'E_UNSUPPORTED_HOST');
+	assert.ok(!harness.sent.some((m) => m.action === 'reviewRequest' || m.action === 'agentRecordBatch'));
+});
+
 test('review mode stages the batch first; the replay is re-validated and only then reviewed', async () => {
 	const staged = useRuntime({ gates: { createArtifacts: 'approve' }, reviewWrites: true });
 	const first = await dispatchAgentCommand(request('create_records', { table: 'sys_choice', rows: [{ label: 'a' }, { label: 'b' }] }));

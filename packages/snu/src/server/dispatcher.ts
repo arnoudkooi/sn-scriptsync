@@ -1287,6 +1287,10 @@ export class StandaloneDispatcher {
       // Validate a multi-record write and give it its batch id before any
       // review, so the payload a human approves is exactly the one that runs.
       const mode = bulkMode(req.command);
+      // Refuse an older helper before the probes and any review card.
+      if (mode && req.params?.dryRun !== true && this.ws.getHelperState().capabilities?.recordBatch !== 1) {
+        throw Object.assign(new Error('The connected SN Utils helper tab cannot run multi-record writes. Update SN Utils (10.2.8.0 or later) and reopen the ScriptSync helper tab.'), { code: 'E_UNSUPPORTED_HOST' });
+      }
       if (mode && !approved) {
         req = { ...req, params: await prepareBulk(mode, req.params, (scope) => this.resolveScopeForCreate(inst, scope, {}), async (table) => {
           const probeId = crypto.randomUUID();
@@ -1359,7 +1363,17 @@ export class StandaloneDispatcher {
         const finalPromise = pendingPromise.then(async (res): Promise<AgentResponse> => {
           if (res?.approvedNotExecuted === true) return this.dispatchRequest(req, true);
           if (mode) {
-            return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: batchResult(res, expectedFor(req.params?.__batch)) };
+            // The helper answered: a failed row is its report, not a lost
+            // answer, so it never reaches the catch below.
+            try {
+              return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: batchResult(res, expectedFor(req.params?.__batch)) };
+            } catch (err: any) {
+              return {
+                id: req.id, command: req.command, status: 'error', timestamp: Date.now(),
+                code: err.code || 'E_COMMAND_FAILED', error: err.message || String(err),
+                details: { ...(err.details || {}), batchId: req.params?.__batch?.batchId },
+              };
+            }
           }
           return {
             id: req.id, command: req.command, status: 'success', timestamp: Date.now(),

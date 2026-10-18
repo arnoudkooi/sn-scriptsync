@@ -86,6 +86,36 @@ test('standalone: an older helper is refused instead of sent rows', async () => 
   } finally { s.cleanup(); }
 });
 
+test('standalone: an older helper behind an approve gate is refused before any review card', async () => {
+  const s = setup('approve', { instanceSecurityGates: 1, commandReview: 1 });
+  try {
+    const resp = await s.dispatcher.dispatch(req('create_records', { table: 'sys_choice', rows: [{ label: 'a' }] }));
+    assert.strictEqual(resp.code, 'E_UNSUPPORTED_HOST');
+    assert.ok(!s.sent.some(m => m.action === 'agentRecordBatch' || m.action === 'reviewRequest'));
+  } finally { s.cleanup(); }
+});
+
+test('standalone: a row that failed after approval is reported per row, not as a lost answer', async () => {
+  const s = setup('approve');
+  let approved: (() => void) | undefined;
+  (s.dispatcher as any).ws.registerReview = (r: any) => { approved = r.onApproved; };
+  try {
+    const first = await s.dispatcher.dispatch(req('update_records', { table: 'incident', rows: [{ sys_id: A, urgency: '2' }] }));
+    assert.strictEqual(first.code, 'E_REVIEW_PENDING');
+    const review = s.sent.find(m => m.action === 'reviewRequest');
+    const batch = review.params.__batch;
+    approved!();
+    s.pending.resolve(review.agentRequestId, {
+      success: true,
+      batch: { batchId: batch.batchId, mode: 'update', table: 'incident', total: 1, running: false, rows: [{ index: 0, outcome: 'failed', sys_id: A, status: 403, error: 'ACL' }] },
+    });
+    const done = await (s.dispatcher as any).reviews.wait(first.details!.reviewId, 2000);
+    assert.strictEqual(done.response.code, 'E_COMMAND_FAILED', done.response.error);
+    assert.strictEqual(done.response.details.batchId, batch.batchId);
+    assert.strictEqual(done.response.details.rows[0].outcome, 'failed');
+  } finally { s.cleanup(); }
+});
+
 test('standalone: a refused batch keeps its id and every row in the error details', async () => {
   const s = setup('auto');
   try {
