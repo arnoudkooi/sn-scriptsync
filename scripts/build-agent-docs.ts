@@ -213,7 +213,7 @@ const SKILLS: SkillDef[] = [
 		name: 'snu-agent-api',
 		title: 'SN ScriptSync — Agent API',
 		description:
-			'SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_artifact, create_application, rest_request, screenshots, etc.). Read this before calling any Agent API command.',
+			'SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_records / update_records for many rows, create_artifact, create_application, analyze_artifact_type, rest_request, screenshots, etc.). Read this before calling any Agent API command.',
 		intro: 'Full reference for the SN ScriptSync Agent API and every command except the live-form g_form bridge (see the snu-form-automation skill) and the browser debugger (see the snu-browser-debug skill).',
 		sections: ['70-agent-api'],
 		commands: COMMAND_ORDER.filter((c) => !FORM_COMMANDS.has(c) && !CDP_COMMANDS.has(c)),
