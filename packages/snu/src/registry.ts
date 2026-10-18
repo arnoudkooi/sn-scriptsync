@@ -973,6 +973,39 @@ export const TOOLS: ToolDefinition[] = [
     mapInput: input => ({ command: 'get_batch_result', instance: input.instance, params: { batchId: input.batchId } }),
   },
   {
+    name: 'snu_analyze_artifact_type', agentCommand: 'analyze_artifact_type', cliCommand: 'type analyze',
+    description: 'Read-only, and deliberately not cheap (many reads, a large result): sample existing artifacts of one type on the instance and compare them into a type profile. Use it BEFORE building a composite artifact (a table, a catalog item) that you have not built on this instance in this project, or as a diagnostic when a create succeeded but the result does not behave. Never for a single record, an edit to an existing artifact, or a type you already profiled here. The profile separates observed recurrence ("3 of 4 samples have ...") from recorded platform generation and requirements, lists creation-path findings (for example: the UI table form creates the role and ACLs, an API insert does not), provenance with confidence, Application Access, flows with their subflows, and what the scan covered. Labels: platform (do not create), convention (build unless told otherwise), choice (ask the user), not_observed, unknown. With detail: true and explicit roots it also classifies each record around a root (owned_by_reference, shared, inherits_shared, no_other_use_found, external). Saved under <instance>/_profiles/ and reused while its fingerprint is unchanged; refresh: true forces a new analysis.',
+    cliUsage: 'snu type analyze <table|catalog_item> [--roots <id,id>] [--scope <scope>] [--sample <n>] [--detail] [--refresh] [--instance <i>] [--json]',
+    cliOptions: {
+      roots: { type: 'string', description: 'Comma-separated sys_ids to analyze instead of a sample' },
+      scope: { type: 'string', description: 'Only samples from this application scope' },
+      sample: { type: 'string', description: 'Number of samples, 1 to 30 (default 12)' },
+      detail: { type: 'boolean', description: 'Classify the records around each sampled root' },
+      refresh: { type: 'boolean', description: 'Analyze again even when a saved profile is still fresh' },
+    },
+    timeoutMs: 15 * 60 * 1000,
+    inputSchema: {
+      type: 'object', properties: {
+        type: { type: 'string', enum: ['table', 'catalog_item'], description: 'Artifact type to profile' },
+        roots: { type: 'array', items: { type: 'string' }, maxItems: 30, description: 'sys_ids to analyze instead of a sample' },
+        query: { type: 'string', description: 'Extra encoded query to narrow the sample (no ^NQ, no javascript:)' },
+        scope: { type: 'string', description: 'Only samples from this application scope' },
+        sample: { type: 'number', minimum: 1, maximum: 30, description: 'Number of samples (default 12)' },
+        detail: { type: 'boolean', description: 'Classify the records around each sampled root (slower)' },
+        refresh: { type: 'boolean', description: 'Analyze again even when a saved profile is still fresh' },
+        instance: { type: 'string', description: 'Target instance' },
+      }, required: ['type'], additionalProperties: false,
+    },
+    mapInput: input => {
+      let roots = input.roots;
+      if (typeof roots === 'string') roots = roots.split(',').map((r: string) => r.trim()).filter(Boolean);
+      return { command: 'analyze_artifact_type', instance: input.instance, params: {
+        type: input.type, ...(roots ? { roots } : {}), ...(input.query ? { query: input.query } : {}), ...(input.scope ? { scope: input.scope } : {}),
+        ...(input.sample !== undefined ? { sample: Number(input.sample) } : {}), ...(input.detail ? { detail: true } : {}), ...(input.refresh ? { refresh: true } : {}),
+      } };
+    },
+  },
+  {
     name: 'snu_upload_attachment', agentCommand: 'upload_attachment', cliCommand: 'attachment upload',
     description: 'Attach a local workspace file or base64 data to one ServiceNow record. Requires createArtifacts permission. Relative filePath is resolved under the instance folder on the bridge; absolute paths must stay inside its workspace.',
     cliUsage: 'snu attachment upload <table> <sys_id> --file <path> [--name <file-name>] [--content-type <mime>] [--instance <i>] [--json]',

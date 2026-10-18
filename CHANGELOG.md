@@ -6,9 +6,11 @@
 - **Create or update up to 200 records in one call** with `snu record create-many` / `snu record update-many` and the `snu_create_records` / `snu_update_records` MCP tools. One review covers the whole batch, every row reports `succeeded`, `failed`, `not_attempted` or `unknown`, and rows that succeed are not rolled back. `--dry-run` checks the rows without writing.
 - **Collect a batch after a lost answer** with `snu batch result <batchId>` / `snu_get_batch_result`, also after the call timed out or was approved later.
 - **MCP errors now include their details**, such as the per-row outcomes and `batchId` of a partly written batch, so an agent can retry only what did not succeed.
+- **Learn how a table or catalog item is built before creating one** with `snu type analyze` / `snu_analyze_artifact_type`: a read-only profile of existing ones on the instance, saved and reused while fresh.
 
 ## Unreleased
 
+- **Agent API: learn how tables and catalog items are built here before creating one.** `analyze_artifact_type` samples existing ones and reports what recurs, what the platform creates for you, what you must add yourself (a table created through the API gets no role or ACLs), which choices to ask about, and what its scan could not see. Read-only; the profile is saved in the workspace and reused while the instance has not changed.
 - **Agent API: write many records with one review.** `create_records` and `update_records` take up to 200 rows for one table, raise one review in the helper tab instead of one per record, and return an outcome for every row; rows that succeed are not rolled back. `get_batch_result` collects a batch after a timeout or a dropped connection. In review mode the batch waits in Pending Saves as one rows file you can edit before syncing. Needs SN Utils 10.2.8.0 or later.
 
 ## `@snutils/snu` 0.4.1 (2026-10-16)

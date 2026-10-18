@@ -29,6 +29,7 @@ const SERVER_INSTRUCTIONS = [
   '- Changing a field on an existing record -> snu_update_record.',
   '- Changing several fields on one record -> snu_update_record_batch.',
   '- Creating or changing many records on one table -> snu_create_records / snu_update_records (one review, an outcome per row, no rollback; collect late results with snu_get_batch_result).',
+  '- Before building a table or catalog item you have not built on this instance -> snu_analyze_artifact_type (read-only; ask the user about anything it labels choice).',
   '- Attaching a file to a record -> snu_upload_attachment.',
   '- Anything the typed tools do not cover (Aggregate API, scripted REST) -> snu_rest_request.',
   '- Check snu_negotiate for supported commands before relying on a capability.',
@@ -167,6 +168,11 @@ export async function createMcpServer(): Promise<McpServer> {
       deadlineMinutes: z.number().min(1).max(30).optional(), instance: z.string().optional(),
     }])),
     snu_get_batch_result: { batchId: z.string(), instance: z.string().optional() },
+    snu_analyze_artifact_type: {
+      type: z.enum(['table', 'catalog_item']), roots: z.array(z.string()).max(30).optional(), query: z.string().optional(),
+      scope: z.string().optional(), sample: z.number().int().min(1).max(30).optional(), detail: z.boolean().optional(),
+      refresh: z.boolean().optional(), instance: z.string().optional(),
+    },
   };
   for (const [name, schema] of Object.entries(paritySchemas)) {
     const tool = getToolByName(name)!;

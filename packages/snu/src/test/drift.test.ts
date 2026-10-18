@@ -60,6 +60,7 @@ const BRIDGE_COMMANDS = new Set([
   'create_records',
   'update_records',
   'get_batch_result',
+  'analyze_artifact_type',
 ]);
 
 test('Drift: every registry tool targets a valid bridge command', () => {

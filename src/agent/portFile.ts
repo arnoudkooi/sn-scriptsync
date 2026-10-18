@@ -27,7 +27,8 @@ import { parseTestPorts } from './testPorts';
 // scope to canonical local files, paged past the Table API limits.
 // v10 -> v11: added create_records / update_records (multi-record writes with
 // one review and a per-row outcome) and get_batch_result.
-export const AGENT_API_VERSION = 11;
+// v11 -> v12: added analyze_artifact_type (read-only type profiles).
+export const AGENT_API_VERSION = 12;
 
 const TEST_PORTS = parseTestPorts(process.env.SN_SCRIPTSYNC_TEST_PORTS);
 

@@ -14,13 +14,14 @@ const { recordsCommands } = require('../out/agent/commands/records.js');
 const { browserCommands } = require('../out/agent/commands/browser.js');
 const { searchCommands } = require('../out/agent/commands/search.js');
 const { bulkCommands } = require('../out/agent/commands/bulk.js');
+const { profileCommands } = require('../out/agent/commands/profile.js');
 const editorPolicy = require('../out/agent/policy.js');
 const standalonePolicy = require('../packages/snu/dist/server/policy.js');
 const { StandaloneDispatcher } = require('../packages/snu/dist/server/dispatcher.js');
 const { StandaloneWsBridge } = require('../packages/snu/dist/server/wsBridge.js');
 const { PendingRegistry } = require('../packages/snu/dist/server/pendingRegistry.js');
 const sysId = '0123456789abcdef0123456789abcdef';
-const handlers = [...recordsCommands, ...browserCommands, ...searchCommands, ...bulkCommands];
+const handlers = [...recordsCommands, ...browserCommands, ...searchCommands, ...bulkCommands, ...profileCommands];
 
 test('shared hosts produce compatible helper requests, results and policies', async t => {
   t.after(() => harness.cleanup());
@@ -116,6 +117,41 @@ test('shared hosts produce compatible helper requests, results and policies', as
       fs.readFileSync(path.join(root, 'packages/snu/src/server/bulkWrite.ts'), 'utf8'));
     assert.equal(fs.readFileSync(path.join(root, 'src/agent/bulkWriteVectors.ts'), 'utf8'),
       fs.readFileSync(path.join(root, 'packages/snu/src/server/bulkWriteVectors.ts'), 'utf8'));
+  });
+  await t.test('artifact type profiles: same reads in the same order, same profile, read-only on both hosts', async () => {
+    // A deterministic fake instance answer per read: one catalog item with one variable.
+    const answer = message => {
+      const q = message.queryParams || {};
+      if (message.method !== 'GET') return { success: false, error: 'write attempted' };
+      if (message.endpoint.startsWith('/api/now/stats/')) return { success: true, status: 200, data: { result: { stats: { count: message.endpoint.endsWith('item_option_new') ? '1' : '0' } } } };
+      if (message.endpoint === '/api/now/table/sc_cat_item' && /sys_idIN/.test(q.sysparm_query)) {
+        return { success: true, status: 200, data: { result: [{ sys_id: sysId, name: 'Item', sys_updated_on: '2026-10-18 10:00:00', active: 'true' }] } };
+      }
+      return { success: true, status: 200, data: { result: [] } };
+    };
+    const params = { type: 'catalog_item', roots: [sysId], detail: true, save: false, refresh: true };
+    const editorReads = [];
+    const editorContext = harness.context({
+      sendToBrowser: m => { editorReads.push(m); },
+      waitForBrowserResponse: () => new Promise(resolve => setImmediate(() => resolve(answer(editorReads.at(-1))))),
+    });
+    const editor = await profileCommands[0].handle(editorContext, params);
+    const standaloneReads = [];
+    const sendStandalone = bridge.sendToBrowser;
+    bridge.sendToBrowser = message => { standaloneReads.push(message); pending.resolve(message.agentRequestId, answer(message)); };
+    const standalone = await dispatcher.dispatch({ id: 'profile', command: 'analyze_artifact_type', params, instance: 'testinst' });
+    bridge.sendToBrowser = sendStandalone;
+    assert.equal(standalone.status, 'success', standalone.error);
+    const reads = list => list.map(m => `${m.method} ${m.endpoint} ${JSON.stringify(m.queryParams || {})}`);
+    assert.deepEqual(reads(standaloneReads), reads(editorReads));
+    assert.ok(editorReads.length > 10 && editorReads.every(m => m.method === 'GET'), 'only GETs');
+    const comparable = ({ generatedAt, savedTo, ...rest }) => rest;
+    assert.deepEqual(comparable(standalone.result), comparable(editor));
+    for (const params of [{}, { type: 'table' }]) {
+      assert.deepEqual(standalonePolicy.getCommandPolicy({ command: 'analyze_artifact_type', params }), editorPolicy.getCommandPolicy({ command: 'analyze_artifact_type', params }));
+    }
+    assert.equal(fs.readFileSync(path.join(root, 'src/agent/artifactProfile.ts'), 'utf8'),
+      fs.readFileSync(path.join(root, 'packages/snu/src/server/artifactProfile.ts'), 'utf8'));
   });
   await t.test('file input validation cannot drift between hosts', () => {
     assert.equal(fs.readFileSync(path.join(root, 'src/agent/attachmentInput.ts'), 'utf8'),

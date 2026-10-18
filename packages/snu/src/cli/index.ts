@@ -151,6 +151,7 @@ export function printHelp(): void {
   record create-many <table>          Insert up to 200 records (--rows, --file, or stdin; --scope, --dry-run)
   record update-many <table>          Update up to 200 records, rows carry sys_id (--rows, --file, or stdin)
   batch result <batchId>              Outcome of a create-many / update-many batch, per row
+  type analyze <type>                 Read-only profile of how tables or catalog items are built here
   record delete <table> <sys_id>      Delete a record (--confirm or --dry-run)
   artifact create <table> <name>      Create a scriptable artifact (Script Include, etc.)
   attachment upload <table> <id>      Attach a workspace file (--file <path>)
@@ -851,6 +852,16 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         if (values.deadline !== undefined) inputData.deadlineMinutes = Number(values.deadline);
         break;
       }
+
+      case 'type analyze':
+        if (!positionals[0]) throw new ScriptSyncClientError('Usage: snu type analyze <table|catalog_item>', 'E_INVALID_PARAMS');
+        inputData.type = positionals[0];
+        if (values.roots !== undefined) inputData.roots = values.roots;
+        if (values.scope !== undefined) inputData.scope = values.scope;
+        if (values.sample !== undefined) inputData.sample = Number(values.sample);
+        if (values.detail) inputData.detail = true;
+        if (values.refresh) inputData.refresh = true;
+        break;
 
       case 'batch result':
         if (!positionals[0]) throw new ScriptSyncClientError('Usage: snu batch result <batchId>', 'E_INVALID_PARAMS');

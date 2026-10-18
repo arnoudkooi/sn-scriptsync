@@ -81,7 +81,7 @@ export interface StagedWriteResult {
  * the client.ts discovery fallback, which would drift silently from the
  * extension's AGENT_API_VERSION.
  */
-export const AGENT_API_VERSION = 11;
+export const AGENT_API_VERSION = 12;
 
 export interface AgentPortFile {
   port: number;

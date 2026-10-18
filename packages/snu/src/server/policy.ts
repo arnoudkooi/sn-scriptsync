@@ -135,6 +135,10 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
     case 'get_batch_result':
       return { risk: 'read', gates: [], review: 'never' };
 
+    // Read-only sampling of existing artifacts; it writes a profile file to
+    // the local workspace only.
+    case 'analyze_artifact_type':
+      return { risk: 'read', gates: [], review: 'never' };
 
     case 'pull_records':
     case 'pull_artifacts':

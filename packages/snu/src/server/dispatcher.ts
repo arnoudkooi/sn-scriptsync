@@ -20,6 +20,7 @@ import { STANDALONE_COMMANDS } from './commands.js';
 import { ReviewRegistry } from './reviewRegistry.js';
 import { resolveAttachment } from './attachmentInput.js';
 import { parseFieldValues } from '../fieldInput.js';
+import { analyzeArtifactType, currentFingerprint, profileFileName, profileStillFresh, validateProfileParams, ProfileIO } from './artifactProfile.js';
 import { ANSWER_GRACE_MS, batchMessage, batchResult, bulkMode, dryRunResult, expectedFor, lostAnswer, prepareBulk, requireBatchId } from './bulkCommands.js';
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
@@ -450,6 +451,43 @@ export class StandaloneDispatcher {
     };
 
     return resolveCreateScope({ scope: scopeParam, fields, lookup });
+  }
+
+  /** GETs only, through the helper tab, as the connected user. */
+  private readOnlyProfileIO(inst: { name: string; settings: any }): ProfileIO {
+    const get = async (endpoint: string, queryParams: Record<string, string>) => {
+      const id = crypto.randomUUID();
+      const pending = this.pending.register({ id, command: 'analyze_artifact_type_read', timeoutMs: 60_000 });
+      // Handled here so a read that times out after the caller stopped waiting
+      // (or a send that throws) never becomes an unhandled rejection that ends
+      // the bridge process; awaiting it below still surfaces the error.
+      pending.catch(() => {});
+      try {
+        this.ws.sendToBrowser({ action: 'agentRestApi', agentRequestId: id, endpoint, method: 'GET', queryParams, instance: inst.settings, appName: 'SN Utils CLI' });
+      } catch (err: any) {
+        this.pending.reject(id, err?.code || 'E_BROWSER_DISCONNECTED', err?.message || String(err));
+      }
+      const res: any = await pending;
+      if (res?.success === false) {
+        throw Object.assign(new Error(res.error || `GET ${endpoint} failed`), { code: res.code || codeForRestStatus(res.status, res.error || '') });
+      }
+      return res?.data;
+    };
+    return {
+      async query(table, query, fields, limit) {
+        const data = await get(`/api/now/table/${table}`, {
+          sysparm_query: query, sysparm_fields: fields.join(','), sysparm_limit: String(limit),
+          sysparm_exclude_reference_link: 'true', sysparm_display_value: 'false', sysparm_no_count: 'true',
+        });
+        return Array.isArray(data?.result) ? data.result : [];
+      },
+      async count(table, query) {
+        const data = await get(`/api/now/stats/${table}`, { sysparm_count: 'true', sysparm_query: query });
+        const n = Number(data?.result?.stats?.count);
+        if (!Number.isFinite(n)) throw Object.assign(new Error(`No count returned for ${table}`), { code: 'E_COMMAND_FAILED' });
+        return n;
+      },
+    };
   }
 
   listInstanceFolders(): string[] {
@@ -1380,6 +1418,35 @@ export class StandaloneDispatcher {
             ...(req.params?.__batch?.batchId ? { batchId: req.params.__batch.batchId } : {}),
           },
         };
+      }
+
+      // Read-only type profile (analyze_artifact_type). Same engine as the
+      // extension; every request is a GET through the helper tab.
+      if (req.command === 'analyze_artifact_type') {
+        const p = validateProfileParams({ ...(req.params || {}), instance: inst.name });
+        const io = this.readOnlyProfileIO(inst);
+        const dir = path.join(this.cwd, inst.name, '_profiles');
+        const file = path.join(dir, profileFileName(p));
+        if (req.params?.refresh !== true && fs.existsSync(file)) {
+          try {
+            const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const check = profileStillFresh(saved, p, await currentFingerprint(io, saved));
+            if (check.fresh) {
+              return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: { ...saved, reused: true, reuseReason: check.reason, savedTo: file } };
+            }
+          } catch { /* unreadable or stale file: analyze again */ }
+        }
+        const profile = await analyzeArtifactType(io, p);
+        if (req.params?.save !== false) {
+          try {
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(file, JSON.stringify(profile, null, 2));
+          } catch (err: any) {
+            profile.warnings.push(`Profile not saved: ${err?.message || err}`);
+          }
+        }
+        return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
+          result: { ...profile, reused: false, ...(req.params?.save !== false ? { savedTo: file } : {}) } };
       }
 
       // Multi-record writes (create_records / update_records) and their result.

@@ -13,6 +13,7 @@ import { lifecycleCommands } from './lifecycle';
 import { negotiateCommands } from './negotiate';
 import { sdkCommands } from './sdk';
 import { bulkCommands } from './bulk';
+import { profileCommands } from './profile';
 
 const allHandlers: CommandHandler[] = [
 	...connectionCommands,
@@ -29,6 +30,7 @@ const allHandlers: CommandHandler[] = [
 	...negotiateCommands,
 	...sdkCommands,
 	...bulkCommands,
+	...profileCommands,
 ];
 
 const registry = new Map<string, CommandHandler>();
