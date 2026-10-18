@@ -148,6 +148,9 @@ export function printHelp(): void {
   record create <table> [f=v ...]     Create a data row (incident, task, user) via the REST API
   record update <table> <sys_id> <f>  Update a record field (--value <v>, --file <p>, or stdin)
   record update-batch <table> <id>    Update several fields on one record (--fields, --file, or stdin)
+  record create-many <table>          Insert up to 200 records (--rows, --file, or stdin; --scope, --dry-run)
+  record update-many <table>          Update up to 200 records, rows carry sys_id (--rows, --file, or stdin)
+  batch result <batchId>              Outcome of a create-many / update-many batch, per row
   record delete <table> <sys_id>      Delete a record (--confirm or --dry-run)
   artifact create <table> <name>      Create a scriptable artifact (Script Include, etc.)
   attachment upload <table> <id>      Attach a workspace file (--file <path>)
@@ -833,6 +836,26 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         inputData.fields = parseFieldValues(content);
         break;
       }
+
+      case 'record create-many':
+      case 'record update-many': {
+        const many = tool.cliCommand;
+        if (!positionals[0]) throw new ScriptSyncClientError(`Usage: snu ${many} <table> (--rows <json> | --file <path> | stdin)`, 'E_INVALID_PARAMS');
+        inputData.table = positionals[0];
+        const content = await resolveContentInput({ value: values.rows, filePath: values.file });
+        if (!content) throw new ScriptSyncClientError('Provide the rows with --rows, --file or stdin', 'E_INVALID_PARAMS');
+        inputData.rows = content;
+        if (values.scope !== undefined) inputData.scope = values.scope;
+        if (values['continue-on-error']) inputData.continueOnError = true;
+        if (values['dry-run']) inputData.dryRun = true;
+        if (values.deadline !== undefined) inputData.deadlineMinutes = Number(values.deadline);
+        break;
+      }
+
+      case 'batch result':
+        if (!positionals[0]) throw new ScriptSyncClientError('Usage: snu batch result <batchId>', 'E_INVALID_PARAMS');
+        inputData.batchId = positionals[0];
+        break;
 
       case 'attachment upload':
         if (!positionals[0] || !positionals[1] || !values.file) throw new ScriptSyncClientError('Usage: snu attachment upload <table> <sys_id> --file <path>', 'E_INVALID_PARAMS');

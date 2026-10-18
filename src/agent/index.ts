@@ -28,4 +28,4 @@ export {
 	probeBridgeHealth,
 } from './bridgeOwnership';
 export type { BridgeOwnership, OwnershipProbes, PortDescriptor } from './bridgeOwnership';
-export type { AgentRequest } from './types';
+export type { AgentRequest, AgentResponse } from './types';

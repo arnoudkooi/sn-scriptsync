@@ -40,6 +40,8 @@ export interface HelperCapabilities {
   sdkDeploy?: 1;
   /** The helper tab can download NOW SDK app packages (downloadAppPackage). */
   sdkPull?: 1;
+  /** The helper tab runs create_records / update_records (agentRecordBatch). */
+  recordBatch?: 1;
 }
 
 export interface InstanceGateSnapshot {
@@ -79,7 +81,7 @@ export interface StagedWriteResult {
  * the client.ts discovery fallback, which would drift silently from the
  * extension's AGENT_API_VERSION.
  */
-export const AGENT_API_VERSION = 10;
+export const AGENT_API_VERSION = 11;
 
 export interface AgentPortFile {
   port: number;

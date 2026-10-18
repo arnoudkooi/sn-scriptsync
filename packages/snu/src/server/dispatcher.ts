@@ -20,6 +20,7 @@ import { STANDALONE_COMMANDS } from './commands.js';
 import { ReviewRegistry } from './reviewRegistry.js';
 import { resolveAttachment } from './attachmentInput.js';
 import { parseFieldValues } from '../fieldInput.js';
+import { ANSWER_GRACE_MS, batchMessage, batchResult, bulkMode, dryRunResult, expectedFor, lostAnswer, prepareBulk, requireBatchId } from './bulkCommands.js';
 
 const FOLDERRECORDTABLES = ['sp_widget', 'sp_header_footer', 'sys_ui_page'];
 
@@ -926,6 +927,12 @@ export class StandaloneDispatcher {
   }
 
   async dispatch(req: AgentRequest): Promise<AgentResponse> {
+    // __batch is the validated plan a multi-record write builds for itself; a
+    // caller could otherwise hand in rows that skipped validation.
+    if (req?.params && typeof req.params === 'object' && '__batch' in req.params) {
+      const { __batch, ...params } = req.params as any;
+      req = { ...req, params };
+    }
     return this.dispatchRequest(req);
   }
 
@@ -1239,6 +1246,33 @@ export class StandaloneDispatcher {
         }
       }
 
+      // Validate a multi-record write and give it its batch id before any
+      // review, so the payload a human approves is exactly the one that runs.
+      const mode = bulkMode(req.command);
+      if (mode && !approved) {
+        req = { ...req, params: await prepareBulk(mode, req.params, (scope) => this.resolveScopeForCreate(inst, scope, {}), async (table) => {
+          const probeId = crypto.randomUUID();
+          const probe = this.pending.register({ id: probeId, command: 'bulk_table_probe', timeoutMs: 15_000 });
+          probe.catch(() => {});
+          this.ws.sendToBrowser({
+            action: 'agentRestApi', agentRequestId: probeId, endpoint: `/api/now/table/${table}`, method: 'GET',
+            queryParams: { sysparm_limit: '1', sysparm_fields: 'sys_id', sysparm_no_count: 'true' },
+            instance: inst.settings, appName: 'SN Utils CLI',
+          });
+          try { return await probe; } catch (err: any) { return { status: err?.details?.status, error: err?.message }; }
+        }, async (table) => {
+          const metaId = crypto.randomUUID();
+          const meta = this.pending.register({ id: metaId, command: 'bulk_columns_probe', timeoutMs: 15_000 });
+          meta.catch(() => {});
+          this.ws.sendToBrowser({
+            action: 'agentRestApi', agentRequestId: metaId, endpoint: `/api/now/ui/meta/${table}`, method: 'GET',
+            instance: inst.settings, appName: 'SN Utils CLI',
+          });
+          const res: any = await meta;
+          return res?.data?.result?.columns;
+        }) };
+      }
+
       // 3. Two-Phase Human Review Enforcement (when supported by connected helper)
       const helperState = this.ws.getHelperState();
       let isReviewRequired = policy.review === 'required' && this.config.reviewHighRisk;
@@ -1247,7 +1281,7 @@ export class StandaloneDispatcher {
           const gateMode = this.ws.getInstanceGate(instanceUrl, gateName);
           if (gateMode === 'auto') {
             isReviewRequired = false;
-          } else if (gateMode === 'approve' && !policy.selfConfirmed) {
+          } else if (gateMode === 'approve' && !policy.selfConfirmed && !policy.preflight) {
             // A selfConfirmed command is confirmed in the helper's own modal.
             isReviewRequired = true;
           }
@@ -1286,13 +1320,22 @@ export class StandaloneDispatcher {
         // Only this private continuation can skip the already completed review.
         const finalPromise = pendingPromise.then(async (res): Promise<AgentResponse> => {
           if (res?.approvedNotExecuted === true) return this.dispatchRequest(req, true);
+          if (mode) {
+            return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: batchResult(res, expectedFor(req.params?.__batch)) };
+          }
           return {
             id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
             result: res.output !== undefined ? { output: res.output } : res.data || res.result || { success: true },
           };
         }).catch((err): AgentResponse => ({
           id: req.id, command: req.command, status: 'error', timestamp: Date.now(),
-          code: err.code || 'E_COMMAND_FAILED', error: err.message || String(err), details: err.details,
+          ...(req.params?.__batch?.batchId && err.code !== 'E_USER_REJECTED' && this.reviews.get(reviewId)?.running
+            // Approved and then the answer was lost: rows may be written.
+            ? (() => { const lost: any = lostAnswer(req.params.__batch.batchId, err); return { code: lost.code, error: lost.message, details: lost.details }; })()
+            : {
+              code: err.code || 'E_COMMAND_FAILED', error: err.message || String(err),
+              details: req.params?.__batch?.batchId ? { ...(err.details || {}), batchId: req.params.__batch.batchId } : err.details,
+            }),
         })).then(response => {
           this.reviews.settle(reviewId, response);
           return response;
@@ -1332,8 +1375,48 @@ export class StandaloneDispatcher {
           id: req.id, command: req.command, status: 'error', timestamp: Date.now(),
           code: 'E_REVIEW_PENDING',
           error: 'Developer approval is required in the SN Utils helper tab Review Queue. Call get_review_result with the reviewId to collect the outcome; do not re-issue the command.',
-          details: { reviewId, instanceOrigin, expiresIn: reviewTimeoutMs / 1000 },
+          details: {
+            reviewId, instanceOrigin, expiresIn: reviewTimeoutMs / 1000,
+            ...(req.params?.__batch?.batchId ? { batchId: req.params.__batch.batchId } : {}),
+          },
         };
+      }
+
+      // Multi-record writes (create_records / update_records) and their result.
+      if (mode || req.command === 'get_batch_result') {
+        if (mode && req.params?.dryRun === true) {
+          return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: dryRunResult(req.params.__batch) };
+        }
+        if (helperState.capabilities?.recordBatch !== 1) {
+          throw Object.assign(new Error('The connected SN Utils helper tab cannot run multi-record writes. Update SN Utils (10.2.8.0 or later) and reopen the ScriptSync helper tab.'), { code: 'E_UNSUPPORTED_HOST' });
+        }
+        if (!mode) {
+          const batchId = requireBatchId(req.params?.batchId);
+          const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 30_000 });
+          pendingPromise.catch(() => {});
+          this.ws.sendToBrowser({ action: 'agentBatchResult', agentRequestId: correlationId, batchId, instance: inst.settings, appName: 'SN Utils CLI' });
+          let reply: any;
+          try { reply = await pendingPromise; } catch (err: any) { reply = { success: false, code: err.code, error: err.message }; }
+          return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: batchResult(reply, { batchId }) };
+        }
+        const batch = req.params?.__batch;
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: batch.deadlineMs + ANSWER_GRACE_MS });
+        pendingPromise.catch(() => {});
+        this.ws.sendToBrowser({ ...batchMessage(batch), agentRequestId: correlationId, instance: inst.settings, appName: 'SN Utils CLI' });
+        let reply: any;
+        try {
+          reply = await pendingPromise;
+        } catch (err: any) {
+          // The bridge turns the helper's own refusal into a rejection; the
+          // helper marks one that came before any row ran as notStarted.
+          // Everything else is an answer lost after sending.
+          if (err.details?.notStarted === true) {
+            reply = { success: false, code: err.code, error: err.message };
+          } else {
+            throw lostAnswer(batch.batchId, err);
+          }
+        }
+        return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: batchResult(reply, expectedFor(batch)) };
       }
 
       // 4. Standard Direct Execution (Unreviewed commands + legacy helper fallback)

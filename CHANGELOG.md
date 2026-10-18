@@ -3,6 +3,13 @@
 ## Unreleased (`@snutils/snu`)
 
 - **Find and gracefully stop an editor-hosted bridge from another folder.** When the global connection file is missing, `snu` can recover the workspace connection from the running bridge. `snu stop` and `snu restart` then ask VS Code or Cursor to release or restart the bridge without closing the editor.
+- **Create or update up to 200 records in one call** with `snu record create-many` / `snu record update-many` and the `snu_create_records` / `snu_update_records` MCP tools. One review covers the whole batch, every row reports `succeeded`, `failed`, `not_attempted` or `unknown`, and rows that succeed are not rolled back. `--dry-run` checks the rows without writing.
+- **Collect a batch after a lost answer** with `snu batch result <batchId>` / `snu_get_batch_result`, also after the call timed out or was approved later.
+- **MCP errors now include their details**, such as the per-row outcomes and `batchId` of a partly written batch, so an agent can retry only what did not succeed.
+
+## Unreleased
+
+- **Agent API: write many records with one review.** `create_records` and `update_records` take up to 200 rows for one table, raise one review in the helper tab instead of one per record, and return an outcome for every row; rows that succeed are not rolled back. `get_batch_result` collects a batch after a timeout or a dropped connection. In review mode the batch waits in Pending Saves as one rows file you can edit before syncing. Needs SN Utils 10.2.8.0 or later.
 
 ## `@snutils/snu` 0.4.1 (2026-10-16)
 

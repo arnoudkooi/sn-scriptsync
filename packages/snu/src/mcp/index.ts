@@ -28,6 +28,7 @@ const SERVER_INSTRUCTIONS = [
   '  check the inserted record\'s sys_scope in the result.',
   '- Changing a field on an existing record -> snu_update_record.',
   '- Changing several fields on one record -> snu_update_record_batch.',
+  '- Creating or changing many records on one table -> snu_create_records / snu_update_records (one review, an outcome per row, no rollback; collect late results with snu_get_batch_result).',
   '- Attaching a file to a record -> snu_upload_attachment.',
   '- Anything the typed tools do not cover (Aggregate API, scripted REST) -> snu_rest_request.',
   '- Check snu_negotiate for supported commands before relying on a capability.',
@@ -92,7 +93,9 @@ export async function createMcpServer(): Promise<McpServer> {
       // Not a tool failure: the browser helper tab simply is not open. Return
       // a normal result with instructions so the agent guides the user
       // instead of surfacing (or retry-looping on) a raw error.
-      if (err?.code === 'E_BROWSER_DISCONNECTED') {
+      // A record batch that was already sent keeps its batchId: never tell the
+      // agent to simply run it again, that can create the rows twice.
+      if (err?.code === 'E_BROWSER_DISCONNECTED' && !err?.details?.batchId) {
         const steps: string[] = Array.isArray(err.details?.guidance) && err.details.guidance.length
           ? err.details.guidance
           : ['Open the ServiceNow instance in the browser, type /token in the SN Utils slash palette to open the helper tab, keep it open, then retry.'];
@@ -111,12 +114,18 @@ export async function createMcpServer(): Promise<McpServer> {
       }
       console.error(`[snu-mcp] Error executing ${name}:`, err?.message || err);
       const userFeedback = err.details?.userFeedback ? ` - User Feedback: "${err.details.userFeedback}"` : '';
+      // Structured details (a batch's per-row outcomes and batchId, a review
+      // id) are what an agent needs to recover safely; never drop them.
+      let detailText = '';
+      if (err?.details && typeof err.details === 'object' && Object.keys(err.details).length) {
+        try { detailText = `\nDetails: ${JSON.stringify(err.details, null, 2)}`; } catch { /* unserializable: message only */ }
+      }
       return {
         isError: true,
         content: [
           {
             type: 'text' as const,
-            text: `Error (${err?.code || 'E_COMMAND_FAILED'}): ${err?.message || err}${userFeedback}`,
+            text: `Error (${err?.code || 'E_COMMAND_FAILED'}): ${err?.message || err}${userFeedback}${detailText}`,
           },
         ],
       };
@@ -149,6 +158,15 @@ export async function createMcpServer(): Promise<McpServer> {
     snu_get_review_result: {
       reviewId: z.string(), waitSeconds: z.number().min(0).max(55).optional(),
     },
+    ...Object.fromEntries((['create', 'update'] as const).map(mode => [`snu_${mode}_records`, {
+      table: z.string(),
+      rows: z.array(z.record(z.any())).max(200).optional().describe(mode === 'create' ? 'One field-value object per new record' : 'One { sys_id, ...fields } object per record'),
+      rowsFile: z.string().optional().describe('JSON file with the rows array inside the local MCP workspace, alternative to rows'),
+      ...(mode === 'create' ? { scope: z.string().optional().describe('Application scope name or sys_id, or "global"') } : {}),
+      continueOnError: z.boolean().optional(), dryRun: z.boolean().optional(),
+      deadlineMinutes: z.number().min(1).max(30).optional(), instance: z.string().optional(),
+    }])),
+    snu_get_batch_result: { batchId: z.string(), instance: z.string().optional() },
   };
   for (const [name, schema] of Object.entries(paritySchemas)) {
     const tool = getToolByName(name)!;

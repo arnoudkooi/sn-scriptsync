@@ -57,6 +57,9 @@ const BRIDGE_COMMANDS = new Set([
   'delete_application',
   'sdk_deploy',
   'sdk_pull',
+  'create_records',
+  'update_records',
+  'get_batch_result',
 ]);
 
 test('Drift: every registry tool targets a valid bridge command', () => {

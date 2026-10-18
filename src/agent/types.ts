@@ -41,6 +41,8 @@ export interface HelperCapabilities {
 	instanceSecurityGates?: 1 | 0;
 	/** The helper answers each editor save (syncId) with a saveResult. */
 	saveAck?: 1 | 0;
+	/** The helper runs create_records / update_records (agentRecordBatch). */
+	recordBatch?: 1 | 0;
 	[key: string]: any;
 }
 
@@ -159,6 +161,15 @@ export interface CommandHandler<P = any, R = any> {
 	/** When true the handler requires a live browser bridge. */
 	requiresBrowser?: boolean;
 	handle(ctx: AgentContext, params: P): Promise<R>;
+	/**
+	 * Validate and normalize the request before any gate review or staging, so
+	 * a human never approves a request that is about to fail validation and
+	 * the reviewed payload is exactly what runs. The dispatcher replaces the
+	 * request params with the result.
+	 */
+	prepare?(ctx: AgentContext, params: P): Promise<P>;
+	/** Map the helper tab's reply to an approved review onto this command's result (throws AgentError for a failure). */
+	fromHelperResult?(reply: any, params: P): any;
 	docs: CommandDocs;
 }
 

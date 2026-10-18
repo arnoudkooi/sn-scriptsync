@@ -9,9 +9,10 @@ import { resolveInstanceFolder } from './instanceResolver';
 import { buildContext, getRuntime } from './runtime';
 import { getCommandPolicy, GATE_FALLBACKS, resolveGateMode } from './policy';
 import { computePayloadHash } from './canonical';
-import { registerReview, settleReview, markReviewRunning } from './reviewRegistry';
+import { registerReview, settleReview, markReviewRunning, isReviewRunning } from './reviewRegistry';
 import { ExtensionUtils } from '../ExtensionUtils';
 import { reviewExecutionFailure } from './reviewOutcome';
+import { lostAnswer } from './commands/bulk';
 
 const VALID_ID = /^[a-zA-Z0-9_-]+$/;
 const eu = new ExtensionUtils();
@@ -56,10 +57,13 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 	// it replays a write the user already approved. Transports hand us whatever
 	// the caller sent, so strip it from anything that did not originate here:
 	// otherwise an agent can opt itself out of review mode by setting a flag.
+	// __batch is the validated plan a multi-record write's prepare step adds;
+	// a caller could otherwise hand in rows that skipped validation.
 	if (!options?.internal && request.params && typeof request.params === 'object'
-		&& '__review_bypass' in request.params) {
+		&& ('__review_bypass' in request.params || '__batch' in request.params)) {
 		request = { ...request, params: { ...request.params } };
 		delete (request.params as any).__review_bypass;
+		delete (request.params as any).__batch;
 	}
 	if (!request.id || !request.command) {
 		return errorResponse(request?.id || 'unknown', request?.command || 'unknown', 'E_INVALID_REQUEST', 'Missing required fields: id, command');
@@ -87,7 +91,7 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 		return errorResponse(request.id, request.command, 'E_INTERNAL', 'Failed to resolve instance folder');
 	}
 
-	const ctx = buildContext(request, instanceFolder);
+	let ctx = buildContext(request, instanceFolder);
 
 	if (handler.requiresBrowser) {
 		if (!ctx.isServerRunning()) {
@@ -135,7 +139,7 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 				return errorResponse(request.id, request.command, 'E_DISABLED',
 					`${label} is not allowed for ${instanceOrigin || 'this instance'}. Grant it in the SN Utils helper tab and retry.`);
 			}
-			if (mode === 'approve' && !policy.selfConfirmed) {
+			if (mode === 'approve' && !policy.selfConfirmed && !policy.preflight) {
 				isReviewRequired = true;
 			}
 		} else {
@@ -153,6 +157,29 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 			}
 		}
 	}
+	// Validate (and normalize) before anything is reviewed or staged, so the
+	// payload a human approves is exactly the one that runs.
+	if (handler.prepare) {
+		try {
+			request = { ...request, params: await handler.prepare(ctx, request.params || {}) };
+		} catch (err: any) {
+			if (err instanceof AgentError) {
+				return errorResponse(request.id, request.command, err.code, err.message, err.details);
+			}
+			console.error('[agent] command prepare failed:', request.command, err?.stack || err);
+			return errorResponse(request.id, request.command, 'E_INTERNAL', 'Internal error while validating the command');
+		}
+		ctx = buildContext(request, instanceFolder);
+	}
+
+	// Review mode holds a record batch in Pending Saves first. The helper
+	// review happens when the user syncs it, on the payload as they left it
+	// (the replay is re-validated above), never before they have seen it.
+	if (isReviewRequired && policy.reviewKind === 'record_batch' && ctx.reviewWritesEnabled()
+		&& (request.params as any)?.__review_bypass !== true) {
+		isReviewRequired = false;
+	}
+
 	if (isReviewRequired && helperGates && policy.gates.length > 0 &&
 		policy.gates.every((g) => resolveGateMode(helperGates, g) === 'auto')) {
 		// Every governing gate is explicitly 'auto': the user pre-approved this
@@ -214,6 +241,17 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 					return errorResponse(request.id, request.command, 'E_INTERNAL', err?.message || String(err));
 				}
 			}
+			if (handler.fromHelperResult) {
+				try {
+					const result = handler.fromHelperResult(revResp, request.params || {});
+					return { id: request.id, command: request.command, status: 'success', result, timestamp: Date.now() };
+				} catch (err: any) {
+					if (err instanceof AgentError) {
+						return errorResponse(request.id, request.command, err.code, err.message, err.details);
+					}
+					return errorResponse(request.id, request.command, 'E_INTERNAL', err?.message || String(err));
+				}
+			}
 			// Handled and executed on helper side - return result directly (no double execution!)
 			const result = revResp.output !== undefined
 				? { output: revResp.output }
@@ -255,9 +293,21 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 		registerReview(reviewId, request.id, request.command, reviewTimeoutMs);
 		pendingPromise
 			.then(async (revResp) => settleReview(reviewId, await finalizeReview(revResp)))
-			.catch((err: any) => settleReview(reviewId, err instanceof AgentError
-				? errorResponse(request.id, request.command, err.code, err.message, err.details)
-				: errorResponse(request.id, request.command, 'E_INTERNAL', err?.message || String(err))))
+			.catch((err: any) => {
+				// A record batch keeps running in the helper past this wait; its
+				// id is how the agent collects the rows (get_batch_result).
+				const batchId = (request.params as any)?.__batch?.batchId;
+				// A review that expired or was rejected never ran. A lost answer
+				// after approval may hide written rows: point at get_batch_result.
+				if (batchId && err?.code !== 'E_USER_REJECTED' && isReviewRunning(reviewId)) {
+					const lost = lostAnswer(batchId, err);
+					settleReview(reviewId, errorResponse(request.id, request.command, lost.code, lost.message, lost.details));
+					return;
+				}
+				settleReview(reviewId, err instanceof AgentError
+					? errorResponse(request.id, request.command, err.code, err.message, err.details)
+					: errorResponse(request.id, request.command, 'E_INTERNAL', err?.message || String(err)));
+			})
 			.finally(cancelHelperReview);
 
 		const expiresInMinutes = Math.floor(reviewTimeoutMs / 60_000);
@@ -267,7 +317,11 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 			'E_REVIEW_PENDING',
 			`Human approval required: "${request.command}" is waiting in the SN Utils helper tab Review Queue for ${instanceOrigin || 'the instance'}. ` +
 			`Tell the user to approve it there (expires in ${expiresInMinutes} min), then call get_review_result with { reviewId: "${reviewId}" } to collect the outcome.`,
-			{ reviewId, expiresInSeconds: Math.floor(reviewTimeoutMs / 1000) },
+			{
+				reviewId,
+				expiresInSeconds: Math.floor(reviewTimeoutMs / 1000),
+				...((request.params as any)?.__batch?.batchId ? { batchId: (request.params as any).__batch.batchId } : {}),
+			},
 		);
 	}
 

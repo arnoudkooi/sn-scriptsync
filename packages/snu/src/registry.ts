@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ToolDefinition, MappedCommand } from './types.js';
 import { findNowSdkProjects, readDeployLink } from './nowsdk/NowSdkProject.js';
 import { resolveFieldValues } from './fieldInput.js';
+import { readWorkspaceFile } from './server/attachmentInput.js';
 
 /**
  * The instance a NOW SDK app is linked to (.snu/deploy.json), so deploy and
@@ -910,6 +911,66 @@ export const TOOLS: ToolDefinition[] = [
       return { command: 'update_record_batch', instance: input.instance,
         params: { table: input.table, sys_id: input.sys_id, fields, await: true } };
     },
+  },
+  ...(['create', 'update'] as const).map((mode): ToolDefinition => ({
+    name: `snu_${mode}_records`, agentCommand: `${mode}_records`, cliCommand: `record ${mode}-many`,
+    description: mode === 'create'
+      ? 'Insert up to 200 records on one table in one call, through the createArtifacts permission. Rows are checked before anything is sent; with an approve permission the user reviews the whole batch once in the SN Utils helper tab. Every row gets an outcome (succeeded, failed, not_attempted, unknown). Rows that succeed are NOT rolled back when a later row fails, so never resend the whole batch: retry only the rows that did not succeed, and query the table first for rows marked unknown. scope is the application the rows are written in (name or sys_id), as on snu_create_record. dryRun validates without writing. Long batches can outlive this call: with E_TIMEOUT or E_REVIEW_PENDING, collect the rows with snu_get_batch_result and the returned batchId.'
+      : 'Update up to 200 existing records on one table in one call, through the updateRecords permission. Each row is { sys_id, ...fields }. Rows are checked before anything is sent; with an approve permission the user reviews the whole batch once in the SN Utils helper tab. Every row gets an outcome (succeeded, failed, not_attempted, unknown). Rows that succeed are NOT rolled back when a later row fails; retry only the rows that did not succeed. Rows may not set sys_scope (read-only after insert; unlike snu_update_record_batch this is refused, not dropped). dryRun validates without writing. With E_TIMEOUT or E_REVIEW_PENDING, collect the rows with snu_get_batch_result and the returned batchId.',
+    cliUsage: `snu record ${mode}-many <table> (--rows <json> | --file <json-file> | stdin)${mode === 'create' ? ' [--scope <scope>]' : ''} [--continue-on-error] [--dry-run] [--deadline <minutes>] [--instance <i>] [--json]`,
+    cliOptions: {
+      rows: { type: 'string' as const, description: 'JSON array of row objects' },
+      file: { type: 'string' as const, description: 'Read the rows from a JSON file' },
+      ...(mode === 'create' ? { scope: { type: 'string' as const, description: 'Application scope name or sys_id, or global' } } : {}),
+      'continue-on-error': { type: 'boolean' as const, description: 'Attempt every row even after one fails' },
+      'dry-run': { type: 'boolean' as const, description: 'Validate only; write nothing' },
+      deadline: { type: 'string' as const, description: 'Minutes the helper may run the batch (1 to 30, default 10)' },
+    },
+    // The batch deadline (at most 30 minutes) plus the review window.
+    timeoutMs: 36 * 60 * 1000,
+    inputSchema: {
+      type: 'object', properties: {
+        table: { type: 'string', description: 'ServiceNow table name' },
+        rows: { type: 'array', items: { type: 'object' }, maxItems: 200, description: mode === 'create' ? 'One field-value object per new record; sys_id is optional' : 'One { sys_id, ...fields } object per record to change' },
+        rowsFile: { type: 'string', description: 'JSON file with the rows array inside the local CLI/MCP workspace; conflicts with rows' },
+        ...(mode === 'create' ? { scope: { type: 'string', description: 'Application scope name or sys_id, or "global"' } } : {}),
+        continueOnError: { type: 'boolean', description: 'Attempt every row even after one fails (default false: stop at the first row that fails or has no answer)' },
+        dryRun: { type: 'boolean', description: 'Validate and normalize only; nothing is written and no review is raised' },
+        deadlineMinutes: { type: 'number', minimum: 1, maximum: 30, description: 'Minutes the helper may run the batch (default 10)' },
+        instance: { type: 'string', description: 'Target instance' },
+      }, required: ['table'], anyOf: [{ required: ['rows'] }, { required: ['rowsFile'] }], additionalProperties: false,
+    },
+    mapInput: (input: Record<string, any>) => {
+      if (input.rows !== undefined && input.rowsFile !== undefined) {
+        throw Object.assign(new Error('Provide rows or rowsFile, not both'), { code: 'E_INVALID_PARAMS' });
+      }
+      let rows = input.rows;
+      if (input.rowsFile !== undefined) {
+        try { rows = JSON.parse(readWorkspaceFile(input.rowsFile, process.cwd()).toString('utf8')); }
+        catch (err: any) { throw Object.assign(new Error(err?.code === 'E_INVALID_PARAMS' ? err.message : 'rowsFile must contain a JSON array of row objects'), { code: 'E_INVALID_PARAMS' }); }
+      }
+      if (typeof rows === 'string') {
+        try { rows = JSON.parse(rows); } catch { throw Object.assign(new Error('rows must be a JSON array of row objects'), { code: 'E_INVALID_PARAMS' }); }
+      }
+      return { command: `${mode}_records`, instance: input.instance, params: {
+        table: input.table, rows,
+        ...(input.scope !== undefined ? { scope: input.scope } : {}),
+        ...(input.continueOnError !== undefined ? { continueOnError: input.continueOnError } : {}),
+        ...(input.dryRun !== undefined ? { dryRun: input.dryRun } : {}),
+        ...(input.deadlineMinutes !== undefined ? { deadlineMinutes: Number(input.deadlineMinutes) } : {}),
+      } };
+    },
+  })),
+  {
+    name: 'snu_get_batch_result', agentCommand: 'get_batch_result', cliCommand: 'batch result',
+    description: 'Collect the outcome of a snu_create_records / snu_update_records batch by its batchId: every row\'s outcome, or running: true while the helper is still writing. Use it after E_TIMEOUT, E_REVIEW_PENDING (once approved) or a dropped connection, before retrying any row. Kept for 24 hours in the browser that ran the batch.',
+    cliUsage: 'snu batch result <batchId> [--instance <i>] [--json]',
+    cliOptions: {},
+    inputSchema: { type: 'object', properties: {
+      batchId: { type: 'string', description: 'batchId returned by snu_create_records / snu_update_records' },
+      instance: { type: 'string', description: 'Target instance' },
+    }, required: ['batchId'], additionalProperties: false },
+    mapInput: input => ({ command: 'get_batch_result', instance: input.instance, params: { batchId: input.batchId } }),
   },
   {
     name: 'snu_upload_attachment', agentCommand: 'upload_attachment', cliCommand: 'attachment upload',

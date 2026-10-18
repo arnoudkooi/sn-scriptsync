@@ -39,13 +39,18 @@ export interface CommandPolicy {
   risk: CommandRisk;
   gates: Array<keyof SecurityGates>;
   review: 'never' | 'optional' | 'required';
-  reviewKind?: 'background_script' | 'record_delete' | 'rest_delete' | 'ui_action' | 'bulk_delete';
+  reviewKind?: 'background_script' | 'record_delete' | 'rest_delete' | 'ui_action' | 'bulk_delete' | 'record_batch';
   /**
    * The helper tab asks the user to confirm this command in its own modal, so
    * an 'approve' gate does not add a command review on top. The gate still has
    * to be granted ('auto' or 'approve') for the command to run at all.
    */
   selfConfirmed?: boolean;
+  /**
+   * Validation only, nothing is written (dryRun): the gate must still be
+   * granted, but an 'approve' gate does not raise a review for it.
+   */
+  preflight?: boolean;
 }
 
 export function getCommandPolicy(req: AgentRequest): CommandPolicy {
@@ -117,6 +122,19 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
     case 'update_record':
     case 'update_record_batch':
       return { risk: 'write', gates: ['updateRecords'], review: 'never' };
+
+    // Multi-record writes ride the same permissions as their single-record
+    // commands. An 'approve' gate raises one record_batch review for the whole
+    // batch instead of one per row; dryRun only validates.
+    case 'create_records':
+      return { risk: 'write', gates: ['createArtifacts'], review: 'never', reviewKind: 'record_batch', ...(req.params?.dryRun === true ? { preflight: true } : {}) };
+    case 'update_records':
+      return { risk: 'write', gates: ['updateRecords'], review: 'never', reviewKind: 'record_batch', ...(req.params?.dryRun === true ? { preflight: true } : {}) };
+
+    // Reads a batch's progress from the helper tab's ledger.
+    case 'get_batch_result':
+      return { risk: 'read', gates: [], review: 'never' };
+
 
     case 'pull_records':
     case 'pull_artifacts':

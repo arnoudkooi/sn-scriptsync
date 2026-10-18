@@ -52,3 +52,25 @@ test('MCP publishes every registry tool and the 0.4 input schemas', async t => {
   assert.strictEqual(JSON.parse((result.content as any[])[0].text).output, 'done');
   assert.deepStrictEqual(calls.map(call => call.command), ['run_background_script', 'get_review_result']);
 });
+
+test('MCP: a record batch with a lost answer keeps its batchId and is never told to run again', async t => {
+  const server = await createMcpServer();
+  const client = new Client({ name: 'batch-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const original = ScriptSyncClient.prototype.execute;
+  let code = 'E_TIMEOUT';
+  (ScriptSyncClient.prototype as any).execute = async () => {
+    throw new ScriptSyncClientError('No answer for batch bat_x_a1b2c3d4', code, 504, { batchId: 'bat_x_a1b2c3d4', retrySafe: false });
+  };
+  t.after(() => { ScriptSyncClient.prototype.execute = original; });
+  for (code of ['E_TIMEOUT', 'E_BROWSER_DISCONNECTED']) {
+    const res = await client.callTool({ name: 'snu_create_records', arguments: { table: 'sys_choice', rows: [{ label: 'a' }] } });
+    const text = (res.content as any[])[0].text as string;
+    assert.ok(res.isError, code);
+    assert.ok(text.includes('bat_x_a1b2c3d4'), `${code}: ${text}`);
+    assert.ok(!text.includes('Then run this tool again'), `${code}: ${text}`);
+  }
+});

@@ -4,8 +4,8 @@ import { TOOLS, getToolByName, getToolByCliCommand } from '../registry.js';
 import { formatHumanOutput } from '../cli/format.js';
 import { resolveContextSecurity } from '../client.js';
 
-test('Registry: exactly 26 tools registered', () => {
-  assert.strictEqual(TOOLS.length, 26);
+test('Registry: exactly 29 tools registered', () => {
+  assert.strictEqual(TOOLS.length, 29);
   const toolNames = TOOLS.map((t) => t.name);
   assert.deepStrictEqual(toolNames, [
     'snu_code_search',
@@ -32,9 +32,28 @@ test('Registry: exactly 26 tools registered', () => {
     'snu_sdk_pull',
     'snu_negotiate',
     'snu_update_record_batch',
+    'snu_create_records',
+    'snu_update_records',
+    'snu_get_batch_result',
     'snu_upload_attachment',
     'snu_get_review_result',
   ]);
+});
+
+test('Adapter: record batches map rows, scope and options, and accept a JSON string from the CLI', () => {
+  const sysId = '0123456789abcdef0123456789abcdef';
+  const created = getToolByName('snu_create_records')!.mapInput({
+    table: 'sys_choice', rows: '[{"label":"a"}]', scope: 'x_app', dryRun: true, deadlineMinutes: '5',
+  });
+  assert.deepStrictEqual(created, { command: 'create_records', instance: undefined, params: {
+    table: 'sys_choice', rows: [{ label: 'a' }], scope: 'x_app', dryRun: true, deadlineMinutes: 5,
+  } });
+  const updated = getToolByName('snu_update_records')!.mapInput({ table: 'incident', rows: [{ sys_id: sysId, urgency: '2' }], continueOnError: true });
+  assert.deepStrictEqual(updated.params, { table: 'incident', rows: [{ sys_id: sysId, urgency: '2' }], continueOnError: true });
+  assert.throws(() => getToolByName('snu_create_records')!.mapInput({ table: 't', rows: [], rowsFile: 'x.json' }), /not both/);
+  assert.strictEqual(getToolByCliCommand('record create-many')?.name, 'snu_create_records');
+  assert.strictEqual(getToolByCliCommand('batch result')?.agentCommand, 'get_batch_result');
+  assert.ok((getToolByName('snu_update_records')!.timeoutMs || 0) > 30 * 60 * 1000, 'a batch may run up to 30 minutes');
 });
 
 test('Adapter: snu_pull_records maps parameters correctly', () => {

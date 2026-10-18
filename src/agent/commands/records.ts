@@ -347,7 +347,7 @@ const create_artifact: CommandHandler = {
  * sys_ids. Reading it is exactly how a scope NAME used to reach the instance in
  * the sys_scope field with no error.
  */
-async function resolveScopeForCreate(
+export async function resolveScopeForCreate(
 	ctx: any,
 	instanceSettings: any,
 	scope: unknown,

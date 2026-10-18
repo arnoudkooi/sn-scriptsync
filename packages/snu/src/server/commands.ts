@@ -8,5 +8,5 @@ export const STANDALONE_COMMANDS = [
   'pull_artifacts', 'pull_scope', 'code_search', 'run_background_script',
   'rest_request', 'get_form_state', 'set_field', 'run_ui_action', 'navigate',
   'take_screenshot', 'switch_context', 'upload_attachment', 'sdk_deploy',
-  'sdk_pull', 'yield',
+  'sdk_pull', 'create_records', 'update_records', 'get_batch_result', 'yield',
 ] as const;

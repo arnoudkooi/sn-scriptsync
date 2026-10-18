@@ -47,6 +47,7 @@ import {
 	AGENT_API_VERSION,
 	HttpServerState,
 	AgentRequest,
+	AgentResponse,
 	findPortListener,
 	classifyListener,
 	terminateListener,
@@ -65,6 +66,7 @@ import {
 	OwnerLease,
 	LEASE_HEARTBEAT_MS,
 } from './agent';
+import { stagedBatchDecision } from './agent/commands/bulk';
 
 
 
@@ -437,6 +439,150 @@ function stageCreateToFiles(reviewId: string, request: AgentRequest, instanceFol
 	if (firstPath) openForReview(firstPath);
 }
 
+// A record batch (create_records / update_records) is held as one JSON file of
+// rows the user can edit or trim. It rides the staged-create bookkeeping, so
+// Sync Now replays it with the rows as the user left them, and the replay is
+// validated again before the helper tab reviews or runs it.
+const BATCH_ROWS_FIELD = '__rows';
+function isBatchCommand(command: string): boolean {
+	return command === 'create_records' || command === 'update_records';
+}
+
+function stageBatchToFile(reviewId: string, request: AgentRequest, instanceFolder: string, label: string, preview: string) {
+	const batch = (request.params as any)?.__batch || {};
+	const workspaceRoot = getWorkspaceRoot() || '';
+	const fileName = `${sanitizePathComponent(String(batch.batchId || reviewId))}.${sanitizePathComponent(String(batch.table || 'records'))}.rows.json`;
+	const filePath = safeJoinUnderRoot(workspaceRoot, path.basename(instanceFolder), '_agent_batches', fileName);
+	captureReviewBaseline(filePath);
+	eu.writeFile(filePath, preview, false, function () { });
+	agentStagedCreates.set(reviewId, { reviewId, label, request, instanceFolder, files: [{ field: BATCH_ROWS_FIELD, filePath }] });
+	agentCreateFilesByPath.set(filePath, reviewId);
+	enqueueForReview(filePath);
+	openForReview(filePath);
+}
+
+/**
+ * The params a staged create or batch is replayed with: the original payload
+ * with the (possibly edited) review files merged in. Null when a batch rows
+ * file no longer parses, so a damaged file is never sent.
+ */
+function stagedReplayParams(c: StagedCreate): any | null {
+	const params: any = { ...(c.request.params || {}) };
+	if (isBatchCommand(c.request.command)) {
+		const file = c.files.find(f => f.field === BATCH_ROWS_FIELD);
+		try {
+			params.rows = JSON.parse(fs.readFileSync(file?.filePath || '', 'utf8'));
+		} catch {
+			vscode.window.showErrorMessage(`sn-scriptsync: "${c.label}" was not synced: its rows file is not valid JSON.`);
+			return null;
+		}
+		// Keep only the id, so the replay is validated from the edited rows.
+		params.__batch = { batchId: params.__batch?.batchId };
+	} else {
+		const mergedFields: Record<string, any> = { ...(params.fields || {}) };
+		for (const f of c.files) {
+			try { mergedFields[f.field] = fs.readFileSync(f.filePath, 'utf8'); } catch { /* keep original payload value */ }
+		}
+		params.fields = mergedFields;
+	}
+	params.__review_bypass = true;
+	return params;
+}
+
+/**
+ * Sync one staged record batch. Its rows file stays on disk, held, until the
+ * batch has run: a payload that fails validation, a review that is rejected or
+ * expires, or an answer that is lost puts it straight back in Pending Saves
+ * with the user's edits and the same batch id (the helper never runs one id
+ * twice, so syncing it again after a lost answer only collects the outcome).
+ * After a run, rows that did not succeed go back as a new batch; rows with no
+ * answer are left out, because they may exist.
+ */
+function replayStagedBatch(c: StagedCreate) {
+	if (stagedBatchesInFlight.has(c.reviewId)) return;
+	const file = c.files.find(f => f.field === BATCH_ROWS_FIELD);
+	if (!file) return;
+	const params = stagedReplayParams(c);
+	if (!params) return; // unparseable: left exactly where it is
+	stagedBatchesInFlight.add(c.reviewId);
+	agentStagedCreates.delete(c.reviewId);
+	pendingFiles.delete(file.filePath);
+	queueProvider?.removeFromQueue(file.filePath);
+
+	const restore = (request: AgentRequest) => {
+		// Discarded by the user while it was syncing: stays discarded.
+		if (!agentCreateFilesByPath.has(file.filePath) || !fs.existsSync(file.filePath)) return;
+		agentStagedCreates.set(c.reviewId, { ...c, request });
+		agentCreateFilesByPath.set(file.filePath, c.reviewId);
+		enqueueForReview(file.filePath);
+	};
+	const instance = path.basename(c.instanceFolder);
+	void (async () => {
+		let resp: AgentResponse | undefined;
+		try {
+			resp = await dispatchAgentCommand({
+				id: `${c.reviewId}_sync`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+				command: c.request.command, instance, params, timestamp: Date.now(),
+			}, { internal: true });
+			// Wait for the helper review to settle before deciding about the file.
+			for (let i = 0; i < 12 && resp.code === 'E_REVIEW_PENDING' && resp.details?.reviewId; i++) {
+				resp = await dispatchAgentCommand({
+					id: `${c.reviewId}_review_${i}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+					command: 'get_review_result', instance,
+					params: { reviewId: resp.details.reviewId, waitSeconds: 55 }, timestamp: Date.now(),
+				}, { internal: true });
+			}
+		} catch (e: any) {
+			resp = { id: c.reviewId, command: c.request.command, status: 'error', code: 'E_INTERNAL', error: e?.message || String(e), timestamp: Date.now() };
+		}
+		stagedBatchesInFlight.delete(c.reviewId);
+
+		const decision = stagedBatchDecision(resp, Array.isArray(params.rows) ? params.rows : []);
+		if (decision.action === 'keep') {
+			// Nothing ran (or we cannot tell yet): the file and its edits stay.
+			const { __review_bypass, ...kept } = params;
+			restore({ ...c.request, params: kept });
+			reportStagedReplay(c.label, c.request.command, resp);
+			return;
+		}
+		const retry = decision.retryRows;
+		const unknown = decision.unknown;
+		if (!retry.length) {
+			agentCreateFilesByPath.delete(file.filePath);
+			undoReviewFile(file.filePath);
+		} else {
+			// The rest goes back as a new batch, so it can run once fixed.
+			try { ExtensionUtils.markSelfWrite(file.filePath); fs.writeFileSync(file.filePath, JSON.stringify(retry, null, 2)); } catch { /* keep the old file */ }
+			const { __batch, __review_bypass, ...rest } = params;
+			restore({ ...c.request, params: { ...rest, rows: retry } });
+		}
+		reportStagedReplay(c.label, c.request.command, resp,
+			retry.length ? `${retry.length} row${retry.length === 1 ? '' : 's'} that did not succeed ${retry.length === 1 ? 'is' : 'are'} back in Pending Saves.` : undefined,
+			unknown ? `${unknown} row${unknown === 1 ? '' : 's'} had no answer and may exist: check the table before adding ${unknown === 1 ? 'it' : 'them'} again.` : undefined);
+	})();
+}
+const stagedBatchesInFlight = new Set<string>();
+
+/** Tell the user how a replayed staged write went. */
+function reportStagedReplay(label: string, command: string, resp: AgentResponse, ...notes: Array<string | undefined>) {
+	const extra = notes.filter(Boolean).join(' ');
+	if (extra && resp.status === 'error') {
+		vscode.window.showErrorMessage(`sn-scriptsync: ${command} for "${label}": ${resp.error} ${extra}`);
+		return;
+	}
+	if (resp.status !== 'error') {
+		const result: any = resp.result;
+		if (isBatchCommand(command) && result?.counts) {
+			vscode.window.showInformationMessage(`sn-scriptsync: "${label}": all ${result.counts.total} rows written.`);
+		}
+		debugLog(`Agent staged ${command} synced: ${label}`);
+	} else if (resp.code === 'E_REVIEW_PENDING') {
+		vscode.window.showInformationMessage(`sn-scriptsync: "${label}" is waiting for approval in the SN Utils helper tab.`);
+	} else {
+		vscode.window.showErrorMessage(`sn-scriptsync: ${command} failed for "${label}": ${resp.error}`);
+	}
+}
+
 // Entry point wired into the agent runtime. Kicks off materialisation and
 // immediately tells the agent the write is staged (await is ignored).
 function stageAgentWrite(input: {
@@ -453,6 +599,8 @@ function stageAgentWrite(input: {
 
 	if (input.request.command === 'create_artifact') {
 		stageCreateToFiles(reviewId, input.request, input.instanceFolder, input.label);
+	} else if (isBatchCommand(input.request.command)) {
+		stageBatchToFile(reviewId, input.request, input.instanceFolder, input.label, input.preview || '[]');
 	} else {
 		// update_record / update_record_batch (async meta lookup, fire-and-forget)
 		stageUpdateToFiles(reviewId, input.request, input.instanceFolder, input.label);
@@ -476,42 +624,41 @@ function stageAgentWrite(input: {
 // as lossy file-creates. Phase 2 awaits the actual create replays.
 function flushStagedCreates() {
 	if (agentStagedCreates.size === 0) return;
-	const creates = Array.from(agentStagedCreates.values());
-	clearStagedCreates();
+	const all = Array.from(agentStagedCreates.values());
+	// Record batches keep their rows file until they have run (see replayStagedBatch).
+	for (const c of all) if (isBatchCommand(c.request.command)) replayStagedBatch(c);
+	const creates = all.filter(c => !isBatchCommand(c.request.command));
+	for (const c of creates) {
+		agentStagedCreates.delete(c.reviewId);
+		for (const f of c.files) agentCreateFilesByPath.delete(f.filePath);
+	}
 
 	// Phase 1 (sync): capture content + pull files out of the queue.
 	const replays = creates.map((c) => {
-		const params: any = { ...(c.request.params || {}) };
-		const mergedFields: Record<string, any> = { ...(params.fields || {}) };
+		const params = stagedReplayParams(c);
 		for (const f of c.files) {
-			try { mergedFields[f.field] = fs.readFileSync(f.filePath, 'utf8'); } catch { /* keep original payload value */ }
 			pendingFiles.delete(f.filePath);
 			queueProvider?.removeFromQueue(f.filePath);
 			acceptReviewBaseline(f.filePath);
 		}
-		params.fields = mergedFields;
-		params.__review_bypass = true;
-		return { reviewId: c.reviewId, label: c.label, instanceFolder: c.instanceFolder, params };
+		return { reviewId: c.reviewId, label: c.label, command: c.request.command, instanceFolder: c.instanceFolder, params };
 	});
 
 	// Phase 2 (async): replay the creates with their full payloads.
 	void (async () => {
 		for (const r of replays) {
+			if (!r.params) continue;
 			try {
 				const resp = await dispatchAgentCommand({
 					id: r.reviewId.replace(/[^a-zA-Z0-9_-]/g, '_'),
-					command: 'create_artifact',
+					command: r.command,
 					instance: path.basename(r.instanceFolder),
 					params: r.params,
 					timestamp: Date.now(),
 				}, { internal: true });
-				if (resp.status === 'error') {
-					vscode.window.showErrorMessage(`sn-scriptsync: create failed for "${r.label}": ${resp.error}`);
-				} else {
-					debugLog(`Agent staged create synced: ${r.label}`);
-				}
+				reportStagedReplay(r.label, r.command, resp);
 			} catch (e: any) {
-				vscode.window.showErrorMessage(`sn-scriptsync: create error for "${r.label}": ${e?.message || e}`);
+				vscode.window.showErrorMessage(`sn-scriptsync: ${r.command} error for "${r.label}": ${e?.message || e}`);
 			}
 		}
 	})();
@@ -610,34 +757,28 @@ function clearStagedCreates() {
 function replayStagedCreate(reviewId: string) {
 	const c = agentStagedCreates.get(reviewId);
 	if (!c) return;
+	if (isBatchCommand(c.request.command)) { replayStagedBatch(c); return; }
 	agentStagedCreates.delete(reviewId);
-	const params: any = { ...(c.request.params || {}) };
-	const mergedFields: Record<string, any> = { ...(params.fields || {}) };
+	const params = stagedReplayParams(c);
 	for (const f of c.files) {
-		try { mergedFields[f.field] = fs.readFileSync(f.filePath, 'utf8'); } catch { /* keep original payload value */ }
 		pendingFiles.delete(f.filePath);
 		queueProvider?.removeFromQueue(f.filePath);
 		agentCreateFilesByPath.delete(f.filePath);
 		acceptReviewBaseline(f.filePath);
 	}
-	params.fields = mergedFields;
-	params.__review_bypass = true;
+	if (!params) return;
 	void (async () => {
 		try {
 			const resp = await dispatchAgentCommand({
 				id: c.reviewId.replace(/[^a-zA-Z0-9_-]/g, '_'),
-				command: 'create_artifact',
+				command: c.request.command,
 				instance: path.basename(c.instanceFolder),
 				params,
 				timestamp: Date.now(),
 			}, { internal: true });
-			if (resp.status === 'error') {
-				vscode.window.showErrorMessage(`sn-scriptsync: create failed for "${c.label}": ${resp.error}`);
-			} else {
-				debugLog(`Agent staged create synced: ${c.label}`);
-			}
+			reportStagedReplay(c.label, c.request.command, resp);
 		} catch (e: any) {
-			vscode.window.showErrorMessage(`sn-scriptsync: create error for "${c.label}": ${e?.message || e}`);
+			vscode.window.showErrorMessage(`sn-scriptsync: ${c.request.command} error for "${c.label}": ${e?.message || e}`);
 		}
 	})();
 }

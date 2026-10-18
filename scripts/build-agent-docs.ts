@@ -145,7 +145,11 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v23 -> v24: added pull_scope: every scriptable artifact of one application
 //               scope to canonical local files, paged past the Table API
 //               limits (the Agent API counterpart of the Load Scope button).
-const INSTRUCTIONS_VERSION = 25;
+//   v25 -> v26: create_records / update_records: up to 200 records on one
+//               table per call, one review for the batch, an outcome per row
+//               (succeeded, failed, not_attempted, unknown), no rollback;
+//               get_batch_result collects a batch after a lost answer.
+const INSTRUCTIONS_VERSION = 26;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -156,8 +160,8 @@ const SKILL_MARKER = `<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=${INSTR
 // Grouped for the auto-generated command index in the core. The flattened list
 // is also the canonical command order inside the skills that own them.
 const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
-	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'get_review_result', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
-	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'create_record', 'create_artifact', 'delete_record'] },
+	{ label: 'Connection & state', cmds: ['check_connection', 'get_capabilities', 'get_review_result', 'get_batch_result', 'list_instances', 'get_instance_info', 'get_sync_status', 'sync_now', 'get_last_error', 'clear_last_error'] },
+	{ label: 'Records — write', cmds: ['update_record', 'update_record_batch', 'update_records', 'create_record', 'create_records', 'create_artifact', 'delete_record'] },
 	{ label: 'Scoped-app ergonomics', cmds: ['create_application', 'create_table', 'add_column', 'delete_application', 'sdk_deploy', 'sdk_pull'] },
 	{ label: 'Records — read', cmds: ['get_record', 'get_table_metadata', 'check_name_exists_remote', 'pull_records', 'pull_scope'] },
 	{ label: 'Queries', cmds: ['query_records', 'get_parent_options', 'code_search'] },
