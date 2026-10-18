@@ -128,8 +128,8 @@ export function printHelp(): void {
   snu doctor                          Diagnose bridge, ownership and session problems (redacted)
   snu auth status                     Verify ServiceNow still accepts the session (read-only probe)
   snu auth refresh                    How to hand the bridge a fresh session
-  snu restart [--force]               Replace a standalone bridge (reclaims a stuck port)
-  snu stop [--force]                  Stop a standalone bridge, even an orphaned one holding port 1978
+  snu restart [--force]               Restart the bridge; editor hosts restart gracefully
+  snu stop [--force]                  Stop the bridge; editor hosts release their ports gracefully
   snu update [--check]                Check for or install the latest CLI release
   snu setup [options]                 Configure AI clients (Claude Code, Cursor, ...) to use the MCP server
   snu permissions [set <gate> on|off] Show or change what the standalone bridge lets an agent do
@@ -345,7 +345,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       if (unknownOption) throw new ScriptSyncClientError(unknownOption, 'E_INVALID_PARAMS');
       ports = { ws: parsePort('ws', 1978), http: parsePort('port', 1977) };
       bridgePorts = [ports.ws, ports.http];
-      const status = await inspectBridge({ portFile, cwd: process.cwd() });
+      const discoveryOptions = { portFile, cwd: process.cwd(), healthPort: ports.http };
+      const status = await inspectBridge(discoveryOptions);
 
       if (lifecycleCommand === 'status') {
         let orphan: PortListener | null = null;
@@ -479,7 +480,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
             // through its freshly written descriptor.
             rediscover: async () => {
               try {
-                const found = await inspectBridge({ portFile, cwd: process.cwd() });
+                const found = await inspectBridge(discoveryOptions);
                 return found.running ? found.discovery.port : undefined;
               } catch {
                 return undefined;
@@ -491,7 +492,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         // is rewritten only after the browser helper reconnects, so reporting
         // plain success here made an immediate `snu status` look like a
         // healthy orphan.
-        const discoverable = await waitForDiscovery({ portFile, cwd: process.cwd() });
+        const discoverable = await waitForDiscovery(discoveryOptions);
         if (isJsonMode) {
           outputJson({
             restarted: true,

@@ -111,6 +111,8 @@ export interface HealthResponse {
 export interface DiscoveryOptions {
   portFile?: string;
   cwd?: string;
+  /** Last-resort health probe when no descriptor is discoverable. Defaults to 1977. */
+  healthPort?: number;
 }
 
 export interface DiscoveryResult {

@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## Unreleased (`@snutils/snu`)
+
+- **Find and gracefully stop an editor-hosted bridge from another folder.** When the global connection file is missing, `snu` can recover the workspace connection from the running bridge. `snu stop` and `snu restart` then ask VS Code or Cursor to release or restart the bridge without closing the editor.
+
 ## `@snutils/snu` 0.4.1 (2026-10-16)
 
 - Released with sn-scriptsync 4.9.17. No changes to the CLI or MCP tools.

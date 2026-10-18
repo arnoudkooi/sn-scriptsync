@@ -232,16 +232,42 @@ export async function discoverBridge(options: DiscoveryOptions = {}): Promise<Di
     }
   }
 
+  // 4. An editor may still be serving while its global descriptor is absent
+  // (for example before the helper reconnects). Its public health response
+  // identifies the workspace containing the normal authenticated descriptor.
+  // This is a hint only: require that file to name this exact port and PID
+  // before using it. Never manufacture a token or rewrite discovery files.
+  const recovered = await discoverEditorWorkspace(options.healthPort ?? 1977);
+  if (recovered) return recovered;
+
   throw new ScriptSyncClientError(
     'No active ScriptSync bridge found. Open your ServiceNow project folder in VS Code with sn-scriptsync active, or start standalone with `snu serve`.',
     'E_BRIDGE_NOT_FOUND'
   );
 }
 
+async function discoverEditorWorkspace(port: number): Promise<DiscoveryResult | undefined> {
+  try {
+    const health = await checkHealth(port);
+    if (health.hostKind !== 'vscode' || !Number.isInteger(health.pid) || health.pid <= 0 ||
+        typeof health.workspaceRoot !== 'string' || !path.isAbsolute(health.workspaceRoot)) return undefined;
+    const portFile = path.join(health.workspaceRoot, '.vscode', 'sn-agent-port.json');
+    return await validatePortFile(portFile, false, { port, pid: health.pid });
+  } catch {
+    // A missing, stale or mismatched descriptor cannot authorize recovery.
+    // Lifecycle commands can still report the listener without signalling it.
+    return undefined;
+  }
+}
+
 /**
  * Validate a candidate port file: parse JSON, check PID liveness, and verify /api/health.
  */
-async function validatePortFile(filePath: string, isGlobal: boolean): Promise<DiscoveryResult> {
+async function validatePortFile(
+  filePath: string,
+  isGlobal: boolean,
+  expected?: { port: number; pid: number },
+): Promise<DiscoveryResult> {
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, 'utf8');
@@ -258,6 +284,13 @@ async function validatePortFile(filePath: string, isGlobal: boolean): Promise<Di
 
   if (!data.port || !data.token || typeof data.pid !== 'number') {
     throw new ScriptSyncClientError(`Invalid port file structure at ${filePath}`, 'E_PORT_FILE_INVALID');
+  }
+
+  if (expected && (data.port !== expected.port || data.pid !== expected.pid)) {
+    throw new ScriptSyncClientError(
+      `Workspace port file does not match the bridge on port ${expected.port}`,
+      'E_STALE_PORT_FILE'
+    );
   }
 
   // Validate process liveness via PID (kill -0)

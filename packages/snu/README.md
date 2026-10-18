@@ -212,7 +212,7 @@ snu negotiate
 # Start a persistent standalone bridge daemon
 snu serve
 
-# Inspect, gracefully restart, or stop the standalone bridge
+# Inspect, gracefully restart, or stop the active bridge
 snu status
 snu restart
 snu stop
@@ -225,7 +225,9 @@ snu update
 snu search "OAuthUtil" --tables sys_script_include,sys_ui_action --limit 20
 ```
 
-`snu serve` is idempotent: if a healthy bridge already owns the ports, it reports that process instead of failing with `EADDRINUSE`. `snu stop` and `snu restart` only manage a bridge that identifies itself as a standalone `snu` host and whose authenticated port file matches its live PID. They refuse to stop a VS Code-owned bridge or an unrelated process.
+`snu serve` is idempotent: if a healthy bridge already owns the ports, it reports that process instead of failing with `EADDRINUSE`. `snu stop` and `snu restart` also support editor-hosted bridges in VS Code and Cursor: they send authenticated `yield` or `restart` commands so the editor releases or restarts its bridge without closing the editor. The CLI never sends process termination signals to an editor host.
+
+If neither the current workspace nor the global descriptor locates the bridge, `snu` probes the HTTP health endpoint on port 1977 (or the lifecycle command's `--port`). An editor-hosted bridge can identify its workspace there; `snu` uses that workspace's descriptor only when its port and PID match the live bridge. An explicit `--port-file` always takes precedence. If the descriptor is missing or invalid, stop the bridge from that editor's sn-scriptsync status bar.
 
 `snu update` checks npm and updates a global installation with `npm install --global @snutils/snu@latest`. Use `snu update --check` for a read-only check. When running through `npx`, restart the MCP or CLI process with `@snutils/snu@latest` instead; there is no global installation to replace.
 
