@@ -1525,7 +1525,7 @@ export class StandaloneDispatcher {
         });
         const res = await pendingPromise;
         if (res.success === false) {
-          throw Object.assign(new Error(res.error || 'Delete failed'), { code: res.code || 'E_COMMAND_FAILED' });
+          throw Object.assign(new Error(res.error || 'Delete failed'), { code: res.code || codeForRestStatus(res.status, res.error) });
         }
         return {
           id: req.id,
@@ -1592,6 +1592,8 @@ export class StandaloneDispatcher {
           sysparmQuery = sysparmQuery ? `${sysparmQuery}` + (sysparmQuery ? '^' : '') + `${orderBy}` : orderBy;
         }
 
+        // No sysparm_display_value: raw values (UTC dates, stored choice
+        // values), the same records the VS Code host returns.
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({
           action: 'agentRestApi',
@@ -1602,7 +1604,6 @@ export class StandaloneDispatcher {
             sysparm_query: sysparmQuery,
             sysparm_fields: fields,
             sysparm_limit: String(limit),
-            sysparm_display_value: 'true',
           },
           instance: inst.settings,
           appName: 'SN Utils CLI',
@@ -1631,7 +1632,8 @@ export class StandaloneDispatcher {
         const sysId = req.params?.sys_id;
         const fields = req.params?.fields;
 
-        const queryParams: Record<string, string> = { sysparm_display_value: 'true' };
+        // Raw values, like the VS Code host's readBackRecord.
+        const queryParams: Record<string, string> = { sysparm_display_value: 'false' };
         if (fields) queryParams.sysparm_fields = fields;
 
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
@@ -1646,7 +1648,7 @@ export class StandaloneDispatcher {
         });
         const res = await pendingPromise;
         if (res.success === false) {
-          throw Object.assign(new Error(res.error || `Record ${sysId} not found`), { code: res.status === 404 ? 'E_NOT_FOUND' : 'E_COMMAND_FAILED' });
+          throw Object.assign(new Error(res.error || `Record ${sysId} not found`), { code: codeForRestStatus(res.status, res.error) });
         }
         return {
           id: req.id,

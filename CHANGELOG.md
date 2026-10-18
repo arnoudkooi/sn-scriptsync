@@ -6,6 +6,7 @@
 - **Create or update up to 200 records in one call** with `snu record create-many` / `snu record update-many` and the `snu_create_records` / `snu_update_records` MCP tools. One review covers the whole batch, every row reports `succeeded`, `failed`, `not_attempted` or `unknown`, and rows that succeed are not rolled back. `--dry-run` checks the rows without writing.
 - **Collect a batch after a lost answer** with `snu batch result <batchId>` / `snu_get_batch_result`, also after the call timed out or was approved later.
 - **MCP errors now include their details**, such as the per-row outcomes and `batchId` of a partly written batch, so an agent can retry only what did not succeed.
+- **`snu query` and `snu record get` (and their MCP tools) return the same values as VS Code:** stored values, with dates in UTC instead of your display time zone and choices as their stored value (`state` is `2`, not `In Progress`). Deleting a record that is not there now fails with `E_NOT_FOUND`.
 - **Learn how a table or catalog item is built before creating one** with `snu type analyze` / `snu_analyze_artifact_type`: a read-only profile of existing ones on the instance, saved and reused while fresh.
 
 ## Unreleased
