@@ -1,6 +1,6 @@
 # CHANGELOG.md
 
-## Unreleased (`@snutils/snu`)
+## `@snutils/snu` 0.5.0 (2026-10-19)
 
 - **Find and gracefully stop an editor-hosted bridge from another folder.** When the global connection file is missing, `snu` can recover the workspace connection from the running bridge. `snu stop` and `snu restart` then ask VS Code or Cursor to release or restart the bridge without closing the editor.
 - **Create or update up to 200 records in one call** with `snu record create-many` / `snu record update-many` and the `snu_create_records` / `snu_update_records` MCP tools. One review covers the whole batch, every row reports `succeeded`, `failed`, `not_attempted` or `unknown`, and rows that succeed are not rolled back. `--dry-run` checks the rows without writing.
@@ -9,7 +9,7 @@
 - **`snu query` and `snu record get` (and their MCP tools) return the same values as VS Code:** stored values, with dates in UTC instead of your display time zone and choices as their stored value (`state` is `2`, not `In Progress`). Deleting a record that is not there now fails with `E_NOT_FOUND`.
 - **Learn how a table or catalog item is built before creating one** with `snu type analyze` / `snu_analyze_artifact_type`: a read-only profile of existing ones on the instance, saved and reused while fresh.
 
-## Unreleased
+## 4.9.18 (2026-10-19)
 
 - **Agent API: learn how tables and catalog items are built here before creating one.** `analyze_artifact_type` samples existing ones and reports what recurs, what the platform creates for you, what you must add yourself (a table created through the API gets no role or ACLs), which choices to ask about, and what its scan could not see. Read-only; the profile is saved in the workspace and reused while the instance has not changed.
 - **Agent API: write many records with one review.** `create_records` and `update_records` take up to 200 rows for one table, raise one review in the helper tab instead of one per record, and return an outcome for every row; rows that succeed are not rolled back. `get_batch_result` collects a batch after a timeout or a dropped connection. In review mode the batch waits in Pending Saves as one rows file you can edit before syncing. Needs SN Utils 10.2.8.0 or later.
