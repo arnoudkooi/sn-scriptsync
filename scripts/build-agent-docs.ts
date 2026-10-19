@@ -151,7 +151,10 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               get_batch_result collects a batch after a lost answer.
 //   v26 -> v27: analyze_artifact_type: read-only type profiles (table,
 //               catalog_item) to consult before building a composite artifact.
-const INSTRUCTIONS_VERSION = 27;
+//   v27 -> v28: SKILL.md frontmatter descriptions are YAML double-quoted so
+//               strict frontmatter parsers (Antigravity) accept the ": " in
+//               them.
+const INSTRUCTIONS_VERSION = 28;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -412,8 +415,18 @@ function buildReference(): string {
 	].join('\n');
 }
 
+/** Encode a string as a YAML double-quoted scalar (YAML 1.2 §7.3.1). */
+function yamlQuote(value: string): string {
+	return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, ' ')}"`;
+}
+
 function buildSkill(skill: SkillDef): string {
-	const frontmatter = ['---', `name: ${skill.name}`, `description: ${skill.description}`, '---'].join('\n');
+	// The description is emitted as a YAML double-quoted scalar: a plain scalar
+	// may not contain ": " (or start with special characters), and strict
+	// frontmatter parsers (Google Antigravity, for one) reject the file
+	// when it does. Claude Code and Cursor are lenient, but quoting is valid
+	// for every parser.
+	const frontmatter = ['---', `name: ${skill.name}`, `description: ${yamlQuote(skill.description)}`, '---'].join('\n');
 
 	const blocks: string[] = [frontmatter, SKILL_MARKER, `# ${skill.title}`, skill.intro];
 

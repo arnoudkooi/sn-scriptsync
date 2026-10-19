@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.9.19 (2026-10-19)
+
+- **The generated `snu-*` skills now load in tools with a strict YAML frontmatter parser, such as Google Antigravity.** The `description` in each `agentrules/skills/*/SKILL.md` is quoted, so the colons in it no longer break the frontmatter. Open workspaces get the refreshed skills on the next activation.
+
 ## `@snutils/snu` 0.5.0 (2026-10-19)
 
 - **Find and gracefully stop an editor-hosted bridge from another folder.** When the global connection file is missing, `snu` can recover the workspace connection from the running bridge. `snu stop` and `snu restart` then ask VS Code or Cursor to release or restart the bridge without closing the editor.
