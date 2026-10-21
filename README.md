@@ -309,6 +309,14 @@ The legacy file-based transport (`{instance}/agent/requests/*.json` -> `{instanc
 "sn-scriptsync.agentApi.fileFallback": false
 ```
 
+## Record history & compare
+
+Right-click a synced field file and choose **sn-scriptsync: Record history & compare…**. The panel shows the current saved version first, other history by date, and a clearly highlighted selection. **Compare recommended** prefers a different snapshot in a completed local set, then a different saved record version, then another customer-update snapshot. No completed set is required to inspect history or use a fallback.
+
+Inspecting history, opening ServiceNow sources, and comparing the recommendation are free. **Compare selected** and **Compare all fields** require SN Utils Pro or an active Trial. Direct commands remain in the Command Palette for keyboard shortcuts.
+
+Connect the SN Utils helper tab first. Your ServiceNow account needs read access to the record and history tables. Each history source is read independently, up to 100 entries, with payloads loaded only as needed. **Refresh history** reloads the panel. Comparisons open a read-only baseline alongside your working file, including unsaved edits, without changing the file or instance. Set associations and states do not prove where an edit originated or whether it was applied.
+
 ## Context Menu Visibility
 The sn-scriptsync context menu commands only appear when the scriptsync server is running. You can also hide them completely using the `showContextMenu` setting.
 

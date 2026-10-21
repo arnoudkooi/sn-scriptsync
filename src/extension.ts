@@ -1,3 +1,5 @@
+import { recordHistoryHtml } from "./RecordHistoryView";
+import { updateSetField, recordFieldFiles, updateSetComparisonAccess, HistoryBaseline, historyDate, sortHistory, historyReadError, historyPayloadReader, findHistoryBaseline, historyActionFeedback } from "./UpdateSetCompare";
 import { randomUUID } from 'crypto';
 import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAlignment, StatusBarItem, TextDocument } from 'vscode';
 
@@ -1967,6 +1969,21 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.commands.registerCommand('extension.openInInstance', (context) => {
 		openInInstance();
 	});
+
+	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('sn-update-set', {
+		provideTextDocumentContent: uri => updateSetBaselines.get(uri.toString())
+	}), vscode.workspace.onDidCloseTextDocument(doc => { updateSetBaselines.delete(doc.uri.toString()); updateSetBaselineLinks.delete(doc.uri.toString()); }));
+	context.subscriptions.push(vscode.commands.registerCommand('extension.showRecordHistory', (resource?: vscode.Uri) => compareRecordHistory(resource, false, false, true)));
+	context.subscriptions.push(vscode.commands.registerCommand('extension.compareAllRecordHistory', (resource?: vscode.Uri) => compareRecordHistory(resource, true, true)));
+	context.subscriptions.push(vscode.commands.registerCommand('extension.openHistorySource', (resource?: vscode.Uri) => {
+		const uri = resource || vscode.window.activeTextEditor?.document.uri;
+		const url = uri && updateSetBaselineLinks.get(uri.toString());
+		if (url) return vscode.env.openExternal(vscode.Uri.parse(url));
+		vscode.window.showInformationMessage('Open a record history comparison first, then use this action on its baseline.');
+	}));
+	for (const [command, choose] of [['extension.compareRecommendedHistory', false], ['extension.compareRecordHistory', true]] as const) {
+		context.subscriptions.push(vscode.commands.registerCommand(command, (resource?: vscode.Uri) => compareRecordHistory(resource, choose)));
+	}
 
 	vscode.commands.registerCommand('extension.refreshFromInstance', (context) => {
 		refreshFromInstance();
@@ -5335,4 +5352,179 @@ async function takeScreenshot(url?: string) {
 	vscode.window.showInformationMessage(`Taking screenshot of ${url}...`);
 
 	broadcastToHelperTab(screenshotRequest);
+}
+
+// Historical content lives in a read-only virtual document, outside the sync tree.
+const updateSetBaselines = new Map<string, string>();
+const updateSetBaselineLinks = new Map<string, string>();
+const recordHistoryPanels = new Map<string, vscode.WebviewPanel>();
+async function requireHistoryAccess(choose: boolean, allFields: boolean): Promise<boolean> {
+	const access = updateSetComparisonAccess(choose, allFields, connectedHelperInfo);
+	if (access === 'unresolved') throw new Error('The helper has not confirmed your SN Utils license yet. Wait for the license check or reload the helper tab, then retry.');
+	if (access === 'proRequired') {
+		const action = await vscode.window.showInformationMessage(
+			'Choosing a saved baseline and comparing all record fields require SN Utils Pro or an active Trial. Automatic comparison with the best available baseline is free.',
+			'Start free trial'
+		);
+		if (action === 'Start free trial') await vscode.env.openExternal(vscode.Uri.parse('https://snutils.com/trial?utm_source=scriptsync&utm_medium=referral&utm_campaign=update_set_compare'));
+		return false;
+	}
+	return true;
+}
+async function compareRecordHistory(resource: vscode.Uri | undefined, choose: boolean, allFields = false, inspectOnly = false, selectedKey?: string) {
+	try {
+		if (!serverRunning || !helperConnection.connected) throw new Error('Start ScriptSync and open the SN Utils helper tab, then retry.');
+		if (!await requireHistoryAccess(choose, allFields)) return;
+		const document = resource ? await vscode.workspace.openTextDocument(resource) : vscode.window.activeTextEditor?.document;
+		if (!document) throw new Error('Open a synced field file first.');
+		const record = eu.fileNameToObject(document);
+		if (record === true) throw new Error('Choose a synced record field file.');
+		const fetch = scopePageFetcher(record.instance);
+		const value = (v: any): string => String(v?.value ?? v ?? '');
+		// Some metadata types use a natural key rather than table + sys_id.
+		const current = await fetch(record.tableName, {
+			sysparm_query: `sys_id=${record.sys_id}`, sysparm_fields: 'sys_update_name', sysparm_limit: '1', sysparm_display_value: 'false'
+		});
+		const updateName = value(current.rows[0]?.sys_update_name) || `${record.tableName}_${record.sys_id}`;
+		const origin = record.instance.url.replace(/\/$/, '');
+		const historyUrl = `${origin}/sys_update_version_list.do?sysparm_query=${encodeURIComponent('name=' + updateName)}`;
+		const updatesUrl = `${origin}/sys_update_xml_list.do?sysparm_query=${encodeURIComponent('name=' + updateName)}`;
+		const display = (v: any) => String(v?.display_value ?? v?.value ?? v ?? '');
+		const history: HistoryBaseline[] = [];
+		const failures: string[] = [];
+		await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Reading record history…' }, async () => {
+			// Read both sources independently: unavailable version history must not hide customer updates.
+			for (const table of ['sys_update_xml', 'sys_update_version'] as const) {
+				try {
+					const result = await fetch(table, {
+						sysparm_query: `name=${updateName}^ORDERBYDESCsys_updated_on^ORDERBYDESCsys_id`,
+						sysparm_fields: table === 'sys_update_xml'
+							? 'sys_id,update_set,update_set.name,update_set.state,remote_update_set,remote_update_set.name,remote_update_set.state,sys_updated_on,sys_updated_by'
+							: 'sys_id,source,source_table,state,sys_created_on,sys_updated_on,sys_updated_by',
+						sysparm_limit: '100', sysparm_display_value: 'all'
+					});
+					for (const row of result.rows) {
+						const id = value(row.sys_id);
+						if (!/^[a-f0-9]{32}$/i.test(id)) continue;
+						const local = value(row.update_set), remote = value(row.remote_update_set);
+						const state = display(local ? row['update_set.state'] : remote ? row['remote_update_set.state'] : row.state);
+						const label = table === 'sys_update_version' ? `Saved version: ${display(row.source) || 'Record history'}`
+							: `${local ? 'Local set' : remote ? 'Remote-linked set' : 'Customer update'}: ${display(local ? row['update_set.name'] : row['remote_update_set.name']) || 'Unlinked'}`;
+						const setTable = local ? 'sys_update_set' : remote ? 'sys_remote_update_set' : table;
+						const setId = local || remote || id;
+						history.push({ table, id, label, state, date: historyDate(table, value(row.sys_created_on), value(row.sys_updated_on)), author: display(row.sys_updated_by),
+							link: /^[a-f0-9]{32}$/i.test(setId) ? `${origin}/${setTable}.do?sys_id=${setId}` : historyUrl, payload: '',
+							completed: !!local && value(row['update_set.state']) === 'complete', current: table === 'sys_update_version' && value(row.state) === 'current' });
+					}
+				} catch (error) { failures.push(historyReadError(table, error)); }
+			}
+		});
+		sortHistory(history);
+		const readPayload = historyPayloadReader(async entry => {
+			try {
+				const result = await fetch(entry.table, { sysparm_query: `sys_id=${entry.id}`, sysparm_fields: 'payload', sysparm_limit: '1', sysparm_display_value: 'false' });
+				if (!result.rows.length || !value(result.rows[0]?.payload)) throw new Error('This saved snapshot is no longer readable. Refresh history or choose another entry.');
+				return value(result.rows[0].payload);
+			} catch (error) {
+				const message = historyReadError(entry.table, error);
+				if (!failures.includes(message)) failures.push(message);
+				throw new Error(message);
+			}
+		});
+		const recommend = async () => {
+			const groups = [history.filter(entry => entry.completed), history.filter(entry => entry.table === 'sys_update_version'), history];
+			for (const entries of groups) {
+				const baseline = await findHistoryBaseline(entries, record.tableName, record.sys_id, record.fieldName, document.getText(), readPayload);
+				if (baseline) return baseline;
+			}
+			return undefined;
+		};
+		const showHistory = async () => {
+			const panelKey = document.uri.toString();
+			recordHistoryPanels.get(panelKey)?.dispose();
+			const panel = vscode.window.createWebviewPanel('snRecordHistory', `History: ${path.basename(document.fileName)}`, vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [] });
+			recordHistoryPanels.set(panelKey, panel);
+			let disposed = false;
+			let listener: vscode.Disposable | undefined;
+			panel.onDidDispose(() => { disposed = true; listener?.dispose(); if (recordHistoryPanels.get(panelKey) === panel) recordHistoryPanels.delete(panelKey); });
+			const recommendation = await recommend();
+			if (disposed) return;
+			panel.webview.html = recordHistoryHtml(`${record.instance.name} · ${record.tableName} · ${record.name} · ${record.fieldName}`, history, recommendation, failures, randomUUID().replace(/-/g, ''));
+			let busy = false;
+			listener = panel.webview.onDidReceiveMessage(async message => {
+				if (busy || !message || typeof message.action !== 'string') return;
+				const entry = history.find(item => `${item.table}:${item.id}` === message.key);
+				busy = true;
+				try {
+					switch (message.action) {
+						case 'recommended': await compareLoaded(false); break;
+						case 'selected': case 'all':
+							if (entry) await compareLoaded(true, message.action === 'all', `${entry.table}:${entry.id}`);
+							break;
+						case 'source': if (entry) await vscode.env.openExternal(vscode.Uri.parse(entry.link)); break;
+						case 'versions': await vscode.env.openExternal(vscode.Uri.parse(historyUrl)); break;
+						case 'updates': await vscode.env.openExternal(vscode.Uri.parse(updatesUrl)); break;
+						case 'refresh': await compareRecordHistory(document.uri, false, false, true); break;
+					}
+				} catch (error) { vscode.window.showErrorMessage(`Record history: ${(error as Error).message}`); }
+				finally { busy = false; await historyActionFeedback(() => disposed, () => panel.webview.postMessage({ action: 'ready' })); }
+			});
+		};
+		const compareLoaded = async (choose: boolean, allFields = false, selectedKey?: string) => {
+			if (!await requireHistoryAccess(choose, allFields)) return;
+			let selected: HistoryBaseline | undefined;
+			if (choose && selectedKey) {
+				selected = history.find(entry => `${entry.table}:${entry.id}` === selectedKey);
+				if (!selected) throw new Error('The selected snapshot is no longer available. Refresh record history and retry.');
+			} else if (choose) {
+				const pick = await vscode.window.showQuickPick(history.map(entry => ({ label: entry.label, description: `${entry.date} UTC · ${entry.state || 'State unavailable'}`, detail: `${entry.table} · ${entry.author}`, entry })),
+					{ title: 'Choose a saved baseline', placeHolder: 'All set states and saved versions; latest 100 per source' });
+				if (!pick) { if (!history.length) await showHistory(); return; }
+				selected = pick.entry;
+			} else {
+				selected = await recommend();
+			}
+			if (!selected) {
+				const action = await vscode.window.showInformationMessage('No different saved baseline is available for this field.',
+					{ modal: true, detail: `${history.length} history entries found. Available snapshots may match your current contents or lack this field.${failures.length ? ' Some history could not be read: ' + failures.join('; ') : ''}` }, 'View available history');
+				if (action) await showHistory();
+				return;
+			}
+			await readPayload(selected);
+			const setUrl = selected.link;
+			const baselineLabel = `${selected.label} · ${selected.state || 'State unavailable'}`;
+			const files = allFields ? recordFieldFiles(document.fileName, record) : [document.fileName];
+			const skipped: string[] = [];
+			let opened = 0;
+			for (const file of files) {
+				const target = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+				const fieldRecord = eu.fileNameToObject(target);
+				if (fieldRecord === true || fieldRecord.sys_id !== record.sys_id || fieldRecord.tableName !== record.tableName) continue;
+				let content: string;
+				try { content = updateSetField(selected.payload, record.tableName, record.sys_id, fieldRecord.fieldName); }
+				catch (error) {
+					if (!allFields) throw error;
+					skipped.push(`${fieldRecord.fieldName}: ${(error as Error).message}`);
+					continue;
+				}
+				const baseline = vscode.Uri.from({ scheme: 'sn-update-set', path: '/' + randomUUID() + '/' + path.basename(file) });
+				updateSetBaselines.set(baseline.toString(), content);
+				updateSetBaselineLinks.set(baseline.toString(), setUrl);
+				try {
+					await vscode.commands.executeCommand('vscode.diff', baseline, target.uri,
+						`${path.basename(file)}: ${baselineLabel} (${selected.date} UTC) ↔ Working file`, { preview: !allFields });
+					opened++;
+				} catch (error) { updateSetBaselines.delete(baseline.toString()); updateSetBaselineLinks.delete(baseline.toString()); throw error; }
+			}
+			const summary = allFields ? `Opened ${opened} field comparisons.${skipped.length ? ' Skipped: ' + skipped.join('; ') : ''}` : `Baseline: ${baselineLabel}.`;
+			void Promise.resolve(vscode.window.showInformationMessage(summary, 'Open baseline source', 'View available history')).then(async action => {
+				if (action === 'View available history') { await showHistory(); return; }
+				if (action) await vscode.env.openExternal(vscode.Uri.parse(setUrl));
+			}).catch(error => vscode.window.showErrorMessage(`Record history: ${(error as Error).message}`));
+		};
+		if (inspectOnly) await showHistory();
+		else await compareLoaded(choose, allFields, selectedKey);
+	} catch (error) {
+		vscode.window.showErrorMessage(`ScriptSync compare: ${(error as Error).message}`);
+	}
 }

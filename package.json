@@ -2,7 +2,7 @@
 	"name": "sn-scriptsync",
 	"displayName": "sn-scriptsync",
 	"description": "sn-scriptsync for VS Code. (Provided by SN Utils B.V.)",
-	"version": "4.9.19",
+	"version": "4.9.20",
 	"publisher": "arnoudkooicom",
 	"icon": "img/icon256.png",
 	"repository": {
@@ -227,6 +227,26 @@
 				"command": "sn-scriptsync.nowSdkEditor.dismiss",
 				"title": "Keep local version",
 				"category": "sn-scriptsync NOW SDK"
+			},
+			{
+				"command": "extension.compareRecommendedHistory",
+				"title": "sn-scriptsync: Compare with best available baseline"
+			},
+			{
+				"command": "extension.compareRecordHistory",
+				"title": "sn-scriptsync: Choose a saved baseline…"
+			},
+			{
+				"command": "extension.compareAllRecordHistory",
+				"title": "sn-scriptsync: Compare all record fields with saved baseline…"
+			},
+			{
+				"command": "extension.openHistorySource",
+				"title": "sn-scriptsync: Open baseline source in browser"
+			},
+			{
+				"command": "extension.showRecordHistory",
+				"title": "sn-scriptsync: Record history & compare…"
 			}
 		],
 		"keybindings": [
@@ -354,6 +374,16 @@
 					"group": "sn-scriptsync",
 					"title": "Execute Background Script in Instance",
 					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && editorLangId == javascript && resourceDirname =~ /background/ && resourceFilename =~ /^[^_]/"
+				},
+				{
+					"command": "extension.showRecordHistory",
+					"group": "sn-scriptsync@-100",
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && resourceScheme == file && resourceFilename =~ /^[^_]/"
+				},
+				{
+					"command": "extension.openHistorySource",
+					"group": "sn-scriptsync",
+					"when": "resourceScheme == sn-update-set"
 				}
 			],
 			"view/title": [
@@ -560,6 +590,18 @@
 					"command": "extension.nowSdkChangeInstance",
 					"when": "resourceFilename == now.config.json",
 					"group": "sn-scriptsync"
+				},
+				{
+					"command": "extension.showRecordHistory",
+					"group": "sn-scriptsync@-100",
+					"when": "sn-scriptsync.serverRunning && sn-scriptsync.showContextMenu && !sn-scriptsync.inNowSdkProject && resourceScheme == file && resourceFilename =~ /^[^_]/"
+				}
+			],
+			"editor/title": [
+				{
+					"command": "extension.openHistorySource",
+					"group": "sn-scriptsync",
+					"when": "resourceScheme == sn-update-set"
 				}
 			]
 		},

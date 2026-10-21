@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## 4.9.20 (2026-10-22)
+
+- **Record history & compare** opens from the editor or Explorer context menu. Inspect saved versions and customer updates, see the recommended baseline, and compare in the native diff editor without changing your file or instance. History inspection and recommended comparison are free; selecting a baseline or comparing all synced record fields requires Pro or an active Trial.
+- History loads metadata first, reads snapshot payloads on demand, and reuses them for panel actions. Permission failures explain which history source is unavailable.
+
 ## 4.9.19 (2026-10-19)
 
 - **The generated `snu-*` skills now load in tools with a strict YAML frontmatter parser, such as Google Antigravity.** The `description` in each `agentrules/skills/*/SKILL.md` is quoted, so the colons in it no longer break the frontmatter. Open workspaces get the refreshed skills on the next activation.
