@@ -4,6 +4,7 @@
 
 - **Record history & compare** opens from the editor or Explorer context menu. Inspect saved versions and customer updates, see the recommended baseline, and compare in the native diff editor without changing your file or instance. History inspection and recommended comparison are free; selecting a baseline or comparing all synced record fields requires Pro or an active Trial.
 - History loads metadata first, reads snapshot payloads on demand, and reuses them for panel actions. Permission failures explain which history source is unavailable.
+- **Agent API: a "Verify a change end to end" loop in the browser-debug skill (Pro / Trial).** After a write that changes browser behaviour, the agent syncs, captures console and network, reproduces the behaviour on a fresh load, reads the form, screenshots, and reports evidence instead of confidence; without Pro it states what was not checked. Open workspaces get the refreshed skill on the next activation.
 
 ## 4.9.19 (2026-10-19)
 

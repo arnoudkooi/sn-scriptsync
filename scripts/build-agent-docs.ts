@@ -154,7 +154,10 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v27 -> v28: SKILL.md frontmatter descriptions are YAML double-quoted so
 //               strict frontmatter parsers (Antigravity) accept the ": " in
 //               them.
-const INSTRUCTIONS_VERSION = 28;
+//   v28 -> v29: browser-debug skill: "Verify a change end to end" loop
+//               (Pro / Trial): sync, capture, reproduce, read the form, stop,
+//               screenshot, report evidence; free fallback stated explicitly.
+const INSTRUCTIONS_VERSION = 29;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -234,7 +237,7 @@ const SKILLS: SkillDef[] = [
 		name: 'snu-browser-debug',
 		title: 'SN ScriptSync — Browser Debugger (CDP)',
 		description:
-			'Drive the connected ServiceNow tab through the Chrome DevTools Protocol (Pro): capture network requests + response bodies, capture console output and uncaught exceptions, take full-page/element screenshots beyond the viewport, and auto-handle (and record) native confirm/alert/prompt/beforeunload dialogs. Read this when you need network bodies, console errors, a whole-page screenshot, or dialog text — capabilities the normal content-script bridge cannot provide. Note the unavoidable Chrome debugger banner and the Pro requirement.',
+			'Drive the connected ServiceNow tab through the Chrome DevTools Protocol (Pro): capture network requests + response bodies, capture console output and uncaught exceptions, take full-page/element screenshots beyond the viewport, and auto-handle (and record) native confirm/alert/prompt/beforeunload dialogs. Read this when you need network bodies, console errors, a whole-page screenshot, or dialog text — capabilities the normal content-script bridge cannot provide. Also holds the "Verify a change end to end" loop to run after any write that changes browser behaviour (Pro / Trial). Note the unavoidable Chrome debugger banner and the Pro requirement.',
 		intro: 'Escalation layer that uses the Chrome debugger for what content scripts cannot do: network/console capture, full-page screenshots, and native dialog handling.',
 		sections: ['66-browser-debug'],
 		commands: ['start_network_capture', 'stop_network_capture', 'start_console_capture', 'stop_console_capture', 'capture_full_page', 'set_dialog_handler', 'clear_dialog_handler', 'debugger_detach'],

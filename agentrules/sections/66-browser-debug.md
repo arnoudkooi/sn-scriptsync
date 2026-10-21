@@ -73,3 +73,48 @@ start_console_capture
 stop_network_capture   (inspect status, response body)
 stop_console_capture   (inspect client-side errors)
 ```
+
+### Verify a change end to end (Pro / Trial)
+Run this after any write that changes behaviour in the browser: a client script, UI policy,
+UI action, widget, or a server script that a form or list triggers. Do not report the behaviour
+as verified until it has been exercised against the synced code. If verification is blocked,
+report the implementation and the remaining verification gap explicitly.
+
+Console and network evidence need the Debug edition plus a Pro, Trial or Enterprise license.
+Check `get_capabilities` and respect per-instance gates: for `E_PRO_REQUIRED`, offer
+https://snutils.com/trial once; for `E_CDP_UNAVAILABLE`, explain that the Debug edition is
+missing; for `E_DISABLED`, respect the opt-out without proposing a trial as the remedy.
+Use the free screenshot, form-state (where supported), and `get_last_error` steps when CDP is
+unavailable. State that console errors and request bodies were not checked. A failed or
+unsupported check is not a pass.
+
+Before starting captures, identify a test tab on the instance you changed. Pass its `tabId`
+to both captures, navigation, form actions, stop commands, and screenshots. Navigate in that
+same tab with `newTab: false` and `discardUnsaved: false`; do not silently discard a user's
+unsaved work. If a clean test tab is needed, create it before starting captures and use its
+returned `tabId`. A new load alone does not prove that a widget or browser cache has refreshed;
+verify an observable effect of the changed code before declaring success.
+
+```
+sync_now                      (only for the intended pending writes; never bypass review)
+get_sync_status               (wait until the changed files are no longer pending or syncing)
+get_record                    (confirm the expected field reached this instance; sync_now's synced:true only means sent)
+                              (for a NOW SDK app, use sdk_deploy and wait for its final install result instead)
+get_capabilities              (cdp.available must be true for capture; otherwise use the free fallback)
+start_console_capture         (tabId: the test tab; remember whether this succeeded)
+start_network_capture         (same tabId; scoped urlFilter, e.g. "/api/now" or "xmlhttp.do"; includeBodies: true)
+→ navigate                    (same tabId, newTab: false, discardUnsaved: false; wait for load)
+→ set_field / run_ui_action / click_element   (same tabId; reproduce the affected behaviour)
+get_form_state                (same tabId; values, mandatory flags, messages, where g_form exists)
+stop_network_capture          (same tabId; inspect failed requests, status and available response bodies)
+stop_console_capture          (same tabId; inspect exceptions and console errors)
+capture_full_page             (same tabId; take_screenshot when CDP is unavailable)
+run_background_script         (optional, if permitted: read-only assertion for server-side behaviour)
+```
+
+Rules for the loop:
+- **Stop what you start, also when a step fails.** Stop each successfully started capture independently, even if the other start or stop failed. Do not stop a capture that you did not start. Report cleanup failures; use `debugger_detach` on the test tab only as recovery for your own session.
+- **Verify on the instance you wrote to**, in the same scope. Check `get_instance_info` when more than one instance is connected. For a page or widget without `g_form`, use screenshots and an appropriate read-only query to verify the outcome; do not treat an unsupported `get_form_state` as a failure of the feature itself.
+- **Verification never writes production data.** Run tests that save data or trigger side effects only on a confirmed non-production instance within the user's authorized scope. If a disposable test record is needed there, create it with `create_record`, record its exact `sys_id`, and delete only that test record with `delete_record` when finished. Report failed cleanup. On production, use only read-only checks and state which behavioural checks remain unverified. Background scripts in this loop read and log; they do not insert or update.
+- **Report evidence, not confidence.** List what was exercised, pass or fail per expectation, console errors and failed requests with their status, and the screenshot path. Note capture filters, missing or truncated bodies, and skipped steps; do not imply the capture covered requests outside its filter. `get_last_error` is bridge error context, not a substitute for browser console capture.
+- **A fix restarts the loop.** After editing in response to a finding, sync and run the whole loop again instead of re-checking only the failing step.
