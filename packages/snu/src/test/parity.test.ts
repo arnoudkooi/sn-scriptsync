@@ -85,6 +85,41 @@ test('negotiate reports the helper build but never its session token', async t =
   assert.ok(!JSON.stringify(result).includes('test-token'));
 });
 
+test('update_record rejects the fields shape from issue #166 before sending a PATCH', async t => {
+  const h = await helper(t);
+  h.ws.on('message', raw => {
+    const request = JSON.parse(String(raw));
+    if (request.action === 'agentRestApi') {
+      h.send({ agentRequestId: request.agentRequestId, success: true, data: { result: { script: 'old script' } } });
+    }
+  });
+  const response = await h.dispatcher.dispatch({ id: 'invalid-update', command: 'update_record',
+    params: { table: 'sys_script_fix', sys_id: sysId, fields: { script: 'x'.repeat(25_000) }, await: true } });
+  assert.equal(response.status, 'error');
+  assert.equal(response.code, 'E_INVALID_PARAMS');
+  assert.match(response.error!, /field, content/);
+  assert.ok(!h.messages.some(m => m.action === 'agentRestApi'));
+  assert.equal(h.pending.size(), 0);
+});
+
+test('update_record validates required params and accepts empty content', async t => {
+  const h = await helper(t);
+  const params = { table: 'sys_script_fix', sys_id: sysId, field: 'script', content: '' };
+  for (const key of Object.keys(params)) {
+    const incomplete: Record<string, any> = { ...params };
+    delete incomplete[key];
+    const response = await h.dispatcher.dispatch({ id: `missing-${key}`, command: 'update_record', params: incomplete });
+    assert.equal(response.code, 'E_INVALID_PARAMS', key);
+  }
+  const result = h.dispatcher.dispatch({ id: 'clear-script', command: 'update_record', params: { ...params, await: true } });
+  const request = await h.message('agentRestApi');
+  assert.equal(request.method, 'PATCH');
+  assert.equal(request.endpoint, `/api/now/table/sys_script_fix/${sysId}`);
+  assert.deepEqual(request.body, { script: '' });
+  h.send({ agentRequestId: request.agentRequestId, success: true, data: { result: { script: '' } } });
+  assert.equal((await result).result.updated, true);
+});
+
 test('batch update sends one PATCH, strips sys_scope and reports silently dropped fields', async t => {
   const h = await helper(t);
   const result = h.dispatcher.dispatch({ id: 'batch', command: 'update_record_batch',

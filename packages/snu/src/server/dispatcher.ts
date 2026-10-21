@@ -1680,6 +1680,9 @@ export class StandaloneDispatcher {
       // Update Record
       if (req.command === 'update_record') {
         const { table, sys_id, field, content } = req.params || {};
+        if (!sys_id || !table || !field || content === undefined) {
+          throw Object.assign(new Error('Missing required params: sys_id, table, field, content. Use update_record_batch for a fields object.'), { code: 'E_INVALID_PARAMS' });
+        }
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({
           action: 'agentRestApi',
