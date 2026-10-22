@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { columnsFromMeta, createSchemaCache, queryValidationError, validateQuery } from '../agent/queryValidation';
-import { QUERY_VALIDATION_VECTORS, VECTOR_SCHEMA } from '../agent/queryValidationVectors';
+import { QUERY_VALIDATION_VECTORS, VECTOR_PARENTS, VECTOR_SCHEMA } from '../agent/queryValidationVectors';
 
 const lookup = async (table: string) => (table in VECTOR_SCHEMA ? VECTOR_SCHEMA[table] : {});
+const parentOf = async (table: string) => (table in VECTOR_PARENTS ? VECTOR_PARENTS[table] : null);
 
 for (const vector of QUERY_VALIDATION_VECTORS) {
 	test(`query validation: ${vector.name}`, async () => {
-		const problems = await validateQuery(vector.table, vector.params, lookup);
+		const problems = await validateQuery(vector.table, vector.params, lookup, parentOf);
 		const expected = vector.expect === 'ok' ? [] : vector.expect;
 		assert.equal(problems.length, expected.length, JSON.stringify(problems));
 		expected.forEach((want, i) => {

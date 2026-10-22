@@ -18,7 +18,7 @@ const { profileCommands } = require('../out/agent/commands/profile.js');
 const { attachmentCommands } = require('../out/agent/commands/attachments.js');
 const { backgroundCommands } = require('../out/agent/commands/background.js');
 const { queryCommands } = require('../out/agent/commands/query.js');
-const { VECTOR_SCHEMA } = require('../out/agent/queryValidationVectors.js');
+const { VECTOR_PARENTS, VECTOR_SCHEMA } = require('../out/agent/queryValidationVectors.js');
 const crypto = require('node:crypto');
 const editorPolicy = require('../out/agent/policy.js');
 const standalonePolicy = require('../packages/snu/dist/server/policy.js');
@@ -205,7 +205,11 @@ test('shared hosts produce compatible helper requests, results and policies', as
     }
   });
   await t.test('query validation: same schema reads, same result or the same error on both hosts', async () => {
-    const answerMeta = (endpoint) => {
+    const answerMeta = (endpoint, queryParams) => {
+      if (endpoint === '/api/now/table/sys_db_object') {
+        const parent = VECTOR_PARENTS[String(queryParams.sysparm_query).replace('name=', '')];
+        return parent === null || parent === undefined ? { success: false, status: 403, error: 'ACL' } : { success: true, status: 200, data: { result: [{ 'super_class.name': parent }] } };
+      }
       const table = endpoint.split('/').pop();
       const columns = VECTOR_SCHEMA[table];
       return columns === null ? { success: false, status: 403, error: 'ACL' } : { success: true, status: 200, data: { result: { columns: columns || {} } } };
@@ -215,22 +219,23 @@ test('shared hosts produce compatible helper requests, results and policies', as
       const sendStandalone = bridge.sendToBrowser;
       bridge.sendToBrowser = message => {
         standaloneReads.push(message.endpoint);
-        pending.resolve(message.agentRequestId, message.endpoint.startsWith('/api/now/ui/meta/')
-          ? answerMeta(message.endpoint) : { success: true, status: 200, data: { result: [{ sys_id: sysId }] } });
+        pending.resolve(message.agentRequestId, message.endpoint.startsWith('/api/now/ui/meta/') || message.endpoint === '/api/now/table/sys_db_object'
+          ? answerMeta(message.endpoint, message.queryParams) : { success: true, status: 200, data: { result: [{ sys_id: sysId }] } });
       };
       const standalone = await dispatcher.dispatch({ id: 'query_records', command: 'query_records', params, instance: 'testinst' });
       bridge.sendToBrowser = sendStandalone;
       const editorReads = [];
+      const editorMessages = [];
       const editorContext = harness.context({
-        sendToBrowser: m => { editorReads.push(m.endpoint || m.action); },
+        sendToBrowser: m => { editorMessages.push(m); editorReads.push(m.endpoint || m.action); },
         waitForBrowserResponse: () => new Promise(resolve => setImmediate(() => {
-          const last = editorReads.at(-1);
-          resolve(last === 'agentQueryRecords' ? { success: true, tableName: params.table, count: 1, records: [{ sys_id: sysId }] } : answerMeta(last));
+          const last = editorMessages.at(-1);
+          resolve(last.action === 'agentQueryRecords' ? { success: true, tableName: params.table, count: 1, records: [{ sys_id: sysId }] } : answerMeta(last.endpoint, last.queryParams));
         })),
       });
       let editor, editorError;
       try { editor = await queryCommands.find(c => c.name === 'query_records').handle(editorContext, params); } catch (error) { editorError = error; }
-      const meta = list => list.filter(e => String(e).startsWith('/api/now/ui/meta/'));
+      const meta = list => list.filter(e => String(e).startsWith('/api/now/ui/meta/') || e === '/api/now/table/sys_db_object');
       assert.deepEqual(meta(standaloneReads), meta(editorReads));
       return { standalone, editor, editorError };
     };

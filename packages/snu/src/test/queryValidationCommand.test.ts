@@ -7,7 +7,7 @@ import { WebSocket } from 'ws';
 import { StandaloneWsBridge } from '../server/wsBridge.js';
 import { PendingRegistry } from '../server/pendingRegistry.js';
 import { StandaloneDispatcher } from '../server/dispatcher.js';
-import { VECTOR_SCHEMA } from '../server/queryValidationVectors.js';
+import { VECTOR_PARENTS, VECTOR_SCHEMA } from '../server/queryValidationVectors.js';
 
 // query_records end to end through the real bridge, with a helper tab that
 // answers ui/meta from the vector schema and the query with one record.
@@ -29,7 +29,10 @@ async function withHelper(body: (dispatcher: StandaloneDispatcher, sent: any[]) 
       sent.push(request);
       const meta = /^\/api\/now\/ui\/meta\/(.+)$/.exec(request.endpoint);
       const columns = meta ? VECTOR_SCHEMA[meta[1]] : undefined;
-      const payload = !meta ? { success: true, status: 200, data: { result: [{ sys_id: '1' }] } }
+      const parent = request.endpoint === '/api/now/table/sys_db_object' ? VECTOR_PARENTS[String(request.queryParams.sysparm_query).replace('name=', '')] : undefined;
+      const payload = request.endpoint === '/api/now/table/sys_db_object'
+        ? (parent === null || parent === undefined ? { success: false, status: 403, error: 'ACL' } : { success: true, status: 200, data: { result: [{ 'super_class.name': parent }] } })
+        : !meta ? { success: true, status: 200, data: { result: [{ sys_id: '1' }] } }
         : columns === null ? { success: false, status: 403, error: 'ACL' }
         : { success: true, status: 200, data: { result: { columns: columns || {} } } };
       ws.send(JSON.stringify({ agentRequestId: request.agentRequestId, ...payload }));
@@ -71,5 +74,15 @@ test('query_records: unreadable columns are E_QUERY_UNVERIFIABLE unless validate
     const unchecked = await dispatcher.dispatch({ id: 'q2', command: 'query_records', instance: 'dev123', params: { table: 'cmn_department', query: 'name=IT', validate: false } });
     assert.equal(unchecked.status, 'success', unchecked.error);
     assert.deepEqual(sent.map((m) => m.endpoint), ['/api/now/table/cmn_department']);
+  });
+});
+
+test('query_records: a ref_ cast is proven through the table hierarchy before the query runs', async () => {
+  await withHelper(async (dispatcher, sent) => {
+    const ok = await dispatcher.dispatch({ id: 'q', command: 'query_records', instance: 'dev123', params: { table: 'question_choice', query: 'question.ref_item_option_new.cat_item=x' } });
+    assert.equal(ok.status, 'success', ok.error);
+    assert.ok(sent.some((m) => m.endpoint === '/api/now/table/sys_db_object' && m.queryParams.sysparm_query === 'name=item_option_new'));
+    const bad = await dispatcher.dispatch({ id: 'q2', command: 'query_records', instance: 'dev123', params: { table: 'incident', query: 'caller_id.ref_incident.priority=1' } });
+    assert.equal(bad.code, 'E_INVALID_QUERY');
   });
 });

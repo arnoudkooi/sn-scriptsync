@@ -2,7 +2,7 @@ import * as path from 'path';
 import { CommandHandler } from '../types';
 import { AgentError } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
-import { columnsFromMeta, createSchemaCache, queryValidationError, validateQuery } from '../queryValidation';
+import { Columns, columnsFromMeta, createSchemaCache, parentFromDbObject, queryValidationError, validateQuery } from '../queryValidation';
 import { restRequest } from './_shared';
 
 const eu = new ExtensionUtils();
@@ -15,17 +15,32 @@ function mustGetInstanceSettings(instanceFolder: string) {
 	return s;
 }
 
-// One column cache per instance URL; entries outlive the request that read them.
-const schemaCaches = new Map<string, ReturnType<typeof createSchemaCache>>();
+// One column cache and one table-parent cache per instance URL; entries
+// outlive the request that read them.
+const schemaCaches = new Map<string, { columns: ReturnType<typeof createSchemaCache<Columns | null>>; parents: ReturnType<typeof createSchemaCache<string | null>> }>();
 
-function schemaLookup(ctx: any, instanceSettings: any) {
-	let cache = schemaCaches.get(instanceSettings.url);
-	if (!cache) schemaCaches.set(instanceSettings.url, cache = createSchemaCache());
+function schemaLookups(ctx: any, instanceSettings: any) {
+	let caches = schemaCaches.get(instanceSettings.url);
+	if (!caches) {
+		caches = { columns: createSchemaCache<Columns | null>(), parents: createSchemaCache<string | null>(undefined, undefined, (parent) => typeof parent === 'string') };
+		schemaCaches.set(instanceSettings.url, caches);
+	}
 	const fetchColumns = async (table: string) => {
 		const { data } = await restRequest(ctx, instanceSettings, { endpoint: `/api/now/ui/meta/${table}`, method: 'GET' });
 		return columnsFromMeta(data);
 	};
-	return (table: string) => cache!(table, fetchColumns);
+	const fetchParent = async (table: string) => {
+		const { data } = await restRequest(ctx, instanceSettings, {
+			endpoint: '/api/now/table/sys_db_object', method: 'GET',
+			queryParams: { sysparm_query: `name=${table}`, sysparm_fields: 'super_class.name', sysparm_limit: '1' },
+		});
+		return parentFromDbObject(data);
+	};
+	const { columns, parents } = caches;
+	return {
+		columns: (table: string) => columns(table, fetchColumns),
+		parentOf: (table: string) => parents(table, fetchParent),
+	};
 }
 
 const query_records: CommandHandler = {
@@ -52,7 +67,8 @@ const query_records: CommandHandler = {
 		// Only caller-supplied fields are checked: the default list is a
 		// convenience for task tables, not something the caller asked for.
 		if (params?.validate !== false) {
-			const invalid = queryValidationError(await validateQuery(table, { query: encodedQuery, fields: params?.fields, orderBy }, schemaLookup(ctx, instanceSettings)));
+			const lookups = schemaLookups(ctx, instanceSettings);
+			const invalid = queryValidationError(await validateQuery(table, { query: encodedQuery, fields: params?.fields, orderBy }, lookups.columns, lookups.parentOf));
 			if (invalid) throw new AgentError(invalid.code, invalid.message, invalid.details);
 		}
 

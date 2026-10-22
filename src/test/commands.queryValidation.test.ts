@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHarness } from './helpers/commandHarness';
-import { VECTOR_SCHEMA } from '../agent/queryValidationVectors';
+import { VECTOR_PARENTS, VECTOR_SCHEMA } from '../agent/queryValidationVectors';
 
 const harness = createHarness();
 // Install the vscode stub before loading the command module.
@@ -22,6 +22,12 @@ function instanceAt(url: string, records: any[] = [{ sys_id: '1' }]) {
 			await new Promise((resolve) => setImmediate(resolve));
 			const message = harness.sent.at(-1)!;
 			if (message.action === 'agentQueryRecords') return { success: true, tableName: message.tableName, count: records.length, records };
+			if (message.endpoint === '/api/now/table/sys_db_object') {
+				const name = String(message.queryParams.sysparm_query).replace('name=', '');
+				const parent = VECTOR_PARENTS[name];
+				return parent === null || parent === undefined ? { success: false, status: 403, error: 'ACL' }
+					: { success: true, status: 200, data: { result: [{ 'super_class.name': parent }] } };
+			}
 			const table = String(message.endpoint).split('/').pop()!;
 			const columns = VECTOR_SCHEMA[table];
 			return columns === null ? { success: false, status: 403, error: 'ACL' } : { success: true, status: 200, data: { result: { columns: columns || {} } } };
@@ -57,4 +63,11 @@ test('query_records: unreadable columns are no proof: E_QUERY_UNVERIFIABLE, unle
 test('query_records: the default field list is not validated', async () => {
 	const result = await query.handle(instanceAt('https://four.service-now.com'), { table: 'question', query: 'name=x' });
 	assert.equal(result.count, 1);
+});
+
+test('query_records: a ref_ cast is proven through the table hierarchy before the query runs', async () => {
+	const result = await query.handle(instanceAt('https://five.service-now.com'), { table: 'question_choice', query: 'question.ref_item_option_new.cat_item=73da21de97085f14c3e2fc90f053aff3' });
+	assert.equal(result.count, 1);
+	assert.ok(harness.sent.some((m) => m.endpoint === '/api/now/table/sys_db_object' && m.queryParams.sysparm_query === 'name=item_option_new'));
+	await assert.rejects(query.handle(instanceAt('https://five.service-now.com'), { table: 'incident', query: 'caller_id.ref_incident.priority=1' }), { code: 'E_INVALID_QUERY' });
 });

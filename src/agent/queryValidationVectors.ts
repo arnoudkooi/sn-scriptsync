@@ -28,6 +28,20 @@ export const VECTOR_SCHEMA: Record<string, Record<string, any> | null> = {
 	cmn_department: null,
 	cmdb_ci: { sys_id: { type: 'GUID' }, name: text },
 	cmdb_ci_server: { sys_id: { type: 'GUID' }, name: text, os: text },
+	task_sla: { sys_id: { type: 'GUID' }, task: ref('task'), stage: text, sla: ref('contract_sla') },
+	task: { sys_id: { type: 'GUID' }, number: text, priority: { type: 'integer' } },
+};
+
+/** Table -> the table it extends ('' for a base table); a table mapped to null cannot be read. Absent: unreadable. */
+export const VECTOR_PARENTS: Record<string, string | null> = {
+	item_option_new: 'question',
+	question: '',
+	incident: 'task',
+	task: '',
+	sys_user: '',
+	cmdb_ci_server: 'cmdb_ci_computer',
+	cmdb_ci_computer: 'cmdb_ci_hardware',
+	cmdb_ci_hardware: null,
 };
 
 export interface QueryValidationVector {
@@ -142,10 +156,52 @@ export const QUERY_VALIDATION_VECTORS: QueryValidationVector[] = [
 		],
 	},
 	{
-		name: 'keyword search and related-list blocks are supported constructs',
+		name: 'keyword search and a valid related-list block',
 		table: 'incident',
 		params: { query: '123TEXTQUERY321=printer^RLQUERYtask_sla.task,>=1^stage=breached^ENDRLQUERY^priority=1' },
 		expect: 'ok',
+	},
+	{
+		name: 'conditions inside a related-list block are checked against its table',
+		table: 'incident',
+		params: { query: 'RLQUERYtask_sla.task,>=1^stgae=breached^ENDRLQUERY^priority=1' },
+		expect: [{ code: 'E_INVALID_QUERY', source: 'query', path: 'stgae', hop: 'stgae', table: 'task_sla' }],
+	},
+	{
+		name: 'the relation field of a related-list block is checked',
+		table: 'incident',
+		params: { query: 'RLQUERYtask_sla.taks,>=1^stage=breached^ENDRLQUERY' },
+		expect: [{ code: 'E_INVALID_QUERY', source: 'query', path: 'taks', table: 'task_sla' }],
+	},
+	{
+		name: 'conditions after the block are checked against the queried table again',
+		table: 'incident',
+		params: { query: 'RLQUERYtask_sla.task,>=1^stage=breached^ENDRLQUERY^stage=x' },
+		expect: [{ code: 'E_INVALID_QUERY', source: 'query', path: 'stage', table: 'incident' }],
+	},
+	{
+		name: 'a related-list block that is never closed cannot hide the rest of the query',
+		table: 'incident',
+		params: { query: 'RLQUERYtask_sla.task,>=1^stage=breached^priority=1' },
+		expect: [{ code: 'E_QUERY_UNVERIFIABLE', source: 'query' }],
+	},
+	{
+		name: 'a related-list header that cannot be read',
+		table: 'incident',
+		params: { query: 'RLQUERYtask_sla,>=1^stage=breached^ENDRLQUERY' },
+		expect: [{ code: 'E_QUERY_UNVERIFIABLE', source: 'query' }],
+	},
+	{
+		name: 'a ref_ cast to a table that does not extend the reference target is invalid',
+		table: 'incident',
+		params: { query: 'caller_id.ref_incident.priority=1' },
+		expect: [{ code: 'E_INVALID_QUERY', source: 'query', path: 'caller_id.ref_incident.priority', hop: 'ref_incident', table: 'sys_user' }],
+	},
+	{
+		name: 'a ref_ cast whose hierarchy cannot be read is unverifiable',
+		table: 'incident',
+		params: { query: 'cmdb_ci.ref_cmdb_ci_server.os=Linux' },
+		expect: [{ code: 'E_QUERY_UNVERIFIABLE', source: 'query', path: 'cmdb_ci.ref_cmdb_ci_server.os', table: 'cmdb_ci' }],
 	},
 	{
 		name: 'an escaped caret stays inside the value',

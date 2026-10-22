@@ -21,7 +21,7 @@ import { ReviewRegistry } from './reviewRegistry.js';
 import { resolveAttachment } from './attachmentInput.js';
 import { checkDownloadTarget, DownloadRequest, resolveDownloadTarget, saveDownloadedAttachment, validateDownloadParams } from './attachmentOutput.js';
 import { retryAfterTokenRefresh, scriptResult } from './backgroundScript.js';
-import { columnsFromMeta, createSchemaCache, queryValidationError, validateQuery } from './queryValidation.js';
+import { Columns, columnsFromMeta, createSchemaCache, parentFromDbObject, queryValidationError, validateQuery } from './queryValidation.js';
 import { parseFieldValues } from '../fieldInput.js';
 import { analyzeArtifactType, currentFingerprint, profileFileName, profileStillFresh, validateProfileParams, ProfileIO } from './artifactProfile.js';
 import { ANSWER_GRACE_MS, batchMessage, batchResult, bulkMode, dryRunResult, expectedFor, lostAnswer, prepareBulk, requireBatchId } from './bulkCommands.js';
@@ -255,7 +255,7 @@ export class StandaloneDispatcher {
   private config: StandaloneConfig;
   private pendingReviewRequests = new Map<string, string>(); // correlationId/requestId -> reviewId
   private reviews = new ReviewRegistry();
-  private schemaCaches = new Map<string, ReturnType<typeof createSchemaCache>>(); // instance URL -> column cache
+  private schemaCaches = new Map<string, { columns: ReturnType<typeof createSchemaCache<Columns | null>>; parents: ReturnType<typeof createSchemaCache<string | null>> }>(); // instance URL -> lookup caches
   /** Pause before the single retry after E_SCREENSHOT_PERMISSION; tests shorten it. */
   screenshotRetryDelayMs = 10_000;
   private requestIdToCorrelationId = new Map<string, string>(); // requestId -> correlationId
@@ -777,22 +777,32 @@ export class StandaloneDispatcher {
     return null;
   }
 
-  /** Column lookup for query validation, cached per instance URL (see createSchemaCache). */
-  private schemaLookup(inst: { settings: any }) {
+  /** Column and table-parent lookups for query validation, cached per instance URL (see createSchemaCache). */
+  private schemaLookups(inst: { settings: any }) {
     const url = String(inst.settings?.url || '');
-    let cache = this.schemaCaches.get(url);
-    if (!cache) this.schemaCaches.set(url, cache = createSchemaCache());
-    const fetchColumns = async (table: string) => {
+    let caches = this.schemaCaches.get(url);
+    if (!caches) {
+      caches = { columns: createSchemaCache<Columns | null>(), parents: createSchemaCache<string | null>(undefined, undefined, (parent) => typeof parent === 'string') };
+      this.schemaCaches.set(url, caches);
+    }
+    const get = async (endpoint: string, queryParams?: Record<string, string>) => {
       const correlationId = crypto.randomUUID();
       const pendingPromise = this.pending.register({ id: correlationId, command: 'query_validation', timeoutMs: 70_000 });
       this.ws.sendToBrowser({
-        action: 'agentRestApi', agentRequestId: correlationId, endpoint: `/api/now/ui/meta/${table}`, method: 'GET',
-        instance: inst.settings, appName: 'SN Utils CLI',
+        action: 'agentRestApi', agentRequestId: correlationId, endpoint, method: 'GET',
+        ...(queryParams ? { queryParams } : {}), instance: inst.settings, appName: 'SN Utils CLI',
       });
       const res = await pendingPromise;
-      return res?.success === false ? null : columnsFromMeta(res?.data);
+      return res?.success === false ? undefined : res?.data;
     };
-    return (table: string) => cache!(table, fetchColumns);
+    const fetchColumns = async (table: string) => columnsFromMeta(await get(`/api/now/ui/meta/${table}`));
+    const fetchParent = async (table: string) => parentFromDbObject(await get('/api/now/table/sys_db_object',
+      { sysparm_query: `name=${table}`, sysparm_fields: 'super_class.name', sysparm_limit: '1' }));
+    const { columns, parents } = caches;
+    return {
+      columns: (table: string) => columns(table, fetchColumns),
+      parentOf: (table: string) => parents(table, fetchParent),
+    };
   }
 
   private async restGet(inst: { settings: any }, reqCommand: string, endpoint: string, queryParams: Record<string, string>, withPagination = false): Promise<any> {
@@ -1788,7 +1798,8 @@ export class StandaloneDispatcher {
         // Only caller-supplied fields are checked: the default list is a
         // convenience for task tables, not something the caller asked for.
         if (req.params?.validate !== false) {
-          const invalid = queryValidationError(await validateQuery(table, { query, fields: req.params?.fields, orderBy }, this.schemaLookup(inst)));
+          const lookups = this.schemaLookups(inst);
+          const invalid = queryValidationError(await validateQuery(table, { query, fields: req.params?.fields, orderBy }, lookups.columns, lookups.parentOf));
           if (invalid) throw Object.assign(new Error(invalid.message), { code: invalid.code, details: invalid.details });
         }
 
