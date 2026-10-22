@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.5.1 (2026-10-22)
+
+- **`update_record` now rejects a `fields` object instead of reporting success and writing nothing** (#166). Use `update_record_batch` for several fields; `update_record` takes `field` and `content`.
+
 ## 4.9.20 (2026-10-22)
 
 - **Record history & compare** opens from the editor or Explorer context menu. Inspect saved versions and customer updates, see the recommended baseline, and compare in the native diff editor without changing your file or instance. History inspection and recommended comparison are free; selecting a baseline or comparing all synced record fields requires Pro or an active Trial.
