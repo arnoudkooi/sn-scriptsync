@@ -130,11 +130,17 @@ if (gitStatus === null) {
 
 const changelog = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
 if (wants.has('vsix') || wants.has('marketplace')) {
+  const topSection = (changelog.split(/\r?\n/).find((l) => l.startsWith('## ')) || '').trim();
   if (!changelog.includes(`## ${extPkg.version}`)) {
     warn(`CHANGELOG.md has no '## ${extPkg.version}' section. Stamp the Unreleased entries before releasing.`);
     if (!(await confirm('Continue without a changelog entry for this version?'))) fail('Aborted.');
+  } else if (!topSection.startsWith(`## ${extPkg.version}`)) {
+    // The welcome panel and the marketplace changelog tab lead with the first
+    // section; an @snutils/snu entry on top hides this release's notes.
+    warn(`CHANGELOG.md starts with '${topSection}', not '## ${extPkg.version}'. Move the ${extPkg.version} section to the top.`);
+    if (!(await confirm('Continue with another section on top?'))) fail('Aborted.');
   } else {
-    ok(`CHANGELOG.md has a ${extPkg.version} section`);
+    ok(`CHANGELOG.md leads with the ${extPkg.version} section`);
   }
 }
 

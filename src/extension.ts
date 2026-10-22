@@ -2278,7 +2278,7 @@ function showWelcomePanel(context: vscode.ExtensionContext, version: string, isF
 
 	const config = vscode.workspace.getConfiguration('sn-scriptsync');
 	const settings = WELCOME_SETTINGS.map(s => ({ ...s, value: config.get(s.key, s.default as any) }));
-	const highlights = getChangelogHighlightsHtml(context);
+	const highlights = getChangelogHighlightsHtml(context, version);
 
 	panel.webview.html = getWelcomeHtml(version, isFirstRun, settings, highlights);
 
@@ -2310,14 +2310,20 @@ function showWelcomePanel(context: vscode.ExtensionContext, version: string, isF
 	}, undefined, context.subscriptions);
 }
 
-function getChangelogHighlightsHtml(context: vscode.ExtensionContext): string {
+function getChangelogHighlightsHtml(context: vscode.ExtensionContext, version: string): string {
 	try {
 		const file = path.join(context.extensionPath, 'CHANGELOG.md');
 		const md = fs.readFileSync(file, 'utf8');
 		const lines = md.split(/\r?\n/);
-		const start = lines.findIndex(l => l.startsWith('## '));
+		// The changelog also carries `@snutils/snu` sections. Prefer the section of
+		// the running extension version; otherwise the first extension section.
+		const isSection = (l: string) => l.startsWith('## ');
+		const isExtensionSection = (l: string) => /^## \d+\.\d+\.\d+/.test(l);
+		let start = version ? lines.findIndex(l => l.startsWith(`## ${version} `) || l === `## ${version}`) : -1;
+		if (start === -1) start = lines.findIndex(isExtensionSection);
+		if (start === -1) start = lines.findIndex(isSection);
 		if (start === -1) return '';
-		let end = lines.findIndex((l, i) => i > start && l.startsWith('## '));
+		let end = lines.findIndex((l, i) => i > start && isSection(l));
 		if (end === -1) end = lines.length;
 		return markdownToHtml(lines.slice(start, end).join('\n'));
 	} catch (e) {
