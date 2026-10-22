@@ -159,6 +159,19 @@ export async function createMcpServer(): Promise<McpServer> {
     snu_get_review_result: {
       reviewId: z.string(), waitSeconds: z.number().min(0).max(55).optional(),
     },
+    snu_download_attachment: {
+      sys_id: z.string().describe('32-character sys_attachment sys_id'),
+      filePath: z.string().optional().describe('Target file inside the bridge workspace; relative paths resolve under the instance folder'),
+      overwrite: z.boolean().optional().describe('Replace an existing file (default false)'),
+      maxBytes: z.number().int().min(1).max(52_428_800).optional().describe('Refuse larger attachments (default and maximum 50 MB)'),
+      instance: z.string().optional(),
+    },
+    snu_delete_attachment: {
+      sys_id: z.string().describe('32-character sys_attachment sys_id'),
+      confirm: z.boolean().optional().describe('Must be set to true to execute deletion'),
+      dryRun: z.boolean().optional().describe('Return the attachment without deleting it'),
+      instance: z.string().optional(),
+    },
     ...Object.fromEntries((['create', 'update'] as const).map(mode => [`snu_${mode}_records`, {
       table: z.string(),
       rows: z.array(z.record(z.any())).max(200).optional().describe(mode === 'create' ? 'One field-value object per new record' : 'One { sys_id, ...fields } object per record'),

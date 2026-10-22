@@ -1,13 +1,18 @@
 import { CommandHandler } from '../types';
 import { AgentError } from '../errors';
 import { mustGetInstanceSettings, runBackgroundScript } from './_shared';
+import { scriptResult } from '../backgroundScript';
 
 const run_background_script: CommandHandler = {
 	name: 'run_background_script',
 	requiresBrowser: true,
 	docs: {
-		summary: 'Run a server-side background script on the instance and return its captured output. Controlled per-instance in the SN Utils helper tab.',
+		summary: 'Run a server-side background script on the instance. Returns the raw `output` plus `stdout` (gs.print lines), `warnings`, `errors`, `logLines`, `executionId` (sys_script_execution_history) and `status`. Controlled per-instance in the SN Utils helper tab.',
 		request: { command: 'run_background_script', id: 'bg_1', params: { script: "gs.print('hello from ' + gs.getUserName());" } },
+	},
+	// A reviewed run executes in the helper tab; shape its reply the same way.
+	fromHelperResult(reply) {
+		return scriptResult(reply?.output);
 	},
 	async handle(ctx, params) {
 		const script = params?.script;
@@ -17,7 +22,7 @@ const run_background_script: CommandHandler = {
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
 		const output = await runBackgroundScript(ctx, instanceSettings, script);
 		ctx.log(`Agent API: Ran background script (${output.length} chars output)`);
-		return { executed: true, output };
+		return scriptResult(output);
 	},
 };
 

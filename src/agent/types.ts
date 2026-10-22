@@ -43,6 +43,10 @@ export interface HelperCapabilities {
 	saveAck?: 1 | 0;
 	/** The helper runs create_records / update_records (agentRecordBatch). */
 	recordBatch?: 1 | 0;
+	/** The helper answers agentDownloadAttachment with bounded bytes. */
+	attachmentDownload?: 1 | 0;
+	/** Background script refusals carry details.notStarted. */
+	scriptNotStarted?: 1 | 0;
 	[key: string]: any;
 }
 

@@ -3,7 +3,7 @@ name: snu-agent-api
 description: "SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_records / update_records for many rows, create_artifact, create_application, analyze_artifact_type, rest_request, screenshots, etc.). Read this before calling any Agent API command."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=29 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=30 -->
 
 # SN ScriptSync — Agent API
 
@@ -1686,14 +1686,24 @@ Execute a server-side background script (`/sys.scripts.do`) on the instance and 
 
 **Response:**
 ```json
-{ "status": "success", "result": { "executed": true, "output": "*** Script: Active incidents: 42" } }
+{ "status": "success", "result": {
+  "executed": true,
+  "output": "[0:00:00.1] Script completed … <PRE>*** Script: Active incidents: 42<BR/>[CacheFlushLog] …</PRE>",
+  "stdout": "Active incidents: 42",
+  "warnings": [], "errors": [], "logLines": ["[CacheFlushLog] …"],
+  "executionId": "47eea1d697485f14c3e2fc90f053af06",
+  "status": "completed"
+} }
 ```
+- `output` is the raw page text, unchanged. Read `stdout` for your `gs.print` lines; `errors` holds evaluator errors (`status: "failed"`), `logLines` the platform's own log noise.
+- `executionId` is the `sys_script_execution_history` record of the run.
 
 **Errors:**
 - `E_DISABLED` — `sn-scriptsync.backgroundScripts.enabled` is off, or the instance gate is set to Off in the helper tab.
 - `E_REVIEW_PENDING` — the instance gate is set to Approve: the script is waiting in the helper tab Review Queue. Tell the user to approve it in the SN Utils ScriptSync helper tab in their browser, then collect the output with `get_review_result`.
 - `E_USER_REJECTED` — the developer rejected the script in the Review Queue; don't retry without asking.
-- `E_UNAUTHORIZED` — the instance answered "not authorized" (session lost, or the user can't run background scripts); the helper refreshes the session token and retries once before raising this.
+- `E_UNAUTHORIZED` — the instance refused the session before running the script (session lost, or the user can't run background scripts). Only when the reply proves the script never ran is the token refreshed and the script run once more; otherwise nothing is replayed.
+- `E_TIMEOUT` / `E_BROWSER_DISCONNECTED` — the wait ended, **not necessarily the script**: it may still be running or may have finished. Never run a mutating script again after these. Check its effect first (query the records it changes).
 - `E_INVALID_PARAMS` — missing `script`.
 
 > The pragmatic escape hatch for bulk data fixes that the typed commands don't cover. Output is whatever `/sys.scripts.do` returns (the `gs.print` lines plus the server's evaluation log).
@@ -2481,5 +2491,68 @@ The `upload_attachment` command resolves relative paths from the **instance fold
 | `.xls` | `application/vnd.ms-excel` |
 | `.xlsx` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
 | Other | `application/octet-stream` |
+
+---
+
+### `download_attachment` (bytes to a file, never to you)
+Download one attachment (`sys_attachment` sys_id) to a file in the workspace. The result carries the file path, size, content type and sha256, **never the bytes**, so a binary file never lands in your context. Process the file locally (resize, convert, inspect) and send it back with `upload_attachment` using `relativePath` or `filePath` from the result.
+
+Needs a current SN Utils helper tab (`capabilities.attachmentDownload` in `get_capabilities`); an older one answers `E_UNSUPPORTED_HELPER`. A read: no permission gate.
+
+**Request:**
+```json
+{ "id": "dl_1", "command": "download_attachment", "params": { "sys_id": "68cf699a97485f14c3e2fc90f053af5d" } }
+```
+
+**Parameters:**
+- `sys_id` (required): the `sys_attachment` record.
+- `filePath` (optional): where to write it. Relative paths resolve under the instance folder; absolute paths must stay inside the workspace. Default: `<instance>/attachments/<sys_id>/<file name>`.
+- `overwrite` (optional, default `false`): replace an existing file. Without it an existing file is never touched (`E_FILE_EXISTS`).
+- `maxBytes` (optional, default and maximum 50 MB): refuse larger attachments.
+
+**Response:**
+```json
+{ "status": "success", "result": {
+  "downloaded": true, "sys_id": "68cf699a97485f14c3e2fc90f053af5d",
+  "filePath": "/workspace/dev1/attachments/68cf699a97485f14c3e2fc90f053af5d/lineup.png",
+  "relativePath": "attachments/68cf699a97485f14c3e2fc90f053af5d/lineup.png",
+  "fileName": "lineup.png", "sizeBytes": 1748088, "contentType": "image/png",
+  "sha256": "…", "sourceTable": "sc_cat_item", "sourceSysId": "73da21de97085f14c3e2fc90f053aff3"
+} }
+```
+
+The file is written to a temporary file first and published atomically only after its size and sha256 match what the helper read, so a file at `filePath` is always complete.
+
+**Errors:**
+- `E_UNSUPPORTED_HELPER` — update SN Utils and reopen the ScriptSync helper tab. Do not fall back to base64 through `run_background_script` or `rest_request`.
+- `E_TOO_LARGE` — larger than `maxBytes`.
+- `E_FILE_EXISTS` — the target exists; pick another path or pass `overwrite: true`.
+- `E_ATOMIC_PUBLISH_UNSUPPORTED` — the volume cannot publish without overwriting; choose another folder.
+- `E_TRANSFER_MISMATCH` — the received bytes did not match; nothing was written. Retrying is safe (a read).
+- `E_SECURITY` — the path leaves the workspace or goes through a symbolic link.
+- `E_NOT_FOUND` — no such attachment.
+
+---
+
+### `delete_attachment` ⚠️ (DESTRUCTIVE — guarded)
+Delete one attachment through the Attachment API, which removes the `sys_attachment` row and its stored content. Prefer it over `delete_record` on `sys_attachment`.
+
+**Gating:** the `deleteRecords` permission, like `delete_record`, including the helper-tab Review Queue when the instance gate is Approve (`E_REVIEW_PENDING`, then `get_review_result`). In `snu`, pass `confirm: true` (or `--confirm`).
+
+**Request:**
+```json
+{ "id": "dat_1", "command": "delete_attachment", "params": { "sys_id": "68cf699a97485f14c3e2fc90f053af5d" } }
+```
+
+**Parameters:**
+- `sys_id` (required): the `sys_attachment` record.
+- `dryRun` (optional): only read and return the attachment; not reviewed.
+
+**Response:**
+```json
+{ "status": "success", "result": { "deleted": true, "sys_id": "68cf…", "fileName": "lineup.png", "table": "sc_cat_item", "tableSysId": "73da…", "sizeBytes": 1748088 } }
+```
+
+**Errors:** `E_NOT_FOUND` (nothing deleted), `E_DISABLED`, `E_REVIEW_PENDING`, `E_USER_REJECTED`.
 
 ---

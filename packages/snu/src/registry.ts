@@ -1031,6 +1031,51 @@ export const TOOLS: ToolDefinition[] = [
     } }),
   },
   {
+    name: 'snu_download_attachment', agentCommand: 'download_attachment', cliCommand: 'attachment download',
+    description: 'Download one attachment (sys_attachment sys_id) to a file in the bridge workspace. Returns the file path, size, content type and sha256, never the bytes, so binary data stays out of model context. Default path: <instance folder>/attachments/<sys_id>/<file name>. Up to 50 MB. Needs a current SN Utils helper tab.',
+    cliUsage: 'snu attachment download <sys_id> [--out <path>] [--overwrite] [--instance <i>] [--json]',
+    cliOptions: {
+      out: { type: 'string', short: 'o', description: 'Workspace file to write (default: <instance>/attachments/<sys_id>/<name>)' },
+      overwrite: { type: 'boolean', description: 'Replace an existing file' },
+    },
+    inputSchema: {
+      type: 'object', properties: {
+        sys_id: { type: 'string', description: '32-character sys_attachment sys_id' },
+        filePath: { type: 'string', description: 'Target file inside the bridge workspace; relative paths resolve under the instance folder' },
+        overwrite: { type: 'boolean', description: 'Replace an existing file (default false: E_FILE_EXISTS)' },
+        maxBytes: { type: 'integer', minimum: 1, maximum: 52428800, description: 'Refuse larger attachments (default and maximum 50 MB)' },
+        instance: { type: 'string', description: 'Target instance' },
+      }, required: ['sys_id'], additionalProperties: false,
+    },
+    mapInput: input => ({ command: 'download_attachment', instance: input.instance, params: {
+      sys_id: input.sys_id, filePath: input.filePath ?? input.out, overwrite: input.overwrite, maxBytes: input.maxBytes,
+    } }),
+  },
+  {
+    name: 'snu_delete_attachment', agentCommand: 'delete_attachment', cliCommand: 'attachment delete',
+    description: 'Delete one attachment through the Attachment API, which removes the sys_attachment row and its stored content. Destructive: governed by the deleteRecords permission and requires confirm: true or dryRun: true.',
+    cliUsage: 'snu attachment delete <sys_id> [--confirm] [--dry-run] [--instance <i>] [--json]',
+    cliOptions: {
+      confirm: { type: 'boolean', description: 'Must be set to true to execute deletion' },
+      'dry-run': { type: 'boolean', description: 'Return the attachment without deleting it' },
+    },
+    inputSchema: {
+      type: 'object', properties: {
+        sys_id: { type: 'string', description: '32-character sys_attachment sys_id' },
+        confirm: { type: 'boolean', const: true, description: 'Must be set to true to execute deletion' },
+        dryRun: { type: 'boolean', description: 'When true, returns the attachment that would be deleted without deleting it' },
+        instance: { type: 'string', description: 'Target instance' },
+      }, required: ['sys_id'], additionalProperties: false,
+    },
+    mapInput: input => {
+      const isDryRun = input.dryRun === true || input['dry-run'] === true;
+      if (!isDryRun && input.confirm !== true) {
+        throw new Error('snu_delete_attachment is destructive: pass --confirm to execute or --dry-run to inspect the attachment.');
+      }
+      return { command: 'delete_attachment', instance: input.instance, params: { sys_id: input.sys_id, dryRun: isDryRun } };
+    },
+  },
+  {
     name: 'snu_get_review_result', agentCommand: 'get_review_result', cliCommand: 'review result',
     description: 'Collect a reviewed command\'s pending, running or completed outcome. Poll the same reviewId instead of repeating a write; completed results are retained for 10 minutes.',
     cliUsage: 'snu review result <reviewId> [--wait <seconds>] [--json]',

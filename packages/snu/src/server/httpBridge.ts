@@ -34,9 +34,16 @@ export function httpStatusForCode(code?: string): number {
     case 'E_REFERENCE_INTEGRITY':
     case 'E_DEBUGGER_BUSY':
     case 'E_REPLAY_DETECTED':
+    case 'E_FILE_EXISTS':
       return 409;
+    case 'E_TOO_LARGE':
+      return 413;
     case 'E_CDP_UNAVAILABLE':
+    case 'E_UNSUPPORTED_HELPER':
+    case 'E_ATOMIC_PUBLISH_UNSUPPORTED':
       return 501;
+    case 'E_TRANSFER_MISMATCH':
+      return 502;
     case 'E_INSTANCE_REQUIRED':
     case 'E_INSTANCE_NOT_FOUND':
       return 422;

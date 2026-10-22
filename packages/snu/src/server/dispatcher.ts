@@ -19,6 +19,8 @@ import { VERSION } from '../version.js';
 import { STANDALONE_COMMANDS } from './commands.js';
 import { ReviewRegistry } from './reviewRegistry.js';
 import { resolveAttachment } from './attachmentInput.js';
+import { checkDownloadTarget, DownloadRequest, resolveDownloadTarget, saveDownloadedAttachment, validateDownloadParams } from './attachmentOutput.js';
+import { retryAfterTokenRefresh, scriptResult } from './backgroundScript.js';
 import { parseFieldValues } from '../fieldInput.js';
 import { analyzeArtifactType, currentFingerprint, profileFileName, profileStillFresh, validateProfileParams, ProfileIO } from './artifactProfile.js';
 import { ANSWER_GRACE_MS, batchMessage, batchResult, bulkMode, dryRunResult, expectedFor, lostAnswer, prepareBulk, requireBatchId } from './bulkCommands.js';
@@ -54,6 +56,15 @@ const SWITCH_CONTEXT_ALIASES: Record<string, string> = {
 const GATE_LABELS = Object.fromEntries(GATE_DEFINITIONS.map((d) => [d.key, d.label])) as Record<keyof SecurityGates, string>;
 
 const REST_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+const DOWNLOAD_TIMEOUT_MS = 3 * 60 * 1000;
+
+function scriptOutputOf(response: any): string {
+  if (!response || response.success === false) {
+    throw Object.assign(new Error(response?.error || 'Background script failed'), { code: response?.code || 'E_COMMAND_FAILED', details: response?.details });
+  }
+  return String(response.output ?? '');
+}
 
 // Mirrors codeForRest() in the VS Code agent so both hosts report the same
 // code for the same HTTP failure.
@@ -672,6 +683,96 @@ export class StandaloneDispatcher {
       warnings,
       records: pulledRecordsList,
     };
+  }
+
+  /**
+   * Run a background script and return its raw output. Mirrors
+   * runBackgroundScript() in the VS Code agent: when the reply proves the
+   * script never ran and the session was refused (retryAfterTokenRefresh), the
+   * session token is refreshed and the script runs once more. Anything short
+   * of that proof is never replayed, and the second attempt's own error (a
+   * timeout, say) is reported as itself, because that run may still be going.
+   */
+  private async runBackgroundScript(inst: { name: string; settings: any }, script: unknown, correlationId: string): Promise<string> {
+    const first = await this.postBackgroundScript(inst.settings, script, correlationId);
+    if (!retryAfterTokenRefresh(first)) return scriptOutputOf(first);
+
+    const refreshed = await this.refreshSessionToken(inst.settings);
+    if (!refreshed) {
+      throw Object.assign(new Error(
+        'ServiceNow rejected the background script ("not authorized") and the session token could not be refreshed. ' +
+        `Please open ${inst.settings?.url || 'the instance'} in your browser, elevate roles to admin/security_admin, and run /token from the helper tab or SN Utils popup.`,
+      ), { code: 'E_UNAUTHORIZED', details: first?.details });
+    }
+    const second = await this.postBackgroundScript(refreshed, script, crypto.randomUUID());
+    if (retryAfterTokenRefresh(second)) {
+      throw Object.assign(new Error(
+        'ServiceNow rejected the background script ("not authorized") even after refreshing the session token. ' +
+        `Ensure you are logged into ${inst.settings?.url || 'the instance'} in your browser as an administrator (with elevated 'security_admin' role if required), then run /token from the helper tab.`,
+      ), { code: 'E_UNAUTHORIZED', details: second?.details });
+    }
+    return scriptOutputOf(second);
+  }
+
+  /**
+   * The helper's reply as a value. The bridge turns a coded helper failure
+   * into a rejection; that is mapped back onto the reply it was, so the retry
+   * rule sees the same shape on both hosts. Transport failures (timeout,
+   * disconnect) carry no helper verdict and are rethrown untouched.
+   */
+  private async postBackgroundScript(settings: any, script: unknown, correlationId: string): Promise<any> {
+    const pendingPromise = this.pending.register({ id: correlationId, command: 'run_background_script', timeoutMs: 70_000 });
+    this.ws.sendToBrowser({
+      action: 'agentRunBackgroundScript',
+      agentRequestId: correlationId,
+      script,
+      instance: settings,
+      appName: 'SN Utils CLI',
+    });
+    try {
+      return await pendingPromise;
+    } catch (err: any) {
+      const reply = { success: false, code: err?.code, error: err?.message, details: err?.details };
+      if (retryAfterTokenRefresh(reply)) return reply;
+      throw err;
+    }
+  }
+
+  /**
+   * Ask the helper for an automatic token refresh under its per-instance
+   * policy (the `/token` request the VS Code host sends), then wait for the
+   * helper to push a different g_ck. Null when none arrives in time.
+   */
+  private async refreshSessionToken(settings: any): Promise<any | null> {
+    // The helper refuses an automatic refresh without an exact instance, so
+    // never fall back to a wildcard that could match another instance's tab.
+    if (typeof settings?.url !== 'string' || !settings.url || settings.url.includes('*')) return null;
+    let origin = '';
+    try { origin = new URL(settings.url).origin.toLowerCase(); } catch { return null; }
+    const oldCk = settings.g_ck;
+    const correlationId = crypto.randomUUID();
+    const pendingPromise = this.pending.register({ id: correlationId, command: 'refresh_session_token', timeoutMs: 15_000 });
+    this.ws.sendToBrowser({
+      action: 'runSlashCommand',
+      agentRequestId: correlationId,
+      command: '/token',
+      url: settings.url + '/*',
+      autoRun: true,
+    });
+    try {
+      const response = await pendingPromise;
+      if (response?.success !== true) return null;
+    } catch {
+      return null;
+    }
+    for (let i = 0; i < 32; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const fresh = this.ws.getLiveInstances().find((live) => {
+        try { return new URL(live.url).origin.toLowerCase() === origin; } catch { return false; }
+      });
+      if (fresh?.g_ck && fresh.g_ck !== oldCk) return fresh;
+    }
+    return null;
   }
 
   private async restGet(inst: { settings: any }, reqCommand: string, endpoint: string, queryParams: Record<string, string>, withPagination = false): Promise<any> {
@@ -1377,7 +1478,9 @@ export class StandaloneDispatcher {
           }
           return {
             id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
-            result: res.output !== undefined ? { output: res.output } : res.data || res.result || { success: true },
+            // A reviewed background script ran in the helper tab; same shape as a direct run.
+            result: req.command === 'run_background_script' ? scriptResult(res.output)
+              : res.output !== undefined ? { output: res.output } : res.data || res.result || { success: true },
           };
         }).catch((err): AgentResponse => ({
           id: req.id, command: req.command, status: 'error', timestamp: Date.now(),
@@ -1504,25 +1607,87 @@ export class StandaloneDispatcher {
 
       // Background Script
       if (req.command === 'run_background_script') {
-        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
-        this.ws.sendToBrowser({
-          action: 'agentRunBackgroundScript',
-          agentRequestId: correlationId,
-          script: req.params?.script,
-          instance: inst.settings,
-          appName: 'SN Utils CLI',
-        });
-        const res = await pendingPromise;
-        if (res.success === false) {
-          throw Object.assign(new Error(res.error || 'Background script failed'), { code: res.code || 'E_COMMAND_FAILED' });
-        }
+        const output = await this.runBackgroundScript(inst, req.params?.script, correlationId);
         return {
           id: req.id,
           command: req.command,
           status: 'success',
           timestamp: Date.now(),
-          result: { output: res.output || '' },
+          result: scriptResult(output),
         };
+      }
+
+      if (req.command === 'download_attachment') {
+        const request: DownloadRequest = validateDownloadParams(req.params || {});
+        // Refuse an unusable target before any bytes move.
+        if (request.filePath !== undefined) checkDownloadTarget(resolveDownloadTarget(request, this.cwd, path.join(this.cwd, inst.name)), request.overwrite);
+        // An older helper tab would treat this action as a record save, so the
+        // capability check is not optional.
+        if (this.ws.getHelperState().capabilities?.attachmentDownload !== 1) {
+          throw Object.assign(new Error('The connected SN Utils helper tab cannot download attachments. Update SN Utils and reopen the ScriptSync helper tab.'), { code: 'E_UNSUPPORTED_HELPER' });
+        }
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: DOWNLOAD_TIMEOUT_MS });
+        this.ws.sendToBrowser({
+          action: 'agentDownloadAttachment',
+          agentRequestId: correlationId,
+          sysId: request.sysId,
+          maxBytes: request.maxBytes,
+          instance: inst.settings,
+          appName: 'SN Utils CLI',
+        });
+        const reply = await pendingPromise;
+        if (!reply || reply.success === false) {
+          throw Object.assign(new Error(reply?.error || 'Attachment download failed'), { code: reply?.code || 'E_COMMAND_FAILED', details: reply?.details });
+        }
+        return {
+          id: req.id, command: req.command, status: 'success', timestamp: Date.now(),
+          result: saveDownloadedAttachment(reply, request, this.cwd, path.join(this.cwd, inst.name)),
+        };
+      }
+
+      if (req.command === 'delete_attachment') {
+        const sysId = req.params?.sys_id;
+        if (typeof sysId !== 'string' || !/^[a-f0-9]{32}$/i.test(sysId)) {
+          throw Object.assign(new Error('delete_attachment requires the 32-character sys_id of a sys_attachment record'), { code: 'E_INVALID_PARAMS' });
+        }
+        const metaId = crypto.randomUUID();
+        const metaPromise = this.pending.register({ id: metaId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: 'agentRestApi', agentRequestId: metaId, endpoint: `/api/now/attachment/${sysId}`, method: 'GET',
+          instance: inst.settings, appName: 'SN Utils CLI',
+        });
+        const metaRes = await metaPromise;
+        if (metaRes?.success === false) {
+          const code = metaRes.code || codeForRestStatus(metaRes.status, metaRes.error);
+          if (code === 'E_NOT_FOUND') throw Object.assign(new Error(`No attachment with sys_id ${sysId}`), { code });
+          throw Object.assign(new Error(metaRes.error || 'Attachment lookup failed'), { code });
+        }
+        const meta = metaRes?.data?.result;
+        if (!meta?.sys_id) throw Object.assign(new Error(`No attachment with sys_id ${sysId}`), { code: 'E_NOT_FOUND' });
+        const summary = {
+          sys_id: sysId.toLowerCase(),
+          fileName: meta.file_name ?? null,
+          table: meta.table_name ?? null,
+          tableSysId: meta.table_sys_id ?? null,
+          sizeBytes: meta.size_bytes !== undefined ? Number(meta.size_bytes) : null,
+        };
+        if (req.params?.dryRun === true) {
+          return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: { dryRun: true, deleted: false, ...summary } };
+        }
+        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
+        this.ws.sendToBrowser({
+          action: 'agentRestApi',
+          agentRequestId: correlationId,
+          endpoint: `/api/now/attachment/${sysId}`,
+          method: 'DELETE',
+          instance: inst.settings,
+          appName: 'SN Utils CLI',
+        });
+        const res = await pendingPromise;
+        if (res.success === false) {
+          throw Object.assign(new Error(res.error || 'Delete failed'), { code: res.code || codeForRestStatus(res.status, res.error) });
+        }
+        return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: { deleted: true, ...summary } };
       }
 
       // Delete Record

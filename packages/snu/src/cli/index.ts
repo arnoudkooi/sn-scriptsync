@@ -155,6 +155,8 @@ export function printHelp(): void {
   record delete <table> <sys_id>      Delete a record (--confirm or --dry-run)
   artifact create <table> <name>      Create a scriptable artifact (Script Include, etc.)
   attachment upload <table> <id>      Attach a workspace file (--file <path>)
+  attachment download <sys_id>        Save an attachment to a workspace file (--out <path>, --overwrite)
+  attachment delete <sys_id>          Delete an attachment (--confirm or --dry-run)
   review result <reviewId>            Collect a reviewed command's outcome (--wait 0..55)
   negotiate                           Report bridge/helper versions and supported commands
   rest <endpoint>                     Call any REST endpoint (--method, --body, --query)
@@ -875,6 +877,18 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         inputData.filePath = path.resolve(String(values.file));
         inputData.fileName = values.name;
         inputData.contentType = values['content-type'];
+        break;
+
+      case 'attachment download':
+        if (!positionals[0]) throw new ScriptSyncClientError('Usage: snu attachment download <sys_id> [--out <path>] [--overwrite]', 'E_INVALID_PARAMS');
+        inputData.sys_id = positionals[0];
+        if (values.out !== undefined) inputData.filePath = path.resolve(String(values.out));
+        if (values.overwrite) inputData.overwrite = true;
+        break;
+
+      case 'attachment delete':
+        if (!positionals[0]) throw new ScriptSyncClientError('Usage: snu attachment delete <sys_id> [--confirm] [--dry-run]', 'E_INVALID_PARAMS');
+        inputData.sys_id = positionals[0];
         break;
 
       case 'review result':

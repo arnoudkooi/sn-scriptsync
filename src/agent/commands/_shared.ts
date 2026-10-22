@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import { AgentContext } from '../types';
 import { AgentError, AgentErrorCode, inferCodeFromMessage } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
+import { retryAfterTokenRefresh } from '../backgroundScript';
 
 const eu = new ExtensionUtils();
 
@@ -99,63 +100,42 @@ function codeForRest(status: number | undefined, msg: string): AgentErrorCode {
  *
  * `sys.scripts.do` answers a bare "not authorized" when the posted `g_ck` no
  * longer matches the session (reads keep working, so the stored token can go
- * stale unnoticed). That is indistinguishable from a real permissions problem,
- * so on that exact output we ask the helper for an automatic token refresh
- * under its per-instance policy, then retry once before giving up.
+ * stale unnoticed). When the reply proves the script never ran and the
+ * session was refused (retryAfterTokenRefresh), we ask the helper for an
+ * automatic token refresh under its per-instance policy and run it once more.
+ * Anything short of that proof is never replayed, and the second attempt's
+ * own error (a timeout, say) is reported as itself, because that run may
+ * still be going.
  */
 export async function runBackgroundScript(ctx: AgentContext, instance: any, script: string): Promise<string> {
-	let output = '';
-	try {
-		output = await postBackgroundScript(ctx, instance, script);
-	} catch (e: any) {
-		if (e instanceof AgentError && (e.code === 'E_UNAUTHORIZED' || e.code === 'E_ACL' || e.message.toLowerCase().includes('not authorized'))) {
-			ctx.log('Agent API: sys.scripts.do reported unauthorized session — attempting token refresh');
-			const refreshed = await refreshSessionToken(ctx, instance);
-			if (refreshed) {
-				ctx.log('Agent API: refreshed session token, retrying background script');
-				try {
-					return await postBackgroundScript(ctx, refreshed, script);
-				} catch (retryErr: any) {
-					throw new AgentError(
-						'E_UNAUTHORIZED',
-						`ServiceNow rejected the background script ("not authorized") even after refreshing the session token. ` +
-						`Ensure you are logged into ${instance?.url || 'the instance'} in your browser as an administrator (with elevated 'security_admin' role if required), then run /token from the helper tab.`,
-						retryErr?.details,
-					);
-				}
-			}
-			throw new AgentError(
-				'E_UNAUTHORIZED',
-				`ServiceNow rejected the background script ("not authorized"). ` +
-				`Please open ${instance?.url || 'the instance'} in your browser, elevate roles to admin/security_admin, and run /token from the helper tab or SN Utils popup.`,
-				e?.details,
-			);
-		}
-		throw e;
-	}
+	const first = await postBackgroundScript(ctx, instance, script);
+	if (!retryAfterTokenRefresh(first)) return scriptOutputOf(first);
 
-	if (isNotAuthorized(output)) {
-		const refreshed = await refreshSessionToken(ctx, instance);
-		if (refreshed) {
-			ctx.log('Agent API: sys.scripts.do said "not authorized" — refreshed g_ck, retrying once');
-			output = await postBackgroundScript(ctx, refreshed, script);
-		}
-		if (isNotAuthorized(output)) {
-			throw new AgentError(
-				'E_UNAUTHORIZED',
-				`Instance rejected the background script ("not authorized")${refreshed ? ' even after a session-token refresh' : ' and the session token could not be refreshed'}. ` +
-				`Ensure you are logged in to ${instance?.url || 'the instance'} as admin (and elevated security_admin if required), then run /token.`,
-			);
-		}
+	ctx.log('Agent API: sys.scripts.do refused the session before running — attempting token refresh');
+	const refreshed = await refreshSessionToken(ctx, instance);
+	if (!refreshed) {
+		throw new AgentError(
+			'E_UNAUTHORIZED',
+			`ServiceNow rejected the background script ("not authorized") and the session token could not be refreshed. ` +
+			`Please open ${instance?.url || 'the instance'} in your browser, elevate roles to admin/security_admin, and run /token from the helper tab or SN Utils popup.`,
+			first?.details,
+		);
 	}
-	return output;
+	ctx.log('Agent API: refreshed session token, retrying background script once');
+	const second = await postBackgroundScript(ctx, refreshed, script);
+	if (retryAfterTokenRefresh(second)) {
+		throw new AgentError(
+			'E_UNAUTHORIZED',
+			`ServiceNow rejected the background script ("not authorized") even after refreshing the session token. ` +
+			`Ensure you are logged into ${instance?.url || 'the instance'} in your browser as an administrator (with elevated 'security_admin' role if required), then run /token from the helper tab.`,
+			second?.details,
+		);
+	}
+	return scriptOutputOf(second);
 }
 
-function isNotAuthorized(output: string): boolean {
-	return output.trim().toLowerCase() === 'not authorized';
-}
-
-async function postBackgroundScript(ctx: AgentContext, instance: any, script: string): Promise<string> {
+/** The helper's raw reply. Transport failures (timeout, disconnect) reject with their own code. */
+async function postBackgroundScript(ctx: AgentContext, instance: any, script: string): Promise<any> {
 	const correlationId = nextCorrelationId(ctx);
 	const pending = ctx.waitForBrowserResponse<any>(correlationId);
 	ctx.sendToBrowser({
@@ -165,7 +145,10 @@ async function postBackgroundScript(ctx: AgentContext, instance: any, script: st
 		instance,
 		appName: 'VS Code',
 	});
-	const response = await pending;
+	return pending;
+}
+
+function scriptOutputOf(response: any): string {
 	if (!response || response.success === false) {
 		const msg: string = response?.error || 'Background script failed';
 		const code: AgentErrorCode = response?.code || inferCodeFromMessage(msg);

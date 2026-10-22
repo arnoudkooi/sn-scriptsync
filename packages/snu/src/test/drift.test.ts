@@ -44,6 +44,8 @@ const BRIDGE_COMMANDS = new Set([
   'activate_tab',
   'switch_context',
   'upload_attachment',
+  'download_attachment',
+  'delete_attachment',
   'set_field',
   'get_form_state',
   'run_ui_action',

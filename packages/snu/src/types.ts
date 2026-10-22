@@ -42,6 +42,10 @@ export interface HelperCapabilities {
   sdkPull?: 1;
   /** The helper tab runs create_records / update_records (agentRecordBatch). */
   recordBatch?: 1;
+  /** The helper tab answers agentDownloadAttachment with bounded bytes. */
+  attachmentDownload?: 1;
+  /** Background script refusals carry details.notStarted. */
+  scriptNotStarted?: 1;
 }
 
 export interface InstanceGateSnapshot {

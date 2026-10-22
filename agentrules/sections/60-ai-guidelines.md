@@ -16,6 +16,12 @@
 
 ---
 
+### Keep binary files and large results out of your context
+
+Use file-based input and output for binary files and large datasets: `download_attachment` writes an attachment to a workspace file and returns only its path and metadata, and `upload_attachment` takes a `filePath`. Choose the CLI (`snu`) for local processing, pipelines and output redirection; choose the MCP tools or Agent API for structured tool interaction. Never print file bytes as base64 through `run_background_script` or `rest_request` to move them.
+
+---
+
 ### ⚠️ Transaction Scope for Create/Update Operations
 
 **When performing ANY create or update operation**, the request URL MUST include the transaction scope parameter:

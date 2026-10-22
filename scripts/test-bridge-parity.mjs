@@ -15,13 +15,16 @@ const { browserCommands } = require('../out/agent/commands/browser.js');
 const { searchCommands } = require('../out/agent/commands/search.js');
 const { bulkCommands } = require('../out/agent/commands/bulk.js');
 const { profileCommands } = require('../out/agent/commands/profile.js');
+const { attachmentCommands } = require('../out/agent/commands/attachments.js');
+const { backgroundCommands } = require('../out/agent/commands/background.js');
+const crypto = require('node:crypto');
 const editorPolicy = require('../out/agent/policy.js');
 const standalonePolicy = require('../packages/snu/dist/server/policy.js');
 const { StandaloneDispatcher } = require('../packages/snu/dist/server/dispatcher.js');
 const { StandaloneWsBridge } = require('../packages/snu/dist/server/wsBridge.js');
 const { PendingRegistry } = require('../packages/snu/dist/server/pendingRegistry.js');
 const sysId = '0123456789abcdef0123456789abcdef';
-const handlers = [...recordsCommands, ...browserCommands, ...searchCommands, ...bulkCommands, ...profileCommands];
+const handlers = [...recordsCommands, ...browserCommands, ...searchCommands, ...bulkCommands, ...profileCommands, ...attachmentCommands, ...backgroundCommands];
 
 test('shared hosts produce compatible helper requests, results and policies', async t => {
   t.after(() => harness.cleanup());
@@ -40,7 +43,7 @@ test('shared hosts produce compatible helper requests, results and policies', as
     pending.resolve(message.agentRequestId, reply);
   };
   const dispatcher = new StandaloneDispatcher({ cwd: harness.workspaceRoot, wsBridge: bridge, pending,
-    cliFlags: { updateRecords: true, createArtifacts: true } });
+    cliFlags: { updateRecords: true, createArtifacts: true, backgroundScripts: true, deleteRecords: true } });
   // Correlation, session and host labels differ; the helper's operation must not.
   const operation = ({ agentRequestId, instance, appName, ...message }) => JSON.parse(JSON.stringify(message));
   const compare = async (command, params, response) => {
@@ -156,5 +159,55 @@ test('shared hosts produce compatible helper requests, results and policies', as
   await t.test('file input validation cannot drift between hosts', () => {
     assert.equal(fs.readFileSync(path.join(root, 'src/agent/attachmentInput.ts'), 'utf8'),
       fs.readFileSync(path.join(root, 'packages/snu/src/server/attachmentInput.ts'), 'utf8'));
+  });
+  await t.test('file output, script results and their vectors cannot drift between hosts', () => {
+    for (const file of ['attachmentOutput.ts', 'backgroundScript.ts', 'backgroundScriptVectors.ts']) {
+      assert.equal(fs.readFileSync(path.join(root, 'src/agent', file), 'utf8'),
+        fs.readFileSync(path.join(root, 'packages/snu/src/server', file), 'utf8'), file);
+    }
+  });
+  await t.test('background scripts: same helper request and the same structured result', () => compare('run_background_script',
+    { script: 'gs.print("hi")' },
+    { success: true, output: "Script execution history <A HREF='sys_script_execution_history.do?sys_id=47eea1d697485f14c3e2fc90f053af06'>x</A><PRE>*** Script: hi<BR/>[CacheFlushLog] x<BR/></PRE>" }));
+  await t.test('attachment download: same helper request, same file, same result', async () => {
+    const bytes = crypto.randomBytes(2048);
+    const downloadReply = { success: true, sysId, fileName: 'lineup.png', contentType: 'image/png', tableName: 'sc_cat_item', tableSysId: sysId,
+      sizeBytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), dataBase64: bytes.toString('base64') };
+    const getHelperState = bridge.getHelperState;
+    bridge.getHelperState = () => ({ ...getHelperState(), capabilities: { ...getHelperState().capabilities, attachmentDownload: 1 } });
+    const params = { sys_id: sysId, overwrite: true };
+    reply = downloadReply;
+    const standalone = await dispatcher.dispatch({ id: 'download_attachment', command: 'download_attachment', params, instance: 'testinst' });
+    bridge.getHelperState = getHelperState;
+    assert.equal(standalone.status, 'success', standalone.error);
+    harness.reply(downloadReply);
+    const editor = await handlers.find(handler => handler.name === 'download_attachment')
+      .handle(harness.context({ getHelperBuildInfo: () => ({ capabilities: { attachmentDownload: 1 } }) }), params);
+    assert.deepEqual(operation(sent.at(-1)), operation(harness.sent.at(-1)));
+    assert.deepEqual(standalone.result, editor);
+    assert.deepEqual(fs.readFileSync(editor.filePath), bytes);
+  });
+  await t.test('attachment delete: same reads and delete, same result', async () => {
+    const meta = { success: true, status: 200, data: { result: { sys_id: sysId, file_name: 'a.png', table_name: 'incident', table_sys_id: sysId, size_bytes: '10' } } };
+    for (const params of [{ sys_id: sysId, dryRun: true }, { sys_id: sysId }]) {
+      const before = sent.length;
+      reply = meta;
+      const standalone = await dispatcher.dispatch({ id: 'delete_attachment', command: 'delete_attachment', params, instance: 'testinst' });
+      assert.equal(standalone.status, 'success', standalone.error);
+      const editorBefore = harness.sent.length;
+      harness.reply(meta);
+      if (!params.dryRun) harness.reply(meta);
+      const editor = await handlers.find(handler => handler.name === 'delete_attachment').handle(harness.context(), params);
+      assert.deepEqual(sent.slice(before).map(operation), harness.sent.slice(editorBefore).map(operation));
+      assert.deepEqual(standalone.result, editor);
+    }
+  });
+  await t.test('attachment and script commands use the same permission policies', () => {
+    for (const request of [
+      { command: 'download_attachment' }, { command: 'delete_attachment' }, { command: 'delete_attachment', params: { dryRun: true } },
+      { command: 'run_background_script' },
+    ]) {
+      assert.deepEqual(standalonePolicy.getCommandPolicy(request), editorPolicy.getCommandPolicy(request));
+    }
   });
 });

@@ -29,6 +29,13 @@ export type AgentErrorCode =
 	| 'E_MULTIPLE_MATCHES'
 	| 'E_STALE_REVIEW'
 	| 'E_UNSUPPORTED_HOST'
+	// The connected helper tab lacks a capability the command needs.
+	| 'E_UNSUPPORTED_HELPER'
+	// Attachment downloads (attachmentOutput.ts).
+	| 'E_TOO_LARGE'
+	| 'E_TRANSFER_MISMATCH'
+	| 'E_FILE_EXISTS'
+	| 'E_ATOMIC_PUBLISH_UNSUPPORTED'
 	| 'E_RECORD_NOT_SAVED'
 	| 'E_FILE_OUTSIDE_WORKSPACE'
 	| 'E_COMMAND_FAILED'
@@ -75,9 +82,16 @@ export function httpStatusForCode(code?: string): number {
 		case 'E_REFERENCE_INTEGRITY':
 		case 'E_DEBUGGER_BUSY':
 		case 'E_REPLAY_DETECTED':
+		case 'E_FILE_EXISTS':
 			return 409;
+		case 'E_TOO_LARGE':
+			return 413;
 		case 'E_CDP_UNAVAILABLE':
+		case 'E_UNSUPPORTED_HELPER':
+		case 'E_ATOMIC_PUBLISH_UNSUPPORTED':
 			return 501;
+		case 'E_TRANSFER_MISMATCH':
+			return 502;
 		case 'E_INSTANCE_REQUIRED':
 		case 'E_INSTANCE_NOT_FOUND':
 			return 422;

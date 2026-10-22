@@ -67,3 +67,31 @@ test('an instance without a URL is never refreshed with a wildcard', async () =>
 	await assert.rejects(runBackgroundScript(refreshingContext(), { ...instance, url: '' }, 'gs.info("test");'), { code: 'E_UNAUTHORIZED' });
 	assert.deepEqual(harness.sent.map(message => message.action), ['agentRunBackgroundScript']);
 });
+
+test('a second attempt that times out stays E_TIMEOUT: that run may still be going', async () => {
+	harness.reply({ success: false, code: 'E_UNAUTHORIZED', error: 'not authorized', details: { notStarted: true } });
+	harness.reply({ success: true });
+	harness.replyWithError(Object.assign(new Error('Timed out waiting for browser response'), { code: 'E_TIMEOUT' }));
+	await assert.rejects(runBackgroundScript(refreshingContext(), instance, 'gs.info("test");'), { code: 'E_TIMEOUT' });
+	assert.equal(harness.sent.filter(message => message.action === 'agentRunBackgroundScript').length, 2);
+});
+
+test('a second attempt that fails for another reason keeps its own code', async () => {
+	harness.reply({ success: true, output: 'not authorized' });
+	harness.reply({ success: true });
+	harness.reply({ success: false, code: 'E_INTERNAL', error: 'Script failed' });
+	await assert.rejects(runBackgroundScript(refreshingContext(), instance, 'gs.info("test");'), { code: 'E_INTERNAL' });
+});
+
+for (const unproven of [
+	{ success: false, code: 'E_ACL', error: 'User not authorized' },
+	{ success: false, error: 'request not authorized by proxy' },
+	{ success: false, code: 'E_DISABLED', error: 'Blocked', details: { notStarted: true } },
+	{ success: false, code: 'E_UNAUTHORIZED', error: 'not authorized', details: { notStarted: false } },
+]) {
+	test(`no proof the script never ran (${unproven.code || 'message only'}${unproven.details ? ', notStarted ' + unproven.details.notStarted : ''}): never replayed`, async () => {
+		harness.reply(unproven);
+		await assert.rejects(runBackgroundScript(refreshingContext(), instance, 'gs.info("test");'));
+		assert.deepEqual(harness.sent.map(message => message.action), ['agentRunBackgroundScript']);
+	});
+}

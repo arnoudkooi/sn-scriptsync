@@ -64,6 +64,18 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
     case 'delete_application':
       return { risk: 'delete', gates: ['deleteRecords', 'backgroundScripts'], review: 'required', reviewKind: 'bulk_delete' };
 
+    // Removes a sys_attachment row and its stored content through the
+    // Attachment API: a delete like delete_record, with the same review. A
+    // dryRun only reads the attachment, so it is not reviewed.
+    case 'delete_attachment':
+      return req.params?.dryRun === true
+        ? { risk: 'delete', gates: ['deleteRecords'], review: 'never', preflight: true }
+        : { risk: 'delete', gates: ['deleteRecords'], review: 'required', reviewKind: 'record_delete' };
+
+    // Writes the attachment to a local workspace file only, like pull_records.
+    case 'download_attachment':
+      return { risk: 'read', gates: [], review: 'never' };
+
     case 'rest_request': {
       const method = (req.params?.method || 'GET').toUpperCase();
       if (method === 'DELETE') {

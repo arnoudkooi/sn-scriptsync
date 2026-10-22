@@ -157,7 +157,12 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v28 -> v29: browser-debug skill: "Verify a change end to end" loop
 //               (Pro / Trial): sync, capture, reproduce, read the form, stop,
 //               screenshot, report evidence; free fallback stated explicitly.
-const INSTRUCTIONS_VERSION = 29;
+//   v29 -> v30: download_attachment / delete_attachment; run_background_script
+//               returns stdout, warnings, errors, logLines, executionId and
+//               status next to the raw output, and is only retried after a
+//               token refresh when the reply proves it never ran; guideline to
+//               keep binary files and large results out of model context.
+const INSTRUCTIONS_VERSION = 30;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -175,7 +180,7 @@ const COMMAND_GROUPS: Array<{ label: string; cmds: string[] }> = [
 	{ label: 'Queries', cmds: ['query_records', 'get_parent_options', 'code_search'] },
 	{ label: 'Escape hatches', cmds: ['rest_request', 'run_background_script'] },
 	{ label: 'File-system helpers', cmds: ['list_tables', 'list_artifacts', 'check_name_exists', 'get_file_structure', 'validate_path'] },
-	{ label: 'Browser helpers', cmds: ['open_in_browser', 'get_served_url', 'refresh_preview', 'take_screenshot', 'navigate_and_screenshot', 'run_slash_command', 'activate_tab', 'switch_context', 'upload_attachment'] },
+	{ label: 'Browser helpers', cmds: ['open_in_browser', 'get_served_url', 'refresh_preview', 'take_screenshot', 'navigate_and_screenshot', 'run_slash_command', 'activate_tab', 'switch_context', 'upload_attachment', 'download_attachment', 'delete_attachment'] },
 	{ label: 'Live form / page (g_form bridge)', cmds: ['navigate', 'set_field', 'get_form_state', 'run_ui_action', 'click_element'] },
 	{ label: 'Browser debugger (CDP · Pro)', cmds: ['start_network_capture', 'stop_network_capture', 'start_console_capture', 'stop_console_capture', 'capture_full_page', 'set_dialog_handler', 'clear_dialog_handler', 'debugger_detach'] },
 ];

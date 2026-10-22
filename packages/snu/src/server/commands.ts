@@ -7,6 +7,7 @@ export const STANDALONE_COMMANDS = [
   'create_record', 'delete_record', 'get_table_metadata', 'pull_records',
   'pull_artifacts', 'pull_scope', 'code_search', 'run_background_script',
   'rest_request', 'get_form_state', 'set_field', 'run_ui_action', 'navigate',
-  'take_screenshot', 'switch_context', 'upload_attachment', 'sdk_deploy',
+  'take_screenshot', 'switch_context', 'upload_attachment', 'download_attachment',
+  'delete_attachment', 'sdk_deploy',
   'sdk_pull', 'create_records', 'update_records', 'get_batch_result', 'analyze_artifact_type', 'yield',
 ] as const;
