@@ -36,6 +36,9 @@ export type AgentErrorCode =
 	| 'E_TRANSFER_MISMATCH'
 	| 'E_FILE_EXISTS'
 	| 'E_ATOMIC_PUBLISH_UNSUPPORTED'
+	// query_records validation (queryValidation.ts).
+	| 'E_INVALID_QUERY'
+	| 'E_QUERY_UNVERIFIABLE'
 	| 'E_RECORD_NOT_SAVED'
 	| 'E_FILE_OUTSIDE_WORKSPACE'
 	| 'E_COMMAND_FAILED'
@@ -66,7 +69,10 @@ export function httpStatusForCode(code?: string): number {
 		case 'E_INVALID_REQUEST':
 		case 'E_CONFIRM_REQUIRED':
 		case 'E_MULTIPLE_MATCHES':
+		case 'E_INVALID_QUERY':
 			return 400;
+		case 'E_QUERY_UNVERIFIABLE':
+			return 422;
 		case 'E_UNAUTHORIZED':
 		case 'E_SECURITY':
 			return 401;

@@ -112,7 +112,7 @@ test('Standalone: query uses the most recently authenticated /token instance', a
     const response = await dispatcher.dispatch({
       id: 'query_live_instance',
       command: 'query_records',
-      params: { table: 'incident', query: 'active=true', limit: 1 },
+      params: { table: 'incident', query: 'active=true', limit: 1, validate: false },
     });
 
     assert.strictEqual(response.status, 'success');

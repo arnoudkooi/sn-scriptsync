@@ -21,6 +21,7 @@ import { ReviewRegistry } from './reviewRegistry.js';
 import { resolveAttachment } from './attachmentInput.js';
 import { checkDownloadTarget, DownloadRequest, resolveDownloadTarget, saveDownloadedAttachment, validateDownloadParams } from './attachmentOutput.js';
 import { retryAfterTokenRefresh, scriptResult } from './backgroundScript.js';
+import { columnsFromMeta, createSchemaCache, queryValidationError, validateQuery } from './queryValidation.js';
 import { parseFieldValues } from '../fieldInput.js';
 import { analyzeArtifactType, currentFingerprint, profileFileName, profileStillFresh, validateProfileParams, ProfileIO } from './artifactProfile.js';
 import { ANSWER_GRACE_MS, batchMessage, batchResult, bulkMode, dryRunResult, expectedFor, lostAnswer, prepareBulk, requireBatchId } from './bulkCommands.js';
@@ -254,6 +255,7 @@ export class StandaloneDispatcher {
   private config: StandaloneConfig;
   private pendingReviewRequests = new Map<string, string>(); // correlationId/requestId -> reviewId
   private reviews = new ReviewRegistry();
+  private schemaCaches = new Map<string, ReturnType<typeof createSchemaCache>>(); // instance URL -> column cache
   /** Pause before the single retry after E_SCREENSHOT_PERMISSION; tests shorten it. */
   screenshotRetryDelayMs = 10_000;
   private requestIdToCorrelationId = new Map<string, string>(); // requestId -> correlationId
@@ -773,6 +775,24 @@ export class StandaloneDispatcher {
       if (fresh?.g_ck && fresh.g_ck !== oldCk) return fresh;
     }
     return null;
+  }
+
+  /** Column lookup for query validation, cached per instance URL (see createSchemaCache). */
+  private schemaLookup(inst: { settings: any }) {
+    const url = String(inst.settings?.url || '');
+    let cache = this.schemaCaches.get(url);
+    if (!cache) this.schemaCaches.set(url, cache = createSchemaCache());
+    const fetchColumns = async (table: string) => {
+      const correlationId = crypto.randomUUID();
+      const pendingPromise = this.pending.register({ id: correlationId, command: 'query_validation', timeoutMs: 70_000 });
+      this.ws.sendToBrowser({
+        action: 'agentRestApi', agentRequestId: correlationId, endpoint: `/api/now/ui/meta/${table}`, method: 'GET',
+        instance: inst.settings, appName: 'SN Utils CLI',
+      });
+      const res = await pendingPromise;
+      return res?.success === false ? null : columnsFromMeta(res?.data);
+    };
+    return (table: string) => cache!(table, fetchColumns);
   }
 
   private async restGet(inst: { settings: any }, reqCommand: string, endpoint: string, queryParams: Record<string, string>, withPagination = false): Promise<any> {
@@ -1765,6 +1785,12 @@ export class StandaloneDispatcher {
         const fields = req.params?.fields || 'sys_id,number,short_description,sys_created_on';
         const limit = req.params?.limit ?? 10;
         const orderBy = req.params?.orderBy;
+        // Only caller-supplied fields are checked: the default list is a
+        // convenience for task tables, not something the caller asked for.
+        if (req.params?.validate !== false) {
+          const invalid = queryValidationError(await validateQuery(table, { query, fields: req.params?.fields, orderBy }, this.schemaLookup(inst)));
+          if (invalid) throw Object.assign(new Error(invalid.message), { code: invalid.code, details: invalid.details });
+        }
 
         let sysparmQuery = query;
         if (orderBy) {

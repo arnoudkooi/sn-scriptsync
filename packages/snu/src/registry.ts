@@ -138,13 +138,14 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: 'snu_query_records',
     agentCommand: 'query_records',
-    description: 'Query records from any ServiceNow table with an encoded query string, projection fields, and limit.',
+    description: 'Query records from any ServiceNow table with an encoded query string, projection fields, and limit. Every field path in query, fields and orderBy is checked against the table schema first (values are not judged): a path that does not exist fails with E_INVALID_QUERY, one that cannot be checked with E_QUERY_UNVERIFIABLE, and the query is not run, because ServiceNow would ignore the condition and return unfiltered rows. Pass validate: false to skip the check.',
     cliCommand: 'query',
-    cliUsage: 'snu query <table> [query] [--fields <f1,f2>] [--limit <n>] [--order-by <field>] [--instance <i>] [--json]',
+    cliUsage: 'snu query <table> [query] [--fields <f1,f2>] [--limit <n>] [--order-by <field>] [--no-validate] [--instance <i>] [--json]',
     cliOptions: {
       fields: { type: 'string', short: 'f', description: 'Fields to project (default: sys_id,number,short_description,sys_created_on)' },
       limit: { type: 'string', short: 'l', description: 'Max records to return (default: 10)' },
       'order-by': { type: 'string', short: 'o', description: 'Order by field expression' },
+      'no-validate': { type: 'boolean', description: 'Run the query without checking its field paths' },
     },
     inputSchema: {
       type: 'object',
@@ -154,6 +155,7 @@ export const TOOLS: ToolDefinition[] = [
         fields: { type: 'string', description: 'Comma-separated field list to project' },
         limit: { type: 'integer', minimum: 1, maximum: 500, default: 10, description: 'Max records to return' },
         orderBy: { type: 'string', description: 'Order by field expression (e.g. sys_created_on or ORDERBYDESCsys_created_on)' },
+        validate: { type: 'boolean', description: 'false runs the query without checking its field paths (default true)' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['table'],
@@ -165,9 +167,12 @@ export const TOOLS: ToolDefinition[] = [
       params: {
         table: input.table,
         query: input.query || '',
-        fields: input.fields || 'sys_id,number,short_description,sys_created_on',
+        // Left out when not given: the bridge applies its default list, and
+        // only fields the caller asked for are validated.
+        fields: input.fields || undefined,
         limit: typeof input.limit === 'number' ? input.limit : input.limit ? parseInt(input.limit, 10) : 10,
         orderBy: formatOrderBy(input.orderBy || input['order-by']),
+        ...(input.validate === false || input['no-validate'] === true ? { validate: false } : {}),
       },
     }),
   },

@@ -161,7 +161,9 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               returns stdout, warnings, errors, logLines, executionId and
 //               status next to the raw output, and is only retried after a
 //               token refresh when the reply proves it never ran; guideline to
-//               keep binary files and large results out of model context.
+//               keep binary files and large results out of model context;
+//               query_records checks field paths first (E_INVALID_QUERY,
+//               E_QUERY_UNVERIFIABLE, validate:false).
 const INSTRUCTIONS_VERSION = 30;
 
 // Marker that identifies a file as an extension-managed skill. The extension

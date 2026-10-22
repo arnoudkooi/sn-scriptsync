@@ -104,9 +104,13 @@ test('Adapter: snu_query_records handles ORDERBY formatting and defaults', () =>
   const m1 = tool.mapInput({ table: 'incident' });
   assert.strictEqual(m1.command, 'query_records');
   assert.strictEqual(m1.params.table, 'incident');
-  assert.strictEqual(m1.params.fields, 'sys_id,number,short_description,sys_created_on');
+  // The bridge applies the default field list; only caller-supplied fields are validated.
+  assert.strictEqual(m1.params.fields, undefined);
   assert.strictEqual(m1.params.limit, 10);
   assert.strictEqual(m1.params.orderBy, undefined);
+  assert.strictEqual('validate' in m1.params, false);
+  assert.strictEqual(tool.mapInput({ table: 'incident', validate: false }).params.validate, false);
+  assert.strictEqual(tool.mapInput({ table: 'incident', 'no-validate': true }).params.validate, false);
 
   // Prefixes ORDERBY when missing
   const m2 = tool.mapInput({ table: 'incident', orderBy: 'sys_created_on' });

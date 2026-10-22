@@ -17,6 +17,8 @@ const { bulkCommands } = require('../out/agent/commands/bulk.js');
 const { profileCommands } = require('../out/agent/commands/profile.js');
 const { attachmentCommands } = require('../out/agent/commands/attachments.js');
 const { backgroundCommands } = require('../out/agent/commands/background.js');
+const { queryCommands } = require('../out/agent/commands/query.js');
+const { VECTOR_SCHEMA } = require('../out/agent/queryValidationVectors.js');
 const crypto = require('node:crypto');
 const editorPolicy = require('../out/agent/policy.js');
 const standalonePolicy = require('../packages/snu/dist/server/policy.js');
@@ -24,7 +26,7 @@ const { StandaloneDispatcher } = require('../packages/snu/dist/server/dispatcher
 const { StandaloneWsBridge } = require('../packages/snu/dist/server/wsBridge.js');
 const { PendingRegistry } = require('../packages/snu/dist/server/pendingRegistry.js');
 const sysId = '0123456789abcdef0123456789abcdef';
-const handlers = [...recordsCommands, ...browserCommands, ...searchCommands, ...bulkCommands, ...profileCommands, ...attachmentCommands, ...backgroundCommands];
+const handlers = [...recordsCommands, ...browserCommands, ...searchCommands, ...bulkCommands, ...profileCommands, ...attachmentCommands, ...backgroundCommands, ...queryCommands];
 
 test('shared hosts produce compatible helper requests, results and policies', async t => {
   t.after(() => harness.cleanup());
@@ -161,7 +163,7 @@ test('shared hosts produce compatible helper requests, results and policies', as
       fs.readFileSync(path.join(root, 'packages/snu/src/server/attachmentInput.ts'), 'utf8'));
   });
   await t.test('file output, script results and their vectors cannot drift between hosts', () => {
-    for (const file of ['attachmentOutput.ts', 'backgroundScript.ts', 'backgroundScriptVectors.ts']) {
+    for (const file of ['attachmentOutput.ts', 'backgroundScript.ts', 'backgroundScriptVectors.ts', 'queryValidation.ts', 'queryValidationVectors.ts']) {
       assert.equal(fs.readFileSync(path.join(root, 'src/agent', file), 'utf8'),
         fs.readFileSync(path.join(root, 'packages/snu/src/server', file), 'utf8'), file);
     }
@@ -201,6 +203,45 @@ test('shared hosts produce compatible helper requests, results and policies', as
       assert.deepEqual(sent.slice(before).map(operation), harness.sent.slice(editorBefore).map(operation));
       assert.deepEqual(standalone.result, editor);
     }
+  });
+  await t.test('query validation: same schema reads, same result or the same error on both hosts', async () => {
+    const answerMeta = (endpoint) => {
+      const table = endpoint.split('/').pop();
+      const columns = VECTOR_SCHEMA[table];
+      return columns === null ? { success: false, status: 403, error: 'ACL' } : { success: true, status: 200, data: { result: { columns: columns || {} } } };
+    };
+    const run = async (params) => {
+      const standaloneReads = [];
+      const sendStandalone = bridge.sendToBrowser;
+      bridge.sendToBrowser = message => {
+        standaloneReads.push(message.endpoint);
+        pending.resolve(message.agentRequestId, message.endpoint.startsWith('/api/now/ui/meta/')
+          ? answerMeta(message.endpoint) : { success: true, status: 200, data: { result: [{ sys_id: sysId }] } });
+      };
+      const standalone = await dispatcher.dispatch({ id: 'query_records', command: 'query_records', params, instance: 'testinst' });
+      bridge.sendToBrowser = sendStandalone;
+      const editorReads = [];
+      const editorContext = harness.context({
+        sendToBrowser: m => { editorReads.push(m.endpoint || m.action); },
+        waitForBrowserResponse: () => new Promise(resolve => setImmediate(() => {
+          const last = editorReads.at(-1);
+          resolve(last === 'agentQueryRecords' ? { success: true, tableName: params.table, count: 1, records: [{ sys_id: sysId }] } : answerMeta(last));
+        })),
+      });
+      let editor, editorError;
+      try { editor = await queryCommands.find(c => c.name === 'query_records').handle(editorContext, params); } catch (error) { editorError = error; }
+      const meta = list => list.filter(e => String(e).startsWith('/api/now/ui/meta/'));
+      assert.deepEqual(meta(standaloneReads), meta(editorReads));
+      return { standalone, editor, editorError };
+    };
+    const ok = await run({ table: 'question_choice', query: 'question.ref_item_option_new.cat_item=y^ORDERBYorder', fields: 'text,question.question_text' });
+    assert.equal(ok.standalone.status, 'success', ok.standalone.error);
+    assert.deepEqual(ok.standalone.result, ok.editor);
+    const bad = await run({ table: 'question_choice', query: 'question.cat_item=x', fields: 'text' });
+    assert.equal(bad.standalone.code, 'E_INVALID_QUERY');
+    assert.equal(bad.editorError.code, 'E_INVALID_QUERY');
+    assert.equal(bad.standalone.error, bad.editorError.message);
+    assert.deepEqual(bad.standalone.details, bad.editorError.details);
   });
   await t.test('attachment and script commands use the same permission policies', () => {
     for (const request of [

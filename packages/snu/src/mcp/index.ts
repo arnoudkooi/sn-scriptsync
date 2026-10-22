@@ -230,13 +230,14 @@ export async function createMcpServer(): Promise<McpServer> {
   // 4. Query Records
   server.tool(
     'snu_query_records',
-    'Query records from any ServiceNow table with an encoded query string, projection fields, and limit.',
+    getToolByName('snu_query_records')!.description,
     {
       table: z.string().describe('Table name to query'),
       query: z.string().optional().describe('ServiceNow encoded query string (e.g. active=true^priority=1)'),
       fields: z.string().optional().describe('Comma-separated field list to project'),
       limit: z.number().int().min(1).max(500).default(10).optional().describe('Max records to return'),
       orderBy: z.string().optional().describe('Order by field expression (e.g. sys_created_on or ORDERBYDESCsys_created_on)'),
+      validate: z.boolean().optional().describe('false runs the query without checking its field paths (default true)'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_query_records', args)

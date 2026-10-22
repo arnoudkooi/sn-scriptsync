@@ -56,7 +56,7 @@ test('query_records: asks for raw values, like the VS Code host', async () => {
     const response = await dispatcher.dispatch({
       id: 'q_raw',
       command: 'query_records',
-      params: { table: 'incident', query: 'active=true', fields: 'sys_id,state,sys_created_on', limit: 5 },
+      params: { table: 'incident', query: 'active=true', fields: 'sys_id,state,sys_created_on', limit: 5, validate: false },
     });
     assert.strictEqual(response.status, 'success');
     assert.strictEqual(seen.queryParams.sysparm_display_value, undefined, 'no display values (time zone and labels would differ from VS Code)');

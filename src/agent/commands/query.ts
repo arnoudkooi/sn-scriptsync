@@ -2,6 +2,8 @@ import * as path from 'path';
 import { CommandHandler } from '../types';
 import { AgentError } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
+import { columnsFromMeta, createSchemaCache, queryValidationError, validateQuery } from '../queryValidation';
+import { restRequest } from './_shared';
 
 const eu = new ExtensionUtils();
 
@@ -13,11 +15,24 @@ function mustGetInstanceSettings(instanceFolder: string) {
 	return s;
 }
 
+// One column cache per instance URL; entries outlive the request that read them.
+const schemaCaches = new Map<string, ReturnType<typeof createSchemaCache>>();
+
+function schemaLookup(ctx: any, instanceSettings: any) {
+	let cache = schemaCaches.get(instanceSettings.url);
+	if (!cache) schemaCaches.set(instanceSettings.url, cache = createSchemaCache());
+	const fetchColumns = async (table: string) => {
+		const { data } = await restRequest(ctx, instanceSettings, { endpoint: `/api/now/ui/meta/${table}`, method: 'GET' });
+		return columnsFromMeta(data);
+	};
+	return (table: string) => cache!(table, fetchColumns);
+}
+
 const query_records: CommandHandler = {
 	name: 'query_records',
 	requiresBrowser: true,
 	docs: {
-		summary: 'Run an arbitrary encoded query against any table and return matching records.',
+		summary: 'Run an arbitrary encoded query against any table and return matching records. Every field path in query, fields and orderBy is checked against the table schema first (values are not judged): a path that does not exist fails with E_INVALID_QUERY, one that cannot be checked with E_QUERY_UNVERIFIABLE, and the query is not run. ServiceNow would otherwise ignore the condition and return unfiltered rows. Pass validate:false to skip the check.',
 		request: {
 			command: 'query_records',
 			id: 'q_1',
@@ -34,6 +49,12 @@ const query_records: CommandHandler = {
 		if (!table) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: table');
 
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
+		// Only caller-supplied fields are checked: the default list is a
+		// convenience for task tables, not something the caller asked for.
+		if (params?.validate !== false) {
+			const invalid = queryValidationError(await validateQuery(table, { query: encodedQuery, fields: params?.fields, orderBy }, schemaLookup(ctx, instanceSettings)));
+			if (invalid) throw new AgentError(invalid.code, invalid.message, invalid.details);
+		}
 
 		let queryString = `sysparm_fields=${fields}&sysparm_limit=${limit}`;
 		if (encodedQuery) queryString += `&sysparm_query=${encodedQuery}`;

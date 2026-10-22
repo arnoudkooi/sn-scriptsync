@@ -18,7 +18,10 @@ export function httpStatusForCode(code?: string): number {
     case 'E_INVALID_REQUEST':
     case 'E_CONFIRM_REQUIRED':
     case 'E_MULTIPLE_MATCHES':
+    case 'E_INVALID_QUERY':
       return 400;
+    case 'E_QUERY_UNVERIFIABLE':
+      return 422;
     case 'E_UNAUTHORIZED':
     case 'E_SECURITY':
       return 401;

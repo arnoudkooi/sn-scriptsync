@@ -22,6 +22,11 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
 - `fields` (optional): Comma-separated field names (default: `sys_id,number,short_description,sys_created_on`)
 - `limit` (optional): Max records to return (default: 10)
 - `orderBy` (optional): Order clause (e.g., `ORDERBYDESCsys_created_on`)
+- `validate` (optional, default `true`): `false` runs the query without checking its field paths.
+
+**Field paths are checked before the query runs.** ServiceNow silently ignores a condition on a field that does not exist and returns unfiltered rows, so every path in `query`, `fields` (when you pass it) and `orderBy` is checked hop by hop against the table schema, including dot-walks and the field inside `ORDERBY`, `DYNAMIC`, `OR`/`NQ` branches. Values are not judged: `javascript:gs.beginningOfToday()` is fine once its field exists. Keyword search (`123TEXTQUERY321`) and related-list blocks are supported.
+- `E_INVALID_QUERY` — a path does not exist (e.g. `question.cat_item` on `question_choice`: `question` has no `cat_item`; use `question.ref_item_option_new.cat_item`), or a non-reference field is dot-walked. `details.problems` lists each one with the failing `hop` and `table`. The query was not run: fix the path.
+- `E_QUERY_UNVERIFIABLE` — a path could not be checked (the table's columns could not be read, or an operator was not recognised). The query was not run. Pass `validate: false` only when you are sure the query is right, for example a field your session cannot see the definition of.
 
 **Response:**
 ```json
