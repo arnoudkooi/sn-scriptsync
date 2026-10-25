@@ -3,7 +3,7 @@ name: snu-browser-debug
 description: "Drive the connected ServiceNow tab through the Chrome DevTools Protocol (Pro): capture network requests + response bodies, capture console output and uncaught exceptions, take full-page/element screenshots beyond the viewport, and auto-handle (and record) native confirm/alert/prompt/beforeunload dialogs. Read this when you need network bodies, console errors, a whole-page screenshot, or dialog text — capabilities the normal content-script bridge cannot provide. Also holds the \"Verify a change end to end\" loop to run after any write that changes browser behaviour (Pro / Trial). Note the unavoidable Chrome debugger banner and the Pro requirement."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=30 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=31 -->
 
 # SN ScriptSync — Browser Debugger (CDP)
 
@@ -109,7 +109,8 @@ verify an observable effect of the changed code before declaring success.
 ```
 sync_now                      (only for the intended pending writes; never bypass review)
 get_sync_status               (wait until the changed files are no longer pending or syncing)
-get_record                    (confirm the expected field reached this instance; sync_now's synced:true only means sent)
+get_record                    (only if the save is not already verified; skip after successful verified:true with matching persisted content)
+                              (sync_now's synced:true only means sent, so file sync still needs a content check)
                               (for a NOW SDK app, use sdk_deploy and wait for its final install result instead)
 get_capabilities              (cdp.available must be true for capture; otherwise use the free fallback)
 start_console_capture         (tabId: the test tab; remember whether this succeeded)

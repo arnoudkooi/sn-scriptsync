@@ -12,7 +12,7 @@ This workspace uses the `sn-scriptsync` VS Code extension to sync ServiceNow art
 2. Create an instance folder (e.g., `dev12345` or `myinstance`)
 3. Add a `_settings.json` file in the instance folder with your credentials
 4. **Sync at least one artifact** from ServiceNow to establish the scope folders
-5. Start creating or editing files - the extension handles the sync automatically
+5. Create or edit files, explicitly save them to ServiceNow, and verify the saved content using the Workflow below; local file saves are only queued by default
 
 **⚠️ Important**: Do not manually create scope folders. Always sync at least one artifact from a scope first to ensure proper folder structure.
 

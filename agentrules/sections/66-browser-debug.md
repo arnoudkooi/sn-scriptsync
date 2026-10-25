@@ -98,7 +98,8 @@ verify an observable effect of the changed code before declaring success.
 ```
 sync_now                      (only for the intended pending writes; never bypass review)
 get_sync_status               (wait until the changed files are no longer pending or syncing)
-get_record                    (confirm the expected field reached this instance; sync_now's synced:true only means sent)
+get_record                    (only if the save is not already verified; skip after successful verified:true with matching persisted content)
+                              (sync_now's synced:true only means sent, so file sync still needs a content check)
                               (for a NOW SDK app, use sdk_deploy and wait for its final install result instead)
 get_capabilities              (cdp.available must be true for capture; otherwise use the free fallback)
 start_console_capture         (tabId: the test tab; remember whether this succeeded)

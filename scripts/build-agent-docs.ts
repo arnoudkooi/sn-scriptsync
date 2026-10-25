@@ -164,7 +164,10 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //               keep binary files and large results out of model context;
 //               query_records checks field paths first (E_INVALID_QUERY,
 //               E_QUERY_UNVERIFIABLE, validate:false).
-const INSTRUCTIONS_VERSION = 30;
+//   v30 -> v31: explicit save and content-verification workflow; queue/review
+//               boundaries and standalone update_record read-back failures;
+//               reuse verified save results instead of duplicate agent reads.
+const INSTRUCTIONS_VERSION = 31;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -202,7 +205,8 @@ const EVERYDAY: Array<{ cmd: string; blurb: string }> = [
 	{ cmd: 'pull_records', blurb: 'Pull records from ServiceNow and write code fields to local files with _map.json sync.' },
 	{ cmd: 'pull_scope', blurb: 'Pull every scriptable artifact of one application scope to local files in one call (paged, refreshable).' },
 	{ cmd: 'get_record', blurb: 'Fetch one record by table + sys_id (e.g. confirm a write).' },
-	{ cmd: 'update_record', blurb: 'Update fields on an existing record (pass `await:true` to read back).' },
+	{ cmd: 'update_record', blurb: 'Write one field with `field` + `content`, `await:true`; skip extra reads when the save is already verified.' },
+	{ cmd: 'update_record_batch', blurb: 'Write several fields on one record with a `fields` object; read back only if not already verified.' },
 	{ cmd: 'create_record', blurb: 'Create a plain data row (incident, task, user) — never drive the form UI to do this.' },
 	{ cmd: 'create_artifact', blurb: 'Create a scriptable artifact incl. config fields via payload (not loose files).' },
 	{ cmd: 'navigate_and_screenshot', blurb: 'Open a page and capture it in one call to verify state.' },

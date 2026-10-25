@@ -13,6 +13,41 @@ test('MCP: server instantiates cleanly with all tools', async () => {
   assert.strictEqual(typeof server.connect, 'function');
 });
 
+test('MCP: upgraded validation preserves field dictionaries and rejects invalid or oversized input before dispatch', async t => {
+  const server = await createMcpServer();
+  const client = new Client({ name: 'validation-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const calls: any[] = [];
+  const original = ScriptSyncClient.prototype.execute;
+  (ScriptSyncClient.prototype as any).execute = async (mapped: any) => {
+    calls.push(mapped);
+    return { result: { success: true } };
+  };
+  t.after(() => { ScriptSyncClient.prototype.execute = original; });
+
+  const fields = { short_description: 'Validation check', active: false, priority: 2, assigned_to: null };
+  const created = await client.callTool({ name: 'snu_create_record', arguments: { table: 'incident', fields } });
+  assert.ok(!created.isError);
+  assert.deepStrictEqual(calls[0].params.fields, fields);
+
+  const batch = await client.callTool({ name: 'snu_create_records', arguments: { table: 'incident', rows: [fields] } });
+  assert.ok(!batch.isError);
+  assert.deepStrictEqual(calls[1].params.rows, [fields]);
+
+  for (const request of [
+    { name: 'snu_create_records', arguments: { table: 'incident', rows: Array.from({ length: 201 }, () => fields) } },
+    { name: 'snu_rest_request', arguments: { endpoint: '/api/now/table/incident', queryParams: { sysparm_limit: 3 } } },
+    { name: 'snu_create_record', arguments: { table: 'incident', fields: ['not', 'a', 'dictionary'] } },
+  ]) {
+    const result = await client.callTool(request);
+    assert.ok(result.isError, request.name);
+  }
+  assert.strictEqual(calls.length, 2, 'invalid input must not reach the bridge');
+});
+
 test('MCP publishes every registry tool and the 0.4 input schemas', async t => {
   const server = await createMcpServer();
   const client = new Client({ name: 'parity-test', version: '1.0.0' });
@@ -73,4 +108,31 @@ test('MCP: a record batch with a lost answer keeps its batchId and is never told
     assert.ok(text.includes('bat_x_a1b2c3d4'), `${code}: ${text}`);
     assert.ok(!text.includes('Then run this tool again'), `${code}: ${text}`);
   }
+});
+
+test('MCP: update persistence failures preserve the acknowledged-write details and verification timeout', async t => {
+  const server = await createMcpServer();
+  const client = new Client({ name: 'verification-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const original = ScriptSyncClient.prototype.execute;
+  (ScriptSyncClient.prototype as any).execute = async (mapped: any, timeoutMs: number) => {
+    assert.strictEqual(mapped.command, 'update_record');
+    assert.strictEqual(mapped.params.await, true);
+    assert.ok(timeoutMs > 85_000, 'client allows time for PATCH and verification GET');
+    throw new ScriptSyncClientError('Persistence verification failed; inspect the saved state before retrying.', 'E_COMMAND_FAILED', 500,
+      { writeAcknowledged: true, verified: false, reason: 'value_mismatch', field: 'script' });
+  };
+  t.after(() => { ScriptSyncClient.prototype.execute = original; });
+  const response = await client.callTool({ name: 'snu_update_record', arguments: {
+    table: 'sys_script_fix', sys_id: '0123456789abcdef0123456789abcdef', field: 'script', value: 'new script',
+  } });
+  assert.ok(response.isError);
+  const text = (response.content as any[])[0].text as string;
+  assert.ok(text.includes('writeAcknowledged'));
+  assert.ok(text.includes('value_mismatch'));
+  assert.ok(text.includes('inspect the saved state'));
+  assert.ok(!text.includes('Then run this tool again'));
 });

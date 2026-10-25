@@ -1,5 +1,24 @@
 # CHANGELOG.md
 
+## 4.10.0 (2026-10-26)
+
+- **Agent API: download an attachment to a file.** `download_attachment` saves one attachment (up to 50 MB) in the workspace and returns its path, size, type and checksum, never the file itself, so a binary file stays out of the agent's context. A file appears only once it has arrived complete, and an existing file is replaced only with `overwrite: true`. Needs SN Utils 10.2.9.0; an older helper tab answers `E_UNSUPPORTED_HELPER`.
+- **Agent API: delete an attachment** with `delete_attachment`, through the Attachment API. It uses the Delete records permission and its review; `dryRun` only shows what would be deleted.
+- **Agent API: `query_records` checks field paths before it runs.** ServiceNow ignores a condition on a field that does not exist and returns unfiltered rows. Every path in the query, the requested fields and the sort order is now checked against the table, including dot-walks, `ref_` casts and related-list blocks. A wrong path fails with `E_INVALID_QUERY`, one that cannot be checked with `E_QUERY_UNVERIFIABLE`, and the query does not run. Pass `validate: false` to skip the check. A query that silently returned the wrong rows before now fails instead.
+- **Agent API: clearer background script results.** `run_background_script` also returns `stdout` (your `gs.print` lines), `errors`, `warnings`, `logLines`, `status` and the `executionId` of the run. `output` is unchanged.
+- **A background script no longer runs twice behind an "unauthorized" error.** After a session-token refresh it is run again only when the instance provably did not run it, and a timeout on that second run is reported as a timeout.
+- Agent instructions v31: explicitly save the intended changes, use the save's verification result, and read back separately only when the save is not already verified. Respect queue/review boundaries and distinguish local saves from verified remote writes. Includes the new commands and guidance to keep binary files and large results out of the agent's context. MCP agents receive the same guidance to avoid duplicate reads. Open workspaces get the refreshed instructions on the next activation.
+
+## `@snutils/snu` 0.6.0 (2026-10-26)
+
+- **Hardened agent input handling:** updated validation and networking dependencies while preserving record field values and rejecting invalid or oversized batches before they reach your instance.
+
+- **`snu_download_attachment` / `snu attachment download`** saves one attachment (up to 50 MB) to a workspace file and returns its path, size, type and checksum, never the contents. `--out <path>` picks the file, `--overwrite` replaces an existing one. Needs SN Utils 10.2.9.0.
+- **`snu_delete_attachment` / `snu attachment delete`** removes an attachment through the Attachment API under the Delete records permission; `--dry-run` only shows what would be deleted, `--confirm` executes.
+- **`query_records` checks field paths before it runs** (same rules as the VS Code host): an unknown path fails with `E_INVALID_QUERY`, one that cannot be checked with `E_QUERY_UNVERIFIABLE`; `validate: false` skips the check.
+- **`run_background_script` returns structured results**: `stdout`, `errors`, `warnings`, `logLines`, `status` and `executionId` next to the unchanged `output`, and a script is never run twice behind an "unauthorized" error.
+- **`update_record` verifies persistence** with a separate read after PATCH. Only matching content returns `updated: true` and `verified: true`; mismatches, unreadable fields and failed reads return `E_COMMAND_FAILED` with `details.writeAcknowledged: true`, so an agent inspects the saved state instead of blindly retrying. The MCP server instructions tell agents to reuse that verification instead of reading the record again.
+
 ## 4.9.21 (2026-10-22)
 
 - **The What's New panel shows this release's notes again.** After updating to 4.9.20 it showed the `@snutils/snu` 0.5.1 entry instead of the 4.9.20 notes; the panel now picks the section of the installed version.

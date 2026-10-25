@@ -76,9 +76,9 @@ curl -s -X POST http://127.0.0.1:$PORT/api \
 **Available commands** (full details in `agentinstructions.md`):
 - Connection/state: `check_connection`, `get_instance_info`, `get_sync_status`, `sync_now`, `get_last_error`, `clear_last_error`
 - Records: `update_record`, `update_record_batch`, `create_artifact`, `get_table_metadata`, `check_name_exists_remote`
-- Queries: `query_records`, `get_parent_options`
+- Queries: `query_records` (checks field paths first; `validate: false` skips it), `get_parent_options`
 - Local files: `list_tables`, `list_artifacts`, `check_name_exists`, `get_file_structure`, `validate_path`
-- Browser: `open_in_browser`, `refresh_preview`, `take_screenshot`, `navigate_and_screenshot`, `run_slash_command`, `activate_tab`, `switch_context`, `upload_attachment`
+- Browser: `open_in_browser`, `refresh_preview`, `take_screenshot`, `navigate_and_screenshot`, `run_slash_command`, `activate_tab`, `switch_context`, `upload_attachment`, `download_attachment`, `delete_attachment`
 - Live form/page control: `navigate`, `set_field`, `get_form_state`, `run_ui_action`, `click_element`
 
 See [CHANGELOG.md](https://github.com/arnoudkooi/sn-scriptsync/blob/main/CHANGELOG.md) for the full list of changes.
@@ -226,7 +226,7 @@ What an AI agent is allowed to do on an instance is decided in **one** of two pl
 | --- | --- | --- | --- | --- |
 | Create records | `sn-scriptsync.createArtifacts.enabled` | `SNU_ALLOW_CREATE_ARTIFACTS` | `create_record`, `create_artifact`, `create_application`, `create_table`, `add_column`, `upload_attachment` | **on** |
 | Update records | `sn-scriptsync.updateRecords.enabled` | `SNU_ALLOW_UPDATE_RECORDS` | `update_record`, `update_record_batch`, `run_ui_action` (committing the open form) | **on** |
-| Delete records | `sn-scriptsync.deleteRecords.enabled` | `SNU_ALLOW_DELETE_RECORDS` | `delete_record`, `delete_application`, REST `DELETE`, delete verbs in `run_ui_action` | off |
+| Delete records | `sn-scriptsync.deleteRecords.enabled` | `SNU_ALLOW_DELETE_RECORDS` | `delete_record`, `delete_attachment`, `delete_application`, REST `DELETE`, delete verbs in `run_ui_action` | off |
 | REST writes | `sn-scriptsync.restRequest.enabled` | `SNU_ALLOW_REST_REQUEST` | `POST`/`PUT`/`PATCH` via `rest_request` | off |
 | Background scripts | `sn-scriptsync.backgroundScripts.enabled` | `SNU_ALLOW_BACKGROUND_SCRIPTS` | `run_background_script`, the `delete_application` cascade | off |
 | Browser debugger | `sn-scriptsync.browserDebugger.enabled` | `SNU_ALLOW_BROWSER_DEBUGGER` | the CDP capture commands | off |

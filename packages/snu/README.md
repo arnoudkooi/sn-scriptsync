@@ -127,8 +127,8 @@ When more than one instance is connected, tell the agent which instance to use o
 | --- | --- | --- |
 | Connection | `snu_get_context`, `snu_auth_status`, `snu_negotiate` | Inspect connection and permissions, check the session, and report supported commands and versions. |
 | Schema and search | `snu_get_schema`, `snu_code_search` | Inspect table metadata and search server-side code. Code Search requires SN Utils Pro. |
-| Record reads | `snu_query_records`, `snu_get_record` | Query tables or fetch a record by `sys_id`. |
-| Record writes | `snu_create_record`, `snu_create_artifact`, `snu_update_record`, `snu_update_record_batch`, `snu_delete_record`, `snu_upload_attachment` | Create records, update one or several fields on one record, delete, or attach a file. |
+| Record reads | `snu_query_records`, `snu_get_record` | Query tables or fetch a record by `sys_id`. `snu_query_records` checks every field path against the table first and fails with `E_INVALID_QUERY` instead of returning unfiltered rows; `validate: false` skips the check. |
+| Record writes | `snu_create_record`, `snu_create_artifact`, `snu_update_record`, `snu_update_record_batch`, `snu_delete_record`, `snu_upload_attachment`, `snu_download_attachment`, `snu_delete_attachment` | Create records, update one or several fields on one record, delete, attach a file, or save an attachment to a workspace file (path, size and checksum only, never the contents) or delete it. |
 | Workspace pulls | `snu_pull_records`, `snu_pull_scope` | Pull code fields from selected records or an application scope into local files. |
 | Reviews | `snu_get_review_result` | Collect the outcome of a write awaiting approval or still running. |
 | NOW SDK | `snu_sdk_deploy`, `snu_sdk_pull` | Build and install a Fluent app, or pull instance changes into its local project. |
@@ -268,6 +268,13 @@ snu artifact create sys_script_include MyNewHelper --file ./fields.json --scope 
 # Attach a file inside the bridge's workspace (MIME type inferred from extension)
 snu attachment upload incident <sys_id> --file ./report.pdf
 
+# Save an attachment (up to 50 MB) to a workspace file; the result carries only path, size, type and checksum
+snu attachment download <attachment_sys_id> --out ./downloads/report.pdf --overwrite
+
+# Delete an attachment (--confirm required, or --dry-run to inspect; needs the Delete records permission)
+snu attachment delete <attachment_sys_id> --dry-run
+snu attachment delete <attachment_sys_id> --confirm
+
 # Collect a reviewed command's outcome; --wait 0 checks immediately (default: 30s)
 snu review result <reviewId> --wait 0
 
@@ -277,6 +284,10 @@ snu record delete incident <sys_id> --confirm
 ```
 
 Attachments accept a workspace file or, through MCP/HTTP, base64 `imageData` plus `fileName`. CLI paths are resolved from your current directory; MCP relative `filePath` is resolved under the selected instance folder. Absolute paths must stay inside the bridge workspace. Both hosts reject symbolic links and paths outside that workspace. `update_record_batch` changes fields on a single record; it does not perform a bulk update across records. It strips read-only `sys_scope` and warns when a supplied non-empty field comes back empty.
+
+Saving a local file does not save it to ServiceNow. Use `snu record update ... --file ...` to write its content, then verify the saved field on the same instance. The standalone `update_record` handler now performs a separate GET after PATCH and returns `verified: true` with the matching `persisted` value. A mismatch, unreadable field or failed read returns `E_COMMAND_FAILED` with `details.writeAcknowledged: true` and `verified: false`: inspect the saved state before retrying, since the write may already have taken effect. Journal fields such as `work_notes` require checking the new journal entry instead of comparing the parent record field.
+
+A successful `verified: true` response with matching `persisted` content already confirms the save; **do not make another read just to verify it again**. Only for older bridges or saves without that confirmation, use `snu record get <table> <sys_id> --fields <field> --instance <instance> --json` and compare the content yourself. A successful send or increased `sys_mod_count` is not enough. If review is pending, approve it in the named UI and collect the outcome before verifying; an agent must not bypass review through another route.
 
 ### Generic REST Calls
 ```bash

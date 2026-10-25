@@ -117,7 +117,125 @@ test('update_record validates required params and accepts empty content', async 
   assert.equal(request.endpoint, `/api/now/table/sys_script_fix/${sysId}`);
   assert.deepEqual(request.body, { script: '' });
   h.send({ agentRequestId: request.agentRequestId, success: true, data: { result: { script: '' } } });
-  assert.equal((await result).result.updated, true);
+  const read = await waitFor(() => h.messages.find(m => m.action === 'agentRestApi' && m.method === 'GET'));
+  assert.equal(read.endpoint, request.endpoint);
+  assert.notEqual(read.agentRequestId, request.agentRequestId);
+  assert.equal(read.queryParams.sysparm_fields, 'script');
+  assert.equal(read.queryParams.sysparm_display_value, 'false');
+  h.send({ agentRequestId: read.agentRequestId, success: true, data: { result: { script: '' } } });
+  const response = await result;
+  assert.equal(response.result.updated, true);
+  assert.equal(response.result.verified, true);
+  assert.deepEqual(response.result.persisted, { script: '' });
+  assert.equal(h.pending.size(), 0);
+});
+
+test('update_record verifies raw stored values with a separate read, even without await', async t => {
+  const script = '/* ' + 'x'.repeat(25_000) + ' */\n gs.info("saved");\n';
+  for (const [name, content, stored] of [
+    ['large script', script, script],
+    ['reference value', sysId, { value: sysId, display_value: 'A different display value' }],
+    ['boolean', false, 'false'],
+    ['numeric zero', 0, '0'],
+    ['clear returning null', '', null],
+  ] as const) {
+    await t.test(name, async t => {
+      const h = await helper(t);
+      h.ws.on('message', raw => {
+        const request = JSON.parse(String(raw));
+        if (request.action !== 'agentRestApi') return;
+        h.send({ agentRequestId: request.agentRequestId, success: true,
+          data: { result: request.method === 'PATCH' ? { sys_id: sysId, script: 'stale PATCH value' } : { script: stored } } });
+      });
+      const response = await h.dispatcher.dispatch({ id: 'verify-update', command: 'update_record',
+        params: { table: 'sys_script_fix', sys_id: sysId, field: 'script', content } });
+      assert.equal(response.status, 'success', response.error);
+      assert.equal(response.result.updated, true);
+      assert.equal(response.result.awaited, true);
+      assert.equal(response.result.verified, true);
+      assert.deepEqual(response.result.persisted, { script: stored });
+      assert.deepEqual(response.result.record, { sys_id: sysId, script: stored });
+      assert.deepEqual(h.messages.filter(m => m.action === 'agentRestApi').map(m => m.method), ['PATCH', 'GET']);
+      assert.equal(h.pending.size(), 0);
+    });
+  }
+});
+
+test('update_record never reports success for a mismatch or unreadable field, even if PATCH echoes the input', async t => {
+  for (const [name, content, record, reason] of [
+    ['unchanged nonempty script', 'new script', { script: 'old script' }, 'value_mismatch'],
+    ['silently dropped script', 'new script', { script: '' }, 'value_mismatch'],
+    ['whitespace is significant', 'new script\n', { script: 'new script' }, 'value_mismatch'],
+    ['failed clear', '', { script: 'old script' }, 'value_mismatch'],
+    ['missing field is not a clear', '', {}, 'field_unreadable'],
+    ['display value is not stored value', '', { script: { display_value: '' } }, 'field_unreadable'],
+    ['missing record', '', undefined, 'field_unreadable'],
+    ['malformed record', '', [], 'field_unreadable'],
+  ] as const) {
+    await t.test(name, async t => {
+      const h = await helper(t);
+      h.ws.on('message', raw => {
+        const request = JSON.parse(String(raw));
+        if (request.action !== 'agentRestApi') return;
+        h.send({ agentRequestId: request.agentRequestId, success: true,
+          data: { result: request.method === 'PATCH' ? { script: content } : record } });
+      });
+      const response = await h.dispatcher.dispatch({ id: 'mismatched-update', command: 'update_record',
+        params: { table: 'sys_script_fix', sys_id: sysId, field: 'script', content, await: true } });
+      assert.equal(response.status, 'error');
+      assert.equal(response.code, 'E_COMMAND_FAILED');
+      assert.equal(response.result, undefined);
+      assert.equal(response.details?.writeAcknowledged, true);
+      assert.equal(response.details?.verified, false);
+      assert.equal(response.details?.reason, reason);
+      assert.match(response.error!, /before retrying/);
+      assert.equal(h.messages.filter(m => m.method === 'PATCH').length, 1);
+      assert.equal(h.pending.size(), 0);
+    });
+  }
+});
+
+test('update_record explains a failed verification read without retrying an acknowledged write', async t => {
+  for (const failure of ['acl', 'timeout', 'disconnect'] as const) {
+    await t.test(failure, async t => {
+      const h = await helper(t);
+      h.ws.on('message', raw => {
+        const request = JSON.parse(String(raw));
+        if (request.action !== 'agentRestApi') return;
+        if (request.method === 'PATCH') {
+          h.send({ agentRequestId: request.agentRequestId, success: true, data: { result: { script: 'new' } } });
+        } else if (failure === 'acl') {
+          h.send({ agentRequestId: request.agentRequestId, success: false, status: 403, error: 'Read denied' });
+        } else {
+          h.pending.reject(request.agentRequestId, failure === 'timeout' ? 'E_TIMEOUT' : 'E_BROWSER_DISCONNECTED', failure);
+        }
+      });
+      const response = await h.dispatcher.dispatch({ id: 'unverified-update', command: 'update_record',
+        params: { table: 'sys_script_fix', sys_id: sysId, field: 'script', content: 'new', await: true } });
+      assert.equal(response.status, 'error');
+      assert.equal(response.code, 'E_COMMAND_FAILED');
+      assert.equal(response.details?.reason, 'read_failed');
+      assert.equal(response.details?.writeAcknowledged, true);
+      assert.equal(response.details?.verified, false);
+      assert.equal(response.details?.causeCode, failure === 'acl' ? 'E_ACL' : failure === 'timeout' ? 'E_TIMEOUT' : 'E_BROWSER_DISCONNECTED');
+      assert.match(response.error!, /write may already have taken effect/);
+      assert.equal(h.messages.filter(m => m.method === 'PATCH').length, 1);
+      assert.equal(h.pending.size(), 0);
+    });
+  }
+});
+
+test('update_record does not verify or retry a refused PATCH', async t => {
+  const h = await helper(t);
+  h.ws.on('message', raw => {
+    const request = JSON.parse(String(raw));
+    if (request.action === 'agentRestApi') h.send({ agentRequestId: request.agentRequestId, success: false, status: 403, error: 'Write denied' });
+  });
+  const response = await h.dispatcher.dispatch({ id: 'denied-update', command: 'update_record',
+    params: { table: 'sys_script_fix', sys_id: sysId, field: 'script', content: 'new', await: true } });
+  assert.equal(response.code, 'E_ACL');
+  assert.deepEqual(h.messages.filter(m => m.action === 'agentRestApi').map(m => m.method), ['PATCH']);
+  assert.equal(h.pending.size(), 0);
 });
 
 test('batch update sends one PATCH, strips sys_scope and reports silently dropped fields', async t => {

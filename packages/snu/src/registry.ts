@@ -333,6 +333,8 @@ export const TOOLS: ToolDefinition[] = [
     description:
       'Update a field on an existing ServiceNow record with synchronous persistence verification. Covered by the updateRecords permission, which is on by default and follows createArtifacts where it is not set on its own. Note: If review mode is enabled in VS Code settings, the write is staged for manual approval rather than applied immediately.',
     cliCommand: 'record update',
+    // The standalone host waits for PATCH and then a bounded verification GET.
+    timeoutMs: 90_000,
     cliUsage: 'snu record update <table> <sys_id> <field> (--value <v> | --file <path> | stdin) [--instance <i>] [--json]',
     cliOptions: {
       value: { type: 'string', short: 'v', description: 'New field content' },

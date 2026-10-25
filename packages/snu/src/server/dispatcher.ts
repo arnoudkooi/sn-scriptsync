@@ -1897,7 +1897,57 @@ export class StandaloneDispatcher {
         });
         const res = await pendingPromise;
         if (res.success === false) {
-          throw Object.assign(new Error(res.error || 'Update failed'), { code: 'E_COMMAND_FAILED' });
+          throw Object.assign(new Error(res.error || 'Update failed'), { code: res.code || codeForRestStatus(res.status, res.error) });
+        }
+
+        // A successful PATCH can echo the input even when a business rule or
+        // ACL did not persist it. Verify through a separate read, including for
+        // callers that omit await (standalone writes already wait for PATCH).
+        // Never retry the write: journal fields and business rules have effects
+        // that must not be repeated just because verification failed.
+        const verificationDetails = { table, sys_id, field, writeAcknowledged: true, verified: false };
+        const verifyId = `${correlationId}_verify`;
+        const verification = this.pending.register({ id: verifyId, command: 'update_record_verify', timeoutMs: 15_000 });
+        verification.catch(() => {});
+        let record: any;
+        try {
+          try {
+            this.ws.sendToBrowser({
+              action: 'agentRestApi', agentRequestId: verifyId,
+              endpoint: `/api/now/table/${table}/${sys_id}`, method: 'GET',
+              queryParams: { sysparm_fields: field, sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true' },
+              instance: inst.settings, appName: 'SN Utils CLI',
+            });
+          } catch (err: any) {
+            this.pending.reject(verifyId, err?.code || 'E_BROWSER_DISCONNECTED', err?.message || String(err));
+          }
+          const read = await verification;
+          if (read.success === false) {
+            throw Object.assign(new Error(read.error || 'Read-back failed'), { code: read.code || codeForRestStatus(read.status, read.error) });
+          }
+          record = read.data?.result;
+        } catch (err: any) {
+          throw Object.assign(new Error(`The write to ${table}/${sys_id}.${field} was acknowledged, but persistence could not be verified: ${err.message}. Read the record before deciding whether to retry; the write may already have taken effect.`), {
+            code: 'E_COMMAND_FAILED', details: { ...verificationDetails, reason: 'read_failed', causeCode: err.code },
+          });
+        }
+        // Table API raw values can be primitives or { value, display_value }.
+        // Preserve whitespace in scripts; a missing/unreadable value is never
+        // equivalent to an intentional clear, but a returned null is.
+        const rawValue = (value: any): string | undefined => {
+          if (value !== null && typeof value === 'object') {
+            value = !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'value') ? value.value : undefined;
+          }
+          if (value === null) return '';
+          return ['string', 'boolean', 'number'].includes(typeof value) ? String(value) : undefined;
+        };
+        const actual = record && !Array.isArray(record) && Object.prototype.hasOwnProperty.call(record, field)
+          ? rawValue(record[field]) : undefined;
+        if (actual === undefined || actual !== rawValue(content)) {
+          const reason = actual === undefined ? 'field_unreadable' : 'value_mismatch';
+          throw Object.assign(new Error(`Persistence verification failed for ${table}/${sys_id}.${field}: ${actual === undefined ? 'the read-back did not include a readable field value' : 'the saved value differs from the requested content'}. Inspect the record and any ACL/business rule before retrying; the write was acknowledged and may have had side effects.`), {
+            code: 'E_COMMAND_FAILED', details: { ...verificationDetails, reason },
+          });
         }
         return {
           id: req.id,
@@ -1905,11 +1955,16 @@ export class StandaloneDispatcher {
           status: 'success',
           timestamp: Date.now(),
           result: {
+            success: true,
             updated: true,
+            awaited: true,
+            verified: true,
             table,
             sys_id,
             field,
-            record: res.data?.result,
+            record: { ...res.data?.result, ...record },
+            persisted: { [field]: record[field] },
+            warnings: [],
           },
         };
       }

@@ -46,8 +46,18 @@ const SERVER_INSTRUCTIONS = [
   'around: report which gate and how to enable it, then stop. Never substitute a different mechanism',
   '(browser UI, background script) to achieve a write the user has gated off.',
   '',
-  'After any write, the returned record is the confirmation. Read it back with snu_get_record only when',
-  'you need fields the write did not return.',
+  'Saving to ServiceNow requires an explicit write through the appropriate tool; editing a local file',
+  'alone is not a remote save. Execute the authorized write, then verify the changed content before',
+  'reporting completion. A successful verified:true result with matching persisted values already',
+  'confirms the save: do not call snu_get_record again just to verify it. Only when the save has run',
+  'without that confirmation, call snu_get_record on the same instance and record and compare the changed fields.',
+  'updated:true, a PATCH response or a higher sys_mod_count alone is not content verification.',
+  'staged:true means the user must approve the file in VS Code Pending Saves; do not bypass that hold.',
+  'If details.writeAcknowledged is true but verification failed, inspect the saved state before deciding',
+  'whether to retry. Journal fields such as work_notes need verification of their sys_journal_field entry;',
+  'do not repeat an acknowledged journal write just because the parent record field did not match.',
+  'Report saved and verified, awaiting approval, or local-only/unverified, naming the exact next action',
+  'when blocked. Do not claim a save succeeded merely because a tool call completed.',
 ].join('\n');
 
 export async function createMcpServer(): Promise<McpServer> {
@@ -147,7 +157,7 @@ export async function createMcpServer(): Promise<McpServer> {
       instance: z.string().optional(),
     },
     snu_update_record_batch: {
-      table: z.string(), sys_id: z.string(), fields: z.record(z.any()).optional(),
+      table: z.string(), sys_id: z.string(), fields: z.record(z.string(), z.any()).optional(),
       fieldsFile: z.string().optional().describe('JSON file inside the local MCP workspace, alternative to fields'),
       instance: z.string().optional(),
     },
@@ -174,7 +184,7 @@ export async function createMcpServer(): Promise<McpServer> {
     },
     ...Object.fromEntries((['create', 'update'] as const).map(mode => [`snu_${mode}_records`, {
       table: z.string(),
-      rows: z.array(z.record(z.any())).max(200).optional().describe(mode === 'create' ? 'One field-value object per new record' : 'One { sys_id, ...fields } object per record'),
+      rows: z.array(z.record(z.string(), z.any())).max(200).optional().describe(mode === 'create' ? 'One field-value object per new record' : 'One { sys_id, ...fields } object per record'),
       rowsFile: z.string().optional().describe('JSON file with the rows array inside the local MCP workspace, alternative to rows'),
       ...(mode === 'create' ? { scope: z.string().optional().describe('Application scope name or sys_id, or "global"') } : {}),
       continueOnError: z.boolean().optional(), dryRun: z.boolean().optional(),
@@ -263,7 +273,7 @@ export async function createMcpServer(): Promise<McpServer> {
     {
       table: z.string().describe('Target ServiceNow artifact table (e.g. sys_script_include)'),
       name: z.string().describe('Artifact name (will be mapped into fields.name)'),
-      fields: z.record(z.any()).optional().describe('Additional field-value dictionary (e.g. script, description)'),
+      fields: z.record(z.string(), z.any()).optional().describe('Additional field-value dictionary (e.g. script, description)'),
       fieldsFile: z.string().optional().describe('JSON file inside the local MCP workspace, alternative to fields'),
       scope: z
         .string()
@@ -400,7 +410,7 @@ export async function createMcpServer(): Promise<McpServer> {
     {
       table: z.string().describe('Table to insert into (e.g. incident, sc_task, sys_user)'),
       fields: z
-        .record(z.any())
+        .record(z.string(), z.any())
         .describe('Field-value dictionary for the new record. Use raw values (sys_id for reference fields, choice value for choice fields), not display labels.'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
@@ -414,8 +424,8 @@ export async function createMcpServer(): Promise<McpServer> {
     {
       endpoint: z.string().describe("Instance-relative path beginning with '/' (e.g. /api/now/table/incident)"),
       method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET').optional().describe('HTTP method'),
-      body: z.record(z.any()).optional().describe('JSON request body for POST/PUT/PATCH'),
-      queryParams: z.record(z.string()).optional().describe('Query-string parameters as a flat object'),
+      body: z.record(z.string(), z.any()).optional().describe('JSON request body for POST/PUT/PATCH'),
+      queryParams: z.record(z.string(), z.string()).optional().describe('Query-string parameters as a flat object'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_rest_request', args)

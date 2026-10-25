@@ -1,6 +1,6 @@
 {
   "name": "@snutils/snu",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Unified CLI and Model Context Protocol (MCP) server for SN Utils and ScriptSync",
   "author": "Arnoud Kooi <arnoud@snutils.com>",
   "license": "SEE LICENSE IN LICENSE.md",
@@ -41,10 +41,10 @@
     "windsurf"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "ws": "^8.18.0",
     "xml-js": "1.6.11",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^20.17.19",

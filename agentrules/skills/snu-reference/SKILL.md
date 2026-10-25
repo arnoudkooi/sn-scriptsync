@@ -3,7 +3,7 @@ name: snu-reference
 description: "Extended reference appendix: detailed file-structure notes, table metadata caching, agent best-practices, and edge cases not covered by the core. Read this when you need depth the other skills do not cover."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=30 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=31 -->
 
 # SN ScriptSync — Deep Reference
 
@@ -92,15 +92,11 @@ The `structure.json` file contains cached table metadata from ServiceNow:
 - Server not running → "Please click sn-scriptsync in VS Code status bar to start"
 - No browser → "Please open the SN Utils helper tab by typing /token in ServiceNow"
 
-### ⚠️ IMPORTANT: Always Call `sync_now` When Finished
+### Save and verify before reporting completion
 
-**After making file changes, ALWAYS call `sync_now` before reporting completion to the user:**
+Follow the core Workflow: explicitly write the authorized changes and inspect the save result. A successful `verified: true` with matching `persisted` content needs no separate read-back. Only when the save is not already verified, read back and compare the saved content on the target instance. For VS Code file edits, inspect `get_sync_status` and call `sync_now` only if all eligible queued files belong to the task and review permits it. Wait for the intended files to leave the pending/syncing lists before reading them. The standalone host needs a typed record write instead of a file-queue flush.
 
-```json
-{ "id": "final", "command": "sync_now" }
-```
-
-This ensures all pending file updates are synced to ServiceNow immediately, rather than waiting for the debounce timer.
+`synced: true` means sent, not verified. If a save is held for approval, name the exact approval step; do not report completion or bypass the hold through another write route.
 
 ### 📸 Screenshot Permission Required
 
@@ -144,7 +140,7 @@ Use `activate_tab` with `reload: true` instead of `open_in_browser` when you wan
 ### ⚡ PREFERRED: Use `create_artifact` for Creating New Records
 
 **The `create_artifact` command is the recommended way for AI agents to create artifacts:**
-- Executes immediately (not queued with debounce)
+- Writes through the configured permissions and approval flow
 - Send all fields in a single payload
 - Can set reference fields directly
 - No file creation needed
@@ -171,31 +167,14 @@ Use `activate_tab` with `reload: true` instead of `open_in_browser` when you wan
 
 | Operation | Behavior |
 |-----------|----------|
-| **create_artifact** (Agent API) | Executes immediately |
-| **sync_now** (Agent API) | Flushes queue immediately |
-| **New file** (no sys_id) | Executes immediately |
-| **Update file** (has sys_id) | Queued with debounce timer |
+| **create_artifact** (Agent API) | Writes or stages the request according to permissions/review; verify the created record |
+| **sync_now** (VS Code Agent API) | Sends eligible queued files across the workspace; blocked in review mode; does not verify persistence |
+| **Local file edit** | Monitored and queued by default (`syncDelay: 0`); auto-sync requires a positive delay |
+| **Standalone local file edit** | Does not flush a VS Code queue; use a typed record write |
 
 ### ⚠️ Multi-File Artifacts (Widgets, UI Pages)
 
-When creating multi-file artifacts like widgets, the flow is:
-1. **First file** (no sys_id) → Executes immediately, creates record, updates `_map.json`
-2. **Subsequent files** (now have sys_id) → Queued as updates
-3. **Queue processes** after debounce timer (~5-10s)
-
-**To speed this up, ALWAYS call `sync_now` after creating all files:**
-```json
-// After creating all widget files
-{ "id": "flush", "command": "sync_now" }
-```
-
-**Recommended flow for widgets:**
-```
-1. Create all widget files (template.html, script.js, client_script.js, css.scss, etc.)
-2. Wait ~1 second for file watcher to detect all files
-3. Call sync_now to flush queue immediately
-4. All files sync in ~2-3 seconds instead of ~20 seconds
-```
+Prefer `create_artifact` with all intended fields for a new widget, or `update_record_batch` for changes to several fields of an existing widget. Respect review and inspect the save result. Only if it lacks successful `verified: true` confirmation covering every changed field, use `get_record` and compare those fields. For file-based edits, use the queue workflow above and check that the watcher detected all intended files; a fixed sleep or an empty queue is not proof of a save.
 
 ### 🖥️ Opening and Refreshing Widget Previews
 
@@ -219,9 +198,10 @@ This refreshes all browser tabs showing the widget preview.
 2. create_artifact            → Create widget with all fields
 3. open_in_browser            → Open preview in browser
 4. (make changes to files)
-5. sync_now                   → Sync changes immediately
-6. refresh_preview            → Refresh browser to see changes
-7. Report completion to user
+5. Save through the authorized queue or typed-write route; collect any approval
+6. Inspect the save result    → Only use get_record to compare content if the save is not already verified
+7. refresh_preview            → Refresh browser and verify the changed behaviour
+8. Report the saved/verified result, or the specific remaining blocker
 ```
 
 **Verifying the rendered widget (component-only screenshot):**
@@ -533,12 +513,7 @@ The `selector` trick returns a clean, component-only image (no full page, no per
 
 ### Before Completion
 
-**ALWAYS call `sync_now` to flush pending changes:**
-```json
-{ "id": "final-sync", "command": "sync_now" }
-```
-
-**Wait for response** to confirm sync completed, then report results.
+**Explicitly save and verify the intended changes.** Follow the core Workflow and the queue/review boundaries above. Inspect the save result first: a successful `verified: true` with matching `persisted` content needs no extra read. Only if that confirmation is absent, compare the stored fields using `get_record`. A successful send alone is not proof of persistence. Report local-only, awaiting approval and verified remote saves accurately.
 
 ### Complete Example Flow
 
@@ -557,11 +532,11 @@ The `selector` trick returns a clean, component-only image (no full page, no per
 
 4. AI creates/modifies artifacts using create_artifact or file changes
 
-5. AI calls: { "command": "sync_now" }
-   → Flushes any queued file updates
+5. AI explicitly saves through the supported queue or typed-write route
+   → Inspect the queue first; respect review and held user saves
 
-6. AI calls: { "command": "get_last_error" }
-   → Check if any errors occurred during sync
+6. AI inspects the save result; reads and compares the changed fields only if not already verified
+   → Also check get_sync_status/get_last_error for file-sync failures
 
 7. AI reports results:
    → If error: "❌ Error: {error message}"
@@ -572,7 +547,7 @@ The `selector` trick returns a clean, component-only image (no full page, no per
 - `check_connection` prevents confusing errors from missing connections
 - `clear_last_error` gives a clean slate before operations
 - `switch_context` ensures global work goes into the correct update set (not Default)
-- `sync_now` ensures changes are live before reporting completion
+- An explicit save followed by a content comparison establishes what reached the instance
 - `get_last_error` catches errors that occurred asynchronously
 - Users get accurate feedback about what happened
 
@@ -606,8 +581,8 @@ The sn-scriptsync extension can update **any** ServiceNow table, not just script
 1. Create a temporary folder structure: `{instance}/global/{table}/`
 2. Create a `_map.json` with the record's sys_id
 3. Create a field file: `{record_identifier}.{field_name}.txt`
-4. Call `sync_now` to push the change
-5. **Delete the temporary folder immediately after sync**
+4. Follow the queue workflow to save only the authorized changes, respecting review
+5. Read back and verify the change before deleting temporary files
 
 ### Example: Adding a Work Note to an Incident
 
@@ -618,7 +593,7 @@ Step 1: Query the incident to get sys_id
 Step 2: Update the record directly (no temp files!)
 { "command": "update_record", "params": { "table": "incident", "sys_id": "<sys_id>", "field": "work_notes", "content": "Your work note message here" } }
 
-Step 3: Verify (optional)
+Step 3: Verify the journal entry before reporting completion; do not repeat the write if its outcome is uncertain
 { "command": "query_records", "params": { "table": "sys_journal_field", "query": "element_id=<sys_id>^element=work_notes", "fields": "value,sys_created_on", "limit": 1, "orderBy": "ORDERBYDESCsys_created_on" } }
 ```
 
@@ -679,8 +654,8 @@ Text line 1\nText line 2           → Use \n in JSON strings
 ```
 1. Query record to get sys_id (if not already known)
 2. Use update_record command directly
-3. Optionally verify the update
-4. Report result to user
+3. Accept successful verified:true with matching persisted content; otherwise read back and compare (query sys_journal_field for journal entries)
+4. Report the verified result, or the exact approval/verification blocker
 ```
 
 ### Direct Update Commands
@@ -774,9 +749,9 @@ For reference only - prefer Direct API above:
 2. Create temp folder: {instance}/global/{table}/
 3. Create _map.json with sys_id mapping  
 4. Create field file with content
-5. sync_now
-6. DELETE temp folder (rm -rf)
-7. Optionally verify the update
+5. Follow the queue/review workflow to save only the intended changes
+6. Read back and verify the update
+7. Delete only your temporary files after verification
 8. Report result to user
 ```
 
@@ -794,7 +769,7 @@ For reference only - prefer Direct API above:
 4. **Use HTML in acceptance_criteria** - rm_story.acceptance_criteria is an HTML field
 5. **Clean up request/response files** - Delete both files after processing
 6. **Use string values for state fields** - Pass `"-7"` not `-7`
-7. **Call sync_now before completion** - Ensures all changes are synced
+7. **Explicitly save and verify before completion** - Follow the core Workflow; a local save or successful send is insufficient
 
 ### Things to NEVER Do
 
