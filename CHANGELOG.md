@@ -1,10 +1,20 @@
 # CHANGELOG.md
 
-## 4.10.1 (unreleased)
+## 4.10.1 (2026-10-28)
 
 - **See how agents use ScriptSync:** with an updated SN Utils helper, completed agent commands contribute to daily usage totals by command, outcome and bridge. Internal retries and review polling do not add extra commands, and no request content is included. Collection follows the extension Usage Data setting. <!-- reported-by: Arnoud Kooi / chat 2026-10-27 --> <!-- web: skip -->
 
 - **Know why a file is still in Pending Saves:** files now explain when they need Sync Now or contain newer changes after a save. Mixed queues distinguish files that will auto-sync from those waiting for approval or needing attention. Delayed notifications of recently confirmed content no longer add it back, and auto-sync settings clarify that Copilot's Keep button does not control syncing. <!-- reported-by: Michel Meyer / SNU0000010216 --> <!-- web: skip -->
+
+- **Review batch requests consistently:** requests containing deletions require both REST write and Delete records permission, including equivalent Batch API URLs. With SN Utils 10.2.9.5, the review card lists each request and preserves accented text and other languages. <!-- reported-by: Dennis Donnelly / email 2026-10-27 --> <!-- web: skip -->
+- **Preview deletions safely:** dry runs only read the target records and never delete or wait for approval. The delete permission must still be granted. <!-- reported-by: Dennis Donnelly / email 2026-10-27 --> <!-- web: skip -->
+- **Honor every approval requirement:** commands with several permissions request review whenever any required permission is set to approve. <!-- reported-by: Dennis Donnelly / email 2026-10-27 --> <!-- web: skip -->
+- **Get consistent deletion results:** bulk deletion reports an error with each record's outcome when any deletion fails, including when all fail. With SN Utils 10.2.9.5, approved single-record deletes read the target first and return its display value. <!-- reported-by: Dennis Donnelly / email 2026-10-27 --> <!-- web: skip -->
+
+## `@snutils/snu` 0.6.1 (2026-10-28)
+
+- **Delete records by query:** the CLI and MCP tools accept a query and limit, offer a read-only preview, and report an outcome for every record. Any failed deletion returns an error with the individual outcomes. Single-record deletes return the target's display value. <!-- reported-by: Dennis Donnelly / email 2026-10-27 --> <!-- web: skip -->
+- **Apply the same deletion protections in both hosts:** the standalone bridge includes the batch permissions, safe dry runs and approval fixes described above. The expanded review preview and consistent approved-delete results require SN Utils 10.2.9.5. <!-- reported-by: Dennis Donnelly / email 2026-10-27 --> <!-- web: skip -->
 
 ## 4.10.0 (2026-10-26)
 

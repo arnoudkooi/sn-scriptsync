@@ -68,6 +68,12 @@ function scriptOutputOf(response: any): string {
   return String(response.output ?? '');
 }
 
+/** A Table API sys_id, whether the row came back raw or as { value, link }. */
+function normaliseSysId(value: unknown): string {
+  if (value && typeof value === 'object') return String((value as any).value ?? '');
+  return String(value ?? '');
+}
+
 // Mirrors codeForRest() in the VS Code agent so both hosts report the same
 // code for the same HTTP failure.
 function codeForRestStatus(status: number | undefined, message: string): string {
@@ -806,6 +812,40 @@ export class StandaloneDispatcher {
     };
   }
 
+  /**
+   * One REST call through the helper tab. An HTTP failure maps to the code the
+   * VS Code host's restRequest gives it (codeForRest), with status and detail
+   * in details. `id` correlates the call with its request so a cancel reaches
+   * it; a side read uses a fresh id.
+   */
+  private async helperRest(
+    inst: { settings: any },
+    reqCommand: string,
+    opts: { endpoint: string; method: string; queryParams?: Record<string, string>; body?: any },
+    id: string = crypto.randomUUID(),
+  ): Promise<any> {
+    const pendingPromise = this.pending.register({ id, command: reqCommand, timeoutMs: 70_000 });
+    this.ws.sendToBrowser({
+      action: 'agentRestApi',
+      agentRequestId: id,
+      endpoint: opts.endpoint,
+      method: opts.method,
+      ...(opts.body !== undefined ? { body: opts.body } : {}),
+      ...(opts.queryParams ? { queryParams: opts.queryParams } : {}),
+      instance: inst.settings,
+      appName: 'SN Utils CLI',
+    });
+    const res: any = await pendingPromise;
+    if (!res || res.success === false) {
+      const message = res?.error || 'REST request failed';
+      throw Object.assign(new Error(message), {
+        code: res?.code || codeForRestStatus(res?.status, message),
+        details: res?.details || { status: res?.status, detail: res?.detail ?? null },
+      });
+    }
+    return res;
+  }
+
   private async restGet(inst: { settings: any }, reqCommand: string, endpoint: string, queryParams: Record<string, string>, withPagination = false): Promise<any> {
     const correlationId = crypto.randomUUID();
     const pendingPromise = this.pending.register({ id: correlationId, command: reqCommand, timeoutMs: 70_000 });
@@ -1455,15 +1495,16 @@ export class StandaloneDispatcher {
       // 3. Two-Phase Human Review Enforcement (when supported by connected helper)
       const helperState = this.ws.getHelperState();
       let isReviewRequired = policy.review === 'required' && this.config.reviewHighRisk;
-      if (helperState.capabilities?.instanceSecurityGates && instanceOrigin) {
-        for (const gateName of policy.gates) {
-          const gateMode = this.ws.getInstanceGate(instanceUrl, gateName);
-          if (gateMode === 'auto') {
-            isReviewRequired = false;
-          } else if (gateMode === 'approve' && !policy.selfConfirmed && !policy.preflight) {
-            // A selfConfirmed command is confirmed in the helper's own modal.
-            isReviewRequired = true;
-          }
+      if (helperState.capabilities?.instanceSecurityGates && instanceOrigin && policy.gates.length > 0) {
+        // Deny-wins across gates: one 'approve' gate asks for a review whatever
+        // the others say; only a command whose every gate is 'auto' skips it.
+        // A selfConfirmed command is confirmed in the helper's own modal, and a
+        // preflight writes nothing, so neither raises a review.
+        const modes = policy.gates.map((gateName) => this.ws.getInstanceGate(instanceUrl, gateName));
+        if (modes.some((mode) => mode === 'approve') && !policy.selfConfirmed && !policy.preflight) {
+          isReviewRequired = true;
+        } else if (modes.every((mode) => mode === 'auto')) {
+          isReviewRequired = false;
         }
       }
       // Positive capability detection: helpers in the wild predate the review
@@ -1727,29 +1768,89 @@ export class StandaloneDispatcher {
         return { id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result: { deleted: true, ...summary } };
       }
 
-      // Delete Record
+      // Delete Record: one record by sys_id, or up to `limit` records matching
+      // an encoded query, the way the VS Code host does it (records.ts). The
+      // display value is read first so the result says what went.
       if (req.command === 'delete_record') {
-        const { table, sys_id } = req.params || {};
-        const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
-        this.ws.sendToBrowser({
-          action: 'agentRestApi',
-          agentRequestId: correlationId,
-          endpoint: `/api/now/table/${table}/${sys_id}`,
-          method: 'DELETE',
-          instance: inst.settings,
-          appName: 'SN Utils CLI',
-        });
-        const res = await pendingPromise;
-        if (res.success === false) {
-          throw Object.assign(new Error(res.error || 'Delete failed'), { code: res.code || codeForRestStatus(res.status, res.error) });
+        const table = req.params?.table;
+        const sysId = req.params?.sys_id;
+        const query = req.params?.query;
+        const dryRun = req.params?.dryRun === true;
+        if (!table || typeof table !== 'string') {
+          throw Object.assign(new Error('Missing required param: table'), { code: 'E_INVALID_PARAMS' });
         }
-        return {
-          id: req.id,
-          command: req.command,
-          status: 'success',
-          timestamp: Date.now(),
-          result: { deleted: true, table, sys_id },
-        };
+        const displayFields = 'sys_id,name,number,short_description,sys_class_name';
+        const displayOf = (record: any, fallback: string) => record?.name || record?.number || record?.short_description || fallback;
+        const done = (result: Record<string, any>): AgentResponse => ({ id: req.id, command: req.command, status: 'success', timestamp: Date.now(), result });
+
+        // ---- Single delete ----
+        if (sysId) {
+          let existing: any = null;
+          try {
+            const read = await this.helperRest(inst, req.command, {
+              endpoint: `/api/now/table/${table}/${sysId}`,
+              method: 'GET',
+              queryParams: { sysparm_display_value: 'false', sysparm_fields: displayFields },
+            });
+            existing = read.data?.result ?? null;
+          } catch (err: any) {
+            if (err?.code !== 'E_NOT_FOUND') throw err;
+          }
+          if (!existing) {
+            throw Object.assign(new Error(`No ${table} record with sys_id ${sysId}`), { code: 'E_NOT_FOUND' });
+          }
+          const display = displayOf(existing, sysId);
+          if (dryRun) {
+            return done({ dryRun: true, deleted: false, table, sys_id: sysId, display, message: 'Dry run: record not deleted' });
+          }
+          await this.helperRest(inst, req.command, { endpoint: `/api/now/table/${table}/${sysId}`, method: 'DELETE' }, correlationId);
+          return done({ deleted: true, table, sys_id: sysId, display });
+        }
+
+        // ---- Bulk delete (query-based) ----
+        if (!query || typeof query !== 'string') {
+          throw Object.assign(new Error('Provide either sys_id (single) or query (bulk)'), { code: 'E_INVALID_PARAMS' });
+        }
+        const confirm = req.params?.confirm === true;
+        const limit = Number(req.params?.limit);
+        if (!dryRun && (!confirm || !Number.isInteger(limit) || limit <= 0)) {
+          throw Object.assign(
+            new Error('Bulk delete requires confirm:true and a positive integer limit. Tip: run with dryRun:true first to preview the matches.'),
+            { code: 'E_CONFIRM_REQUIRED' }
+          );
+        }
+        const effectiveLimit = Number.isInteger(limit) && limit > 0 ? limit : 100;
+        const { data } = await this.helperRest(inst, req.command, {
+          endpoint: `/api/now/table/${table}`,
+          method: 'GET',
+          queryParams: { sysparm_query: query, sysparm_fields: displayFields, sysparm_limit: String(effectiveLimit), sysparm_display_value: 'false' },
+        });
+        const matches: any[] = data?.result || [];
+        const previews = matches.map((record) => {
+          const id = normaliseSysId(record.sys_id);
+          return { sys_id: id, display: displayOf(record, id) };
+        });
+        if (dryRun) {
+          return done({ dryRun: true, deleted: false, table, count: previews.length, limit: effectiveLimit, matches: previews, message: `Dry run: ${previews.length} record(s) would be deleted` });
+        }
+        const results: Array<{ sys_id: string; display: string; deleted: boolean; error?: string }> = [];
+        let failures = 0;
+        for (const match of previews) {
+          try {
+            await this.helperRest(inst, req.command, { endpoint: `/api/now/table/${table}/${match.sys_id}`, method: 'DELETE' });
+            results.push({ sys_id: match.sys_id, display: match.display, deleted: true });
+          } catch (err: any) {
+            failures++;
+            results.push({ sys_id: match.sys_id, display: match.display, deleted: false, error: err?.message || String(err) });
+          }
+        }
+        if (failures > 0) {
+          throw Object.assign(
+            new Error(`Deleted ${results.length - failures} of ${results.length}; ${failures} failed`),
+            { code: 'E_PARTIAL_FAILURE', details: { results } }
+          );
+        }
+        return done({ deleted: failures === 0, table, count: results.length, deletedCount: results.length - failures, results });
       }
 
       // Code Search (GraphQL)

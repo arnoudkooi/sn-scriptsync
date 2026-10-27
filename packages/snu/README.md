@@ -281,6 +281,8 @@ snu review result <reviewId> --wait 0
 # Delete record (--confirm required for safety, or --dry-run to inspect)
 snu record delete incident <sys_id> --dry-run
 snu record delete incident <sys_id> --confirm
+snu record delete incident --query "active=false^sys_created_on<javascript:gs.daysAgo(365)" --dry-run
+snu record delete incident --query "active=false^sys_created_on<javascript:gs.daysAgo(365)" --limit 50 --confirm
 ```
 
 Attachments accept a workspace file or, through MCP/HTTP, base64 `imageData` plus `fileName`. CLI paths are resolved from your current directory; MCP relative `filePath` is resolved under the selected instance folder. Absolute paths must stay inside the bridge workspace. Both hosts reject symbolic links and paths outside that workspace. `update_record_batch` changes fields on a single record; it does not perform a bulk update across records. It strips read-only `sys_scope` and warns when a supplied non-empty field comes back empty.

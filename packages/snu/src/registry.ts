@@ -376,38 +376,55 @@ export const TOOLS: ToolDefinition[] = [
     name: 'snu_delete_record',
     agentCommand: 'delete_record',
     description:
-      'Delete a single record from ServiceNow by sys_id. Destructive: disabled by default (deleteRecords.enabled) and requires confirm: true or dryRun: true.',
+      'Delete one record by sys_id, or bulk-delete the records matching an encoded query (query + limit). Destructive: disabled by default (deleteRecords.enabled) and requires confirm: true or dryRun: true. A single delete echoes the display value; a bulk delete reports an outcome per record. dryRun lists what would be deleted without deleting anything.',
     cliCommand: 'record delete',
-    cliUsage: 'snu record delete <table> <sys_id> [--confirm] [--dry-run] [--instance <i>] [--json]',
+    cliUsage: 'snu record delete <table> [sys_id] [--query <q> --limit <n>] [--confirm] [--dry-run] [--instance <i>] [--json]',
     cliOptions: {
+      query: { type: 'string', short: 'q', description: 'Encoded query selecting the records to delete (bulk mode, instead of sys_id)' },
+      limit: { type: 'string', short: 'l', description: 'Most records the bulk delete may remove (required with --confirm)' },
       confirm: { type: 'boolean', description: 'Must be set to true to execute deletion' },
-      'dry-run': { type: 'boolean', description: 'Return target record without deleting' },
+      'dry-run': { type: 'boolean', description: 'Return the target record(s) without deleting' },
     },
     inputSchema: {
       type: 'object',
       properties: {
         table: { type: 'string', description: 'Table name' },
-        sys_id: { type: 'string', description: 'Record sys_id' },
+        sys_id: { type: 'string', description: 'Record sys_id (single mode)' },
+        query: { type: 'string', description: 'Encoded query selecting the records to delete (bulk mode, instead of sys_id)' },
+        limit: { type: 'integer', minimum: 1, description: 'Most records the bulk delete may remove (bulk mode, required unless dryRun)' },
         confirm: { type: 'boolean', const: true, description: 'Must be set to true to execute deletion' },
-        dryRun: { type: 'boolean', description: 'When true, returns the record that would be deleted without deleting it' },
+        dryRun: { type: 'boolean', description: 'When true, returns the record(s) that would be deleted without deleting' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
-      required: ['table', 'sys_id'],
+      required: ['table'],
       additionalProperties: false,
     },
     mapInput: (input) => {
       const isDryRun = input.dryRun === true || input['dry-run'] === true;
+      const sysId = typeof input.sys_id === 'string' && input.sys_id.trim() ? input.sys_id.trim() : undefined;
+      const query = typeof input.query === 'string' && input.query.trim() ? input.query.trim() : undefined;
+      if (!sysId && !query) {
+        throw new Error('snu_delete_record needs either sys_id (one record) or query (the records matching an encoded query).');
+      }
+      if (sysId && query) {
+        throw new Error('snu_delete_record takes either sys_id or query, not both.');
+      }
       if (!isDryRun && input.confirm !== true) {
         throw new Error('snu_delete_record is destructive: pass --confirm to execute or --dry-run to inspect the target record.');
+      }
+      const limit = input.limit === undefined || input.limit === '' ? undefined : Number(input.limit);
+      if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+        throw new Error('limit must be a positive integer: the most records the bulk delete may remove.');
+      }
+      if (query && !isDryRun && limit === undefined) {
+        throw new Error('snu_delete_record by query needs --limit, the most records it may remove. Run with --dry-run first to see the matches.');
       }
       return {
         command: 'delete_record',
         instance: input.instance,
-        params: {
-          table: input.table,
-          sys_id: input.sys_id,
-          dryRun: isDryRun,
-        },
+        params: sysId
+          ? { table: input.table, sys_id: sysId, dryRun: isDryRun }
+          : { table: input.table, query, ...(limit !== undefined ? { limit } : {}), confirm: input.confirm === true, dryRun: isDryRun },
       };
     },
   },

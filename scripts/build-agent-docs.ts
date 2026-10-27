@@ -167,7 +167,9 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v30 -> v31: explicit save and content-verification workflow; queue/review
 //               boundaries and standalone update_record read-back failures;
 //               reuse verified save results instead of duplicate agent reads.
-const INSTRUCTIONS_VERSION = 31;
+//   v31 -> v32: query-based deletion in both hosts, read-only delete previews,
+//               and Batch API permission and review requirements.
+const INSTRUCTIONS_VERSION = 32;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
