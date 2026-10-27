@@ -33,7 +33,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { readErrorInstance, instanceFolderMatchesError } from './agent/errorRelay';
 import { ExplicitSaveIntents, SyncIntent, decideEditorSave, filesForSync } from './saveIntent';
-import { InFlightSave, SubmittedFile, SyncTarget, SyncTracker } from './syncTracker';
+import { InFlightSave, SubmittedFile, SyncTarget, SyncTracker, revisionOf } from './syncTracker';
 import {
 	setRuntime as setAgentRuntime,
 	setSyncStateProvider,
@@ -188,8 +188,8 @@ let lastSave = Math.floor(+new Date() / 1000);
 // Documents Save & Sync is saving right now (see src/saveIntent.ts). Only a save
 // carrying this mark pushes; every other save of a synced file is held.
 const explicitSaveIntents = new ExplicitSaveIntents();
-// Track timestamps of editor saves to ignore subsequent watcher events
-const recentManualSaves: Map<string, number> = new Map();
+// Track editor save revisions so their duplicate watcher events can be ignored.
+const recentManualSaves = new Map<string, { at: number; revision: string }>();
 
 // Global debounce state
 let globalDebounceTimer: NodeJS.Timeout | undefined;
@@ -327,7 +327,8 @@ function extForFieldType(fieldType: string): string {
 // even when auto-sync is otherwise on).
 function enqueueForReview(filePath: string) {
 	pendingFiles.add(filePath);
-	if (queueProvider) queueProvider.updateQueue(pendingFiles, 0);
+	queueProvider?.setPendingStatus(filePath, 'Review before sync is enabled.');
+	if (queueProvider) queueProvider.updateQueue(pendingFiles, 0, !!globalDebounceTimer || queueProvider.isPaused);
 }
 
 function openForReview(filePath: string, attempt = 0) {
@@ -749,6 +750,28 @@ function isHeldPendingFile(filePath: string): boolean {
 		|| reviewBaselines.has(reviewKey(filePath));
 }
 
+function showPendingReason(filePath: string, newerChanges = false) {
+	const review = reviewWritesEnabled() || agentCreateFilesByPath.has(filePath) || reviewBaselines.has(reviewKey(filePath));
+	const heldReason = review ? 'Review before sync is enabled.'
+		: heldSaves.has(filePath) ? 'This file was saved locally without Save & Sync and needs a manual sync.' : undefined;
+	queueProvider?.setPendingStatus(filePath, heldReason, newerChanges);
+}
+
+// File watchers and editor save events can arrive after the matching saveResult.
+// Ignore only identical, recently confirmed content; a new revision or a staged
+// review must still be handled normally. Explicit Save & Sync always runs.
+function isDuplicateConfirmedSave(filePath: string): boolean {
+	if (agentCreateFilesByPath.has(filePath) || reviewBaselines.has(reviewKey(filePath))) return false;
+	try {
+		if (!syncTracker.isRecentlyConfirmed(filePath, fs.readFileSync(filePath, 'utf8'))) return false;
+		auditLog('file_event_ignored', { filePath, reason: 'recently_confirmed_content' });
+		return true;
+	} catch {
+		syncTracker.forgetConfirmation(filePath);
+		return false;
+	}
+}
+
 function clearStagedCreates() {
 	agentStagedCreates.clear();
 	agentCreateFilesByPath.clear();
@@ -914,7 +937,7 @@ function handleSaveResult(msg: any) {
 			// The instance now holds what was sent; a review file diffs and
 			// restores against that, not against the value from before the save.
 			rebaseReviewBaseline(file.filePath, file.submittedContent);
-			queueProvider?.setFileStatus(file.filePath, 'pending');
+			showPendingReason(file.filePath, true);
 		} else {
 			heldSaves.add(file.filePath);
 			queueProvider?.setFileStatus(file.filePath, 'failed', detail);
@@ -1352,6 +1375,7 @@ function enqueuePendingFile(
 	debounceDelay: number
 ) {
 	pendingFiles.add(filePath);
+	showPendingReason(filePath);
 	auditLog('queue_decision', { filePath, queued: true, reason }, runId);
 
 	// While review mode is on, nothing the watcher sees may auto-push: staged agent
@@ -1362,7 +1386,7 @@ function enqueuePendingFile(
 
 	// Monitor-only: update queue/badge but don't schedule auto sync.
 	if (debounceSeconds <= 0 || holdForReview) {
-		queueProvider.updateQueue(pendingFiles, 0);
+		queueProvider.updateQueue(pendingFiles, 0, !!globalDebounceTimer || queueProvider.isPaused);
 		auditLog('queue_monitor_only', { filePath, pendingCount: pendingFiles.size, reviewHold: holdForReview }, runId);
 		return;
 	}
@@ -1596,15 +1620,23 @@ function setupWatcher() {
 			// Ignore if this is a result of our own write. Time-window based (not
 			// one-shot): a single write can produce multiple watcher events.
 			if (ExtensionUtils.wasRecentSelfWrite(uri.fsPath)) {
+				syncTracker.forgetConfirmation(uri.fsPath);
 				auditLog('watcher_event_ignored', { reason: 'self_write_guard', filePath: uri.fsPath }, runId);
 				return;
 			}
 
-			// Ignore if this file was manually saved recently (within 2 seconds)
+			if (isDuplicateConfirmedSave(uri.fsPath)) return;
+
+			// Ignore duplicate events from a recent editor save, never a newer edit.
 			const lastManualSave = recentManualSaves.get(uri.fsPath);
-			if (lastManualSave && (Date.now() - lastManualSave < 2000)) {
-				auditLog('watcher_event_ignored', { reason: 'recent_manual_save', filePath: uri.fsPath }, runId);
-				return;
+			if (lastManualSave) {
+				try {
+					if (Date.now() - lastManualSave.at < 2000 && revisionOf(fs.readFileSync(uri.fsPath, 'utf8')) === lastManualSave.revision) {
+						auditLog('watcher_event_ignored', { reason: 'recent_manual_save', filePath: uri.fsPath }, runId);
+						return;
+					}
+				} catch { /* unreadable content is not evidence of a duplicate */ }
+				recentManualSaves.delete(uri.fsPath);
 			}
 
 			// Check if this is a NEW artifact (no sys_id) - execute immediately, don't queue
@@ -1664,7 +1696,8 @@ vscode.workspace.onDidSaveTextDocument(document => {
 	auditLog('editor_save_decision', { filePath, decision, manualReason }, buildRunId());
 
 	if (decision === 'ignore') return;
-	recentManualSaves.set(filePath, Date.now());
+	if (decision === 'queue_held' && isDuplicateConfirmedSave(filePath)) return;
+	recentManualSaves.set(filePath, { at: Date.now(), revision: revisionOf(document.getText()) });
 	if (decision === 'push') {
 		pushEditorSave(document);
 	} else if (decision === 'queue_held') {
@@ -1677,7 +1710,7 @@ vscode.workspace.onDidSaveTextDocument(document => {
 const explicitPushes = new Map<string, { version: number; at: number }>();
 function pushEditorSave(document: TextDocument) {
 	explicitPushes.set(document.uri.toString(), { version: document.version, at: Date.now() });
-	recentManualSaves.set(document.fileName, Date.now());
+	recentManualSaves.set(document.fileName, { at: Date.now(), revision: revisionOf(document.getText()) });
 	if (syncTracker.isInFlight(document.fileName)) {
 		// An earlier revision is still unanswered; this one follows right after.
 		deferredPushes.add(document.fileName);
@@ -2216,7 +2249,7 @@ const WELCOME_SETTINGS: WelcomeSetting[] = [
 	{
 		key: 'externalChanges.syncDelay',
 		label: 'Auto-sync delay (seconds)',
-		description: 'Seconds to wait before auto-syncing monitored external changes. 0 means monitor only: push with Sync Now or Ctrl+S / Cmd+S in the file. Any value above 0 enables auto-sync. Saves made without Ctrl+S / Cmd+S are never auto-synced.',
+		description: '0 means manual sync. A positive value auto-syncs external changes written directly to disk after that many seconds. This can happen before you click Keep in Copilot; Keep is not a ScriptSync approval. Saves through the editor without Save & Sync still wait for Sync Now.',
 		group: GROUP_WORKSPACE,
 		type: 'number',
 		default: 0,

@@ -631,7 +631,7 @@
 					"type": "integer",
 					"default": 0,
 					"order": 21,
-					"description": "Seconds to wait before auto-syncing monitored external changes. Default is 0 (monitor-only). Use Sync Now or Ctrl+S / Cmd+S in the file to push changes, or set a value > 0 to enable auto-sync. Saves made without Ctrl+S / Cmd+S are never auto-synced."
+					"description": "0 means manual sync. A positive value auto-syncs external changes written directly to disk after that many seconds. This can happen before you click Keep in Copilot; Keep is not a ScriptSync approval. Saves through the editor without Save & Sync still wait for Sync Now."
 				},
 				"sn-scriptsync.agentApi.reviewWrites": {
 					"type": "boolean",
