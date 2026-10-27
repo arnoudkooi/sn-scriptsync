@@ -5,6 +5,7 @@
 // timeout); get_review_result long-polls against this registry.
 
 import { AgentResponse } from './types';
+import { FinishUsage } from './usageMetrics';
 
 interface PendingReview {
 	reviewId: string;
@@ -13,6 +14,7 @@ interface PendingReview {
 	createdAt: number;
 	settled: boolean;
 	running: boolean; // approved, and the host is executing the command now
+	finishUsage?: FinishUsage;
 	response?: AgentResponse; // final response once settled
 	waiters: Array<() => void>; // long-poll wakeups
 }
@@ -30,8 +32,9 @@ const MAX_UNSETTLED_MS = 2 * 60 * 60_000;
 
 const reviews = new Map<string, PendingReview>();
 
-export function registerReview(reviewId: string, requestId: string, command: string, reviewTimeoutMs: number): void {
+export function registerReview(reviewId: string, requestId: string, command: string, reviewTimeoutMs: number, finishUsage?: FinishUsage): void {
 	reviews.set(reviewId, {
+		finishUsage,
 		reviewId,
 		requestId,
 		command,
@@ -62,6 +65,8 @@ export function settleReview(reviewId: string, response: AgentResponse): void {
 	r.settled = true;
 	r.running = false;
 	r.response = response;
+	r.finishUsage?.(response);
+	r.finishUsage = undefined;
 	r.waiters.splice(0).forEach((wake) => wake());
 	const t = setTimeout(() => { reviews.delete(reviewId); }, RETENTION_AFTER_SETTLE_MS);
 	(t as any).unref?.();

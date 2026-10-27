@@ -257,3 +257,9 @@ test('shared hosts produce compatible helper requests, results and policies', as
     }
   });
 });
+
+// The telemetry contract is byte-identical across hosts; unknown commands never become keys.
+test('usage metrics use the same privacy and counting rules in both hosts', () => {
+  assert.equal(fs.readFileSync(path.join(root, 'src/agent/usageMetrics.ts'), 'utf8'),
+    fs.readFileSync(path.join(root, 'packages/snu/src/server/usageMetrics.ts'), 'utf8'));
+});

@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import { AgentRequest, AgentResponse } from './types';
 import { AgentError } from './errors';
+import { beginUsage, FinishUsage } from './usageMetrics';
 import { getCommand } from './commands';
 import { getSetting } from './commands/_shared';
 import { resolveInstanceFolder } from './instanceResolver';
@@ -49,6 +50,15 @@ export interface DispatchOptions {
  * else. Evaluates CommandPolicy and Two-Phase Monaco Review.
  */
 export async function dispatchAgentCommand(request: AgentRequest, options?: DispatchOptions): Promise<AgentResponse> {
+    const finish = beginUsage(request?.command, request?.params?.dryRun === true, 'vscode',
+        () => getRuntime().getHelperBuildInfo?.()?.capabilities?.usageSession,
+        event => getRuntime().sendToBrowser(event));
+    const response = await executeAgentCommand(request, options, finish);
+    finish(response);
+    return response;
+}
+
+async function executeAgentCommand(request: AgentRequest, options: DispatchOptions | undefined, finish: FinishUsage): Promise<AgentResponse> {
 	if (!request || typeof request !== 'object') {
 		return errorResponse('unknown', 'unknown', 'E_INVALID_REQUEST', 'Request must be a JSON object');
 	}
@@ -290,7 +300,7 @@ export async function dispatchAgentCommand(request: AgentRequest, options?: Disp
 
 		// Default: answer immediately so the agent can tell the user to approve,
 		// and let get_review_result collect the outcome.
-		registerReview(reviewId, request.id, request.command, reviewTimeoutMs);
+		registerReview(reviewId, request.id, request.command, reviewTimeoutMs, finish);
 		pendingPromise
 			.then(async (revResp) => settleReview(reviewId, await finalizeReview(revResp)))
 			.catch((err: any) => {

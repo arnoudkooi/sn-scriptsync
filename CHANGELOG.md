@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.10.1 (unreleased)
+
+- **See how agents use ScriptSync:** with an updated SN Utils helper, completed agent commands contribute to daily usage totals by command, outcome and bridge. Internal retries and review polling do not add extra commands, and no request content is included. Collection follows the extension Usage Data setting. <!-- reported-by: Arnoud Kooi / chat 2026-10-27 --> <!-- web: skip -->
+
 ## 4.10.0 (2026-10-26)
 
 - **Agent API: download an attachment to a file.** `download_attachment` saves one attachment (up to 50 MB) in the workspace and returns its path, size, type and checksum, never the file itself, so a binary file stays out of the agent's context. A file appears only once it has arrived complete, and an existing file is replaced only with `overwrite: true`. Needs SN Utils 10.2.9.0; an older helper tab answers `E_UNSUPPORTED_HELPER`.

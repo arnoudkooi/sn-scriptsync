@@ -3313,6 +3313,13 @@ async function startBridgeTransports(): Promise<void> {
 					}
 					return;
 				}
+                if (messageJson?.action === 'helperUsageInfo') {
+                    if (helperBuildInfo?.capabilities?.usageMetrics === 1) {
+                        helperBuildInfo.capabilities.usageSession = typeof messageJson.usageSession === 'string'
+                            && messageJson.usageSession.length <= 64 ? messageJson.usageSession : '';
+                    }
+                    return;
+                }
 				if (messageJson?.action === 'helperLicenseInfo') {
 					const tier = ['free', 'pro', 'trial', 'enterprise'].includes(messageJson.tier)
 						? messageJson.tier

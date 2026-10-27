@@ -35,6 +35,9 @@ export interface AgentResponse<T = any> {
 }
 
 export interface HelperCapabilities {
+  /** Content-free command counters, enabled by a per-helper collection session. */
+  usageMetrics?: 1;
+  usageSession?: string;
 	protocolVersion?: number;
 	commandReview?: 1 | 0;
 	rejectionFeedback?: 1 | 0;

@@ -18,6 +18,7 @@ import { NowSdkFlowError, NowSdkTransport, deployFlow, pullFlow } from '../nowsd
 import { VERSION } from '../version.js';
 import { STANDALONE_COMMANDS } from './commands.js';
 import { ReviewRegistry } from './reviewRegistry.js';
+import { beginUsage, FinishUsage } from './usageMetrics.js';
 import { resolveAttachment } from './attachmentInput.js';
 import { checkDownloadTarget, DownloadRequest, resolveDownloadTarget, saveDownloadedAttachment, validateDownloadParams } from './attachmentOutput.js';
 import { retryAfterTokenRefresh, scriptResult } from './backgroundScript.js';
@@ -1102,10 +1103,15 @@ export class StandaloneDispatcher {
       const { __batch, ...params } = req.params as any;
       req = { ...req, params };
     }
-    return this.dispatchRequest(req);
+    const finish = beginUsage(req?.command, req?.params?.dryRun === true, 'standalone',
+      () => this.ws.getHelperState().capabilities?.usageSession as string | undefined,
+      event => this.ws.sendToBrowser(event));
+    const response = await this.dispatchRequest(req, false, finish);
+    finish(response);
+    return response;
   }
 
-  private async dispatchRequest(req: AgentRequest, approved = false): Promise<AgentResponse> {
+  private async dispatchRequest(req: AgentRequest, approved = false, finish?: FinishUsage): Promise<AgentResponse> {
     const correlationId = `snu_req_${req.id}_${crypto.randomUUID()}`;
     this.requestIdToCorrelationId.set(req.id, correlationId);
     const policy = getCommandPolicy(req);
@@ -1523,6 +1529,7 @@ export class StandaloneDispatcher {
             }),
         })).then(response => {
           this.reviews.settle(reviewId, response);
+          finish?.(response);
           return response;
         }).finally(() => {
           this.pendingReviewRequests.delete(correlationId);

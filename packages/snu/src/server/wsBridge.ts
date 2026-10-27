@@ -238,6 +238,14 @@ export class StandaloneWsBridge {
       return;
     }
 
+    if (msg.action === 'helperUsageInfo') {
+      if (this.state.capabilities?.usageMetrics === 1) {
+        this.state.capabilities.usageSession = typeof msg.usageSession === 'string'
+          && msg.usageSession.length <= 64 ? msg.usageSession : '';
+      }
+      return;
+    }
+
     // 2. Per-Instance Gate Snapshot update
     if (msg.action === 'helperGatesUpdated') {
       try {
