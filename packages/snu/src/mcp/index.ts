@@ -301,12 +301,14 @@ export async function createMcpServer(): Promise<McpServer> {
   // 8. Delete Record
   server.tool(
     'snu_delete_record',
-    'Delete a single record from ServiceNow by sys_id. Destructive: disabled by default (deleteRecords.enabled) and requires confirm: true or dryRun: true.',
+    'Delete one record by sys_id, or bulk-delete the records matching an encoded query (query + limit). Destructive: disabled by default (deleteRecords.enabled) and requires confirm: true or dryRun: true. A single delete echoes the display value; a bulk delete reports an outcome per record. dryRun lists what would be deleted without deleting anything.',
     {
       table: z.string().describe('Table name'),
-      sys_id: z.string().describe('Record sys_id'),
+      sys_id: z.string().optional().describe('Record sys_id (single mode)'),
+      query: z.string().optional().describe('Encoded query selecting the records to delete (bulk mode, instead of sys_id)'),
+      limit: z.number().int().positive().optional().describe('Most records the bulk delete may remove (bulk mode, required unless dryRun)'),
       confirm: z.boolean().describe('Must be set to true to execute deletion'),
-      dryRun: z.boolean().optional().describe('When true, returns the record that would be deleted without deleting it'),
+      dryRun: z.boolean().optional().describe('When true, returns the record(s) that would be deleted without deleting'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_delete_record', args)

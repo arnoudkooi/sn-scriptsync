@@ -1,6 +1,6 @@
 ### `delete_record` ⚠️ (DESTRUCTIVE — guarded)
 
-Delete a record by `table` + `sys_id`, or bulk-delete by query. **Disabled by default.** Enable `sn-scriptsync.deleteRecords.enabled` in VS Code settings to allow it.
+Delete a record by `table` + `sys_id`, or bulk-delete by query. **Disabled by default.** Enable `sn-scriptsync.deleteRecords.enabled` in VS Code settings to allow it. Both hosts (VS Code and the standalone `snu` bridge) implement the single and the bulk form.
 
 **Single delete:**
 ```json
@@ -22,7 +22,7 @@ The display value (name/number/short_description) is read back first and echoed 
 }
 ```
 
-**Preview without deleting:** add `"dryRun": true` to return the matches that *would* be deleted.
+**Preview without deleting:** add `"dryRun": true` to return the matches that *would* be deleted. A dry run only reads, so it is never held for review; the delete permission must still be granted.
 
 **Parameters:**
 - `table` (required).
@@ -35,6 +35,12 @@ The display value (name/number/short_description) is read back first and echoed 
 **Response (single):**
 ```json
 { "status": "success", "result": { "deleted": true, "table": "incident", "sys_id": "abc...", "display": "INC0010001" } }
+```
+
+**Response (bulk):** an outcome per record. `deleted` is `true` only when every match was removed; when some fail the command answers `E_PARTIAL_FAILURE` with the same `results` list in `details`.
+```json
+{ "status": "success", "result": { "deleted": true, "table": "incident", "count": 2, "deletedCount": 2,
+  "results": [ { "sys_id": "abc...", "display": "INC0010001", "deleted": true }, { "sys_id": "def...", "display": "INC0010002", "deleted": true } ] } }
 ```
 
 **Errors:**

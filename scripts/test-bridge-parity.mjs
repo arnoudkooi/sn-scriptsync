@@ -42,7 +42,7 @@ test('shared hosts produce compatible helper requests, results and policies', as
   let reply;
   bridge.sendToBrowser = message => {
     sent.push(message);
-    pending.resolve(message.agentRequestId, reply);
+    pending.resolve(message.agentRequestId, typeof reply === 'function' ? reply(message) : reply);
   };
   const dispatcher = new StandaloneDispatcher({ cwd: harness.workspaceRoot, wsBridge: bridge, pending,
     cliFlags: { updateRecords: true, createArtifacts: true, backgroundScripts: true, deleteRecords: true } });
@@ -68,6 +68,33 @@ test('shared hosts produce compatible helper requests, results and policies', as
   await t.test('#164 code search uses searchTerm and nested options on both hosts', () => compare('code_search',
     { term: 'GlideRecord', activeOnly: true, tables: 'sys_script_include, sys_script', limit: 20 },
     { success: true, searchTerm: 'GlideRecord', stats: { count: 1 }, words: [], results: [{ sys_id: sysId }] }));
+  await t.test('a single delete reads the display value back on both hosts', () => {
+    const record = { success: true, status: 200, data: { result: { sys_id: sysId, number: 'INC0001' } } };
+    harness.reply(record); // the read-back; compare() queues the delete's own reply
+    return compare('delete_record', { table: 'incident', sys_id: sysId }, record);
+  });
+  await t.test('a dry-run bulk delete previews the same matches on both hosts', () => compare('delete_record',
+    { table: 'incident', query: 'active=false', dryRun: true },
+    { success: true, status: 200, data: { result: [{ sys_id: sysId, number: 'INC0001' }, { sys_id: { value: 'b2' }, short_description: 'Beta' }] } }));
+  await t.test('a wholly refused bulk delete returns matching errors and per-row outcomes', async () => {
+    const rows = { success: true, status: 200, data: { result: [{ sys_id: sysId }, { sys_id: 'b2' }] } };
+    const refused = { success: false, status: 403, error: 'ACL denied' };
+    const params = { table: 'incident', query: 'active=false', limit: 2, confirm: true };
+    harness.reply(rows);
+    harness.reply(refused);
+    harness.reply(refused);
+    reply = message => message.method === 'GET' ? rows : refused;
+    let editorError;
+    try { await handlers.find(handler => handler.name === 'delete_record').handle(harness.context(), params); }
+    catch (err) { editorError = err; }
+    const standalone = await dispatcher.dispatch({ id: 'delete_all_failed', command: 'delete_record', params, instance: 'testinst' });
+    assert.equal(standalone.status, 'error');
+    assert.equal(standalone.code, 'E_PARTIAL_FAILURE');
+    assert.ok(editorError);
+    assert.equal(standalone.code, editorError.code);
+    assert.equal(standalone.error, editorError.message);
+    assert.deepEqual(standalone.details, editorError.details);
+  });
   await t.test('shared commands use the same permission policies', () => {
     for (const command of ['negotiate', 'get_review_result', 'create_artifact', 'update_record_batch', 'upload_attachment', 'code_search']) {
       assert.deepEqual(standalonePolicy.getCommandPolicy({ command }), editorPolicy.getCommandPolicy({ command }));
@@ -252,6 +279,13 @@ test('shared hosts produce compatible helper requests, results and policies', as
     for (const request of [
       { command: 'download_attachment' }, { command: 'delete_attachment' }, { command: 'delete_attachment', params: { dryRun: true } },
       { command: 'run_background_script' },
+      { command: 'delete_record', params: { table: 'incident', sys_id: sysId } }, { command: 'delete_record', params: { table: 'incident', sys_id: sysId, dryRun: true } },
+      { command: 'delete_record', params: { table: 'incident', query: 'active=false', limit: 5, confirm: true } },
+      // The Batch API is classified by its sub-requests on both hosts.
+      { command: 'rest_request', params: { endpoint: '/api/now/v1/batch', method: 'POST', body: { rest_requests: [{ method: 'DELETE', url: '/x' }] } } },
+      { command: 'rest_request', params: { endpoint: '/api/now/v1/batch', method: 'POST', body: { rest_requests: [{ method: 'PATCH', url: '/x' }] } } },
+      { command: 'rest_request', params: { endpoint: '/api/now/v1/batch', method: 'POST', body: {} } },
+      { command: 'rest_request', params: { endpoint: '/api/now/table/incident', method: 'POST', body: { rest_requests: [{ method: 'DELETE', url: '/x' }] } } },
     ]) {
       assert.deepEqual(standalonePolicy.getCommandPolicy(request), editorPolicy.getCommandPolicy(request));
     }

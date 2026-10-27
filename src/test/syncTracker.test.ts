@@ -125,3 +125,69 @@ test('revisions follow the content', () => {
 	assert.notStrictEqual(revisionOf('abc'), revisionOf('abc '));
 	assert.strictEqual(revisionOf(undefined as unknown as string), revisionOf(''));
 });
+
+test('delayed identical notifications are ignored only for a recent confirmed revision', () => {
+	let now = 1000;
+	const tracker = new SyncTracker(() => now);
+	const file = '/w/a.js';
+	const id = tracker.newSyncId();
+	tracker.submit(id, target(), [{ filePath: file, content: 'v1' }]);
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), false);
+	tracker.resolve(id, true, disk({ [file]: 'v1' }));
+	now += 3000; // Beyond the old editor-save timing guard.
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), true);
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), true, 'repeated notifications stay suppressed');
+	now += 60_000;
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), false, 'old confirmations do not suppress later activity');
+});
+
+test('a new revision invalidates duplicate suppression, including a subsequent revert', () => {
+	const tracker = new SyncTracker();
+	const file = '/w/a.js';
+	const id = tracker.newSyncId();
+	tracker.submit(id, target(), [{ filePath: file, content: 'v1' }]);
+	tracker.resolve(id, true, disk({ [file]: 'v1' }));
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v2'), false);
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), false);
+});
+
+test('failed and unanswered writes cannot reuse an earlier confirmation', () => {
+	for (const outcome of ['failed', 'timeout', 'disconnect']) {
+		const tracker = new SyncTracker();
+		const file = '/w/a.js';
+		let id = tracker.newSyncId();
+		tracker.submit(id, target(), [{ filePath: file, content: 'v1' }]);
+		tracker.resolve(id, true, disk({ [file]: 'v1' }));
+		id = tracker.newSyncId();
+		tracker.submit(id, target(), [{ filePath: file, content: 'v2' }]);
+		assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), false);
+		if (outcome === 'failed') tracker.resolve(id, false, disk({ [file]: 'v1' }));
+		else if (outcome === 'timeout') tracker.expire(id);
+		else tracker.drain();
+		assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), false, outcome);
+	}
+});
+
+test('a newer disk revision at confirmation is never treated as saved', () => {
+	const tracker = new SyncTracker();
+	const file = '/w/a.js';
+	const id = tracker.newSyncId();
+	tracker.submit(id, target(), [{ filePath: file, content: 'v1' }]);
+	tracker.resolve(id, true, disk({ [file]: 'v2' }));
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v2'), false);
+	assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), false);
+});
+
+test('disconnect, clear and a refreshed file invalidate recent confirmations', () => {
+	for (const reset of ['disconnect', 'clear', 'refresh']) {
+		const tracker = new SyncTracker();
+		const file = '/w/a.js';
+		const id = tracker.newSyncId();
+		tracker.submit(id, target(), [{ filePath: file, content: 'v1' }]);
+		tracker.resolve(id, true, disk({ [file]: 'v1' }));
+		if (reset === 'disconnect') tracker.drain();
+		else if (reset === 'clear') tracker.clear();
+		else tracker.forgetConfirmation(file);
+		assert.strictEqual(tracker.isRecentlyConfirmed(file, 'v1'), false, reset);
+	}
+});

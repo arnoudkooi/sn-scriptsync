@@ -319,3 +319,20 @@ test('Health: transportApiVersion is preferred but apiVersion still works', asyn
   assert.strictEqual(health.apiVersion, 9, 'a pre-rename bridge is still usable');
   (serve as any).last.close();
 });
+
+test('Adapter: snu_delete_record maps a bulk delete by query', () => {
+  const tool = getToolByName('snu_delete_record')!;
+  assert.deepStrictEqual(tool.inputSchema.required, ['table']);
+  assert.throws(() => tool.mapInput({ table: 'incident', confirm: true }), /either sys_id .* or query/);
+  assert.throws(() => tool.mapInput({ table: 'incident', sys_id: '123', query: 'active=false', confirm: true }), /not both/);
+  assert.throws(() => tool.mapInput({ table: 'incident', query: 'active=false', confirm: true }), /needs --limit/);
+  assert.throws(() => tool.mapInput({ table: 'incident', query: 'active=false', confirm: true, limit: '0' }), /positive integer/);
+  assert.throws(() => tool.mapInput({ table: 'incident', query: 'active=false', limit: 5 }), /pass --confirm/);
+
+  const dry = tool.mapInput({ table: 'incident', query: 'active=false', 'dry-run': true });
+  assert.deepStrictEqual(dry.params, { table: 'incident', query: 'active=false', confirm: false, dryRun: true });
+  const confirmed = tool.mapInput({ table: 'incident', query: 'active=false', limit: '25', confirm: true });
+  assert.deepStrictEqual(confirmed.params, { table: 'incident', query: 'active=false', limit: 25, confirm: true, dryRun: false });
+  const single = tool.mapInput({ table: 'incident', sys_id: ' 123 ', confirm: true });
+  assert.deepStrictEqual(single.params, { table: 'incident', sys_id: '123', dryRun: false });
+});

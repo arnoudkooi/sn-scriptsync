@@ -152,7 +152,7 @@ export function printHelp(): void {
   record update-many <table>          Update up to 200 records, rows carry sys_id (--rows, --file, or stdin)
   batch result <batchId>              Outcome of a create-many / update-many batch, per row
   type analyze <type>                 Read-only profile of how tables or catalog items are built here
-  record delete <table> <sys_id>      Delete a record (--confirm or --dry-run)
+  record delete <table> [sys_id]      Delete a record, or several with --query <q> --limit <n> (--confirm or --dry-run)
   artifact create <table> <name>      Create a scriptable artifact (Script Include, etc.)
   attachment upload <table> <id>      Attach a workspace file (--file <path>)
   attachment download <sys_id>        Save an attachment to a workspace file (--out <path>, --overwrite)
@@ -967,11 +967,14 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         break;
 
       case 'record delete':
-        if (!positionals[0] || !positionals[1]) {
-          throw new ScriptSyncClientError('Usage: snu record delete <table> <sys_id> [--confirm] [--dry-run]', 'E_INVALID_PARAMS');
+        if (!positionals[0] || (!positionals[1] && !values.query)) {
+          throw new ScriptSyncClientError(
+            'Usage: snu record delete <table> <sys_id> [--confirm] [--dry-run], or snu record delete <table> --query <q> --limit <n> [--confirm] [--dry-run]',
+            'E_INVALID_PARAMS'
+          );
         }
         inputData.table = positionals[0];
-        inputData.sys_id = positionals[1];
+        if (positionals[1]) inputData.sys_id = positionals[1];
         break;
 
       case 'run': {

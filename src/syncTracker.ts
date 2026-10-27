@@ -78,6 +78,10 @@ function sameDestination(a: SyncTarget, b: SyncTarget): boolean {
 
 export class SyncTracker {
 	private readonly inFlight = new Map<string, InFlightSave>();
+	// Only suppress delayed notifications of a recently confirmed revision.
+	// This is not a durable claim about the instance: another client can edit it.
+	private readonly confirmed = new Map<string, { revision: string; at: number }>();
+	private readonly confirmationWindowMs = 60_000;
 	private seq = 0;
 
 	constructor(private readonly now: () => number = Date.now) {}
@@ -92,6 +96,7 @@ export class SyncTracker {
 	}
 
 	submit(syncId: string, target: SyncTarget, files: SubmittedFile[]): InFlightSave {
+		for (const file of files) this.forgetConfirmation(file.filePath);
 		const save: InFlightSave = {
 			syncId,
 			target: { ...target, fields: [...target.fields] },
@@ -100,6 +105,31 @@ export class SyncTracker {
 		};
 		this.inFlight.set(syncId, save);
 		return save;
+	}
+
+	forgetConfirmation(filePath: string): void {
+		this.confirmed.delete(filePath);
+	}
+
+	/** A different revision invalidates the guard, including a later revert. */
+	isRecentlyConfirmed(filePath: string, content: string): boolean {
+		const saved = this.confirmed.get(filePath);
+		if (!saved) return false;
+		if (this.isInFlight(filePath) || this.now() - saved.at >= this.confirmationWindowMs || revisionOf(content) !== saved.revision) {
+			this.forgetConfirmation(filePath);
+			return false;
+		}
+		return true;
+	}
+
+	private rememberConfirmation(filePath: string, revision: string) {
+		const now = this.now();
+		for (const [file, saved] of this.confirmed) {
+			if (now - saved.at >= this.confirmationWindowMs) this.confirmed.delete(file);
+		}
+		// Bound memory even when a large workspace syncs many files at once.
+		if (this.confirmed.size >= 1000) this.confirmed.delete(this.confirmed.keys().next().value);
+		this.confirmed.set(filePath, { revision, at: now });
 	}
 
 	isInFlight(filePath: string): boolean {
@@ -140,6 +170,7 @@ export class SyncTracker {
 			const current = currentContent(file.filePath);
 			// A file that is gone cannot hold a newer change.
 			const unchanged = current === undefined || revisionOf(current) === file.revision;
+			if (current !== undefined && unchanged) this.rememberConfirmation(file.filePath, file.revision);
 			return { filePath: file.filePath, outcome: unchanged ? 'confirmed' : 'superseded', submittedContent: file.content };
 		});
 		return { syncId, ok, target: save.target, files };
@@ -156,11 +187,13 @@ export class SyncTracker {
 	drain(): InFlightSave[] {
 		const saves = [...this.inFlight.values()];
 		this.inFlight.clear();
+		this.confirmed.clear();
 		return saves;
 	}
 
 	/** Forget everything without reporting (queue cleared by the user). */
 	clear(): void {
 		this.inFlight.clear();
+		this.confirmed.clear();
 	}
 }

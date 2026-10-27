@@ -39,7 +39,7 @@ export interface CommandPolicy {
   risk: CommandRisk;
   gates: Array<keyof SecurityGates>;
   review: 'never' | 'optional' | 'required';
-  reviewKind?: 'background_script' | 'record_delete' | 'rest_delete' | 'ui_action' | 'bulk_delete' | 'record_batch';
+  reviewKind?: 'background_script' | 'record_delete' | 'rest_delete' | 'rest_batch' | 'ui_action' | 'bulk_delete' | 'record_batch';
   /**
    * The helper tab asks the user to confirm this command in its own modal, so
    * an 'approve' gate does not add a command review on top. The gate still has
@@ -53,13 +53,50 @@ export interface CommandPolicy {
   preflight?: boolean;
 }
 
+/** Endpoint of the Batch API, which runs the requests carried in its body. */
+const BATCH_ENDPOINT = /^\/api\/now\/v\d+\/batch\/?$/i;
+
+/**
+ * The sub-requests of a Batch API call (POST /api/now/v1/batch), or undefined
+ * when the request is not one. Every entry of the body's rest_requests array
+ * carries its own method and url, so the outer POST says nothing about what
+ * the call does. Returns null when the body holds no readable rest_requests
+ * array; the policy treats that as the strictest case, so a malformed batch
+ * is reviewed instead of waved through as a write.
+ */
+export function batchSubRequests(params: Record<string, any> | undefined): Array<{ method: string; url: string }> | null | undefined {
+  // Match the URL parser used by the helper before fetch: dot segments,
+  // encoded dot segments and fragments must not change the permission gate.
+  let endpoint: string;
+  try {
+    endpoint = new URL(String(params?.endpoint ?? ''), 'https://instance.invalid').pathname.replace(/\/{2,}/g, '/');
+  } catch {
+    return null; // An unreadable target cannot be treated as a plain write.
+  }
+  if (!BATCH_ENDPOINT.test(endpoint)) return undefined;
+  let body = params?.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { return null; }
+  }
+  const entries = body?.rest_requests;
+  if (!Array.isArray(entries)) return null;
+  return entries.map((entry: any) => ({
+    method: String(entry?.method ?? '').toUpperCase(),
+    url: String(entry?.url ?? ''),
+  }));
+}
+
 export function getCommandPolicy(req: AgentRequest): CommandPolicy {
   switch (req.command) {
     case 'run_background_script':
       return { risk: 'execute', gates: ['backgroundScripts'], review: 'required', reviewKind: 'background_script' };
 
+    // A dryRun only reads the record(s) that would go: the gate must still be
+    // granted, but nothing is reviewed. The host handles the read-only preview.
     case 'delete_record':
-      return { risk: 'delete', gates: ['deleteRecords'], review: 'required', reviewKind: 'record_delete' };
+      return req.params?.dryRun === true
+        ? { risk: 'delete', gates: ['deleteRecords'], review: 'never', preflight: true }
+        : { risk: 'delete', gates: ['deleteRecords'], review: 'required', reviewKind: 'record_delete' };
 
     case 'delete_application':
       return { risk: 'delete', gates: ['deleteRecords', 'backgroundScripts'], review: 'required', reviewKind: 'bulk_delete' };
@@ -78,6 +115,19 @@ export function getCommandPolicy(req: AgentRequest): CommandPolicy {
 
     case 'rest_request': {
       const method = (req.params?.method || 'GET').toUpperCase();
+      // A Batch API call is classified by its sub-requests, not by the outer
+      // POST: one DELETE, or an entry whose method cannot be read, makes the
+      // whole batch a reviewed delete behind both gates; otherwise it is the
+      // write the outer POST already was. The helper sends no body with a
+      // GET, so only a write method can carry a batch.
+      const batch = ['POST', 'PUT', 'PATCH'].includes(method) ? batchSubRequests(req.params) : undefined;
+      if (batch !== undefined) {
+        const methods = batch === null ? ['DELETE'] : batch.map((entry) => entry.method);
+        if (methods.some((m) => !['GET', 'POST', 'PUT', 'PATCH'].includes(m))) {
+          return { risk: 'delete', gates: ['deleteRecords', 'restRequest'], review: 'required', reviewKind: 'rest_batch' };
+        }
+        return { risk: 'write', gates: ['restRequest'], review: 'never' };
+      }
       if (method === 'DELETE') {
         return { risk: 'delete', gates: ['deleteRecords'], review: 'required', reviewKind: 'rest_delete' };
       }

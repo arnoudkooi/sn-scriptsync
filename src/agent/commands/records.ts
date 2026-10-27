@@ -548,7 +548,7 @@ const delete_record: CommandHandler = {
 			if (!existing) throw new AgentError('E_NOT_FOUND', `No ${table} record with sys_id ${sysId}`);
 			const display = existing.name || existing.number || existing.short_description || sysId;
 			if (dryRun) {
-				return { dryRun: true, deleted: false, table, sys_id: sysId, display, message: 'Dry run — record NOT deleted' };
+				return { dryRun: true, deleted: false, table, sys_id: sysId, display, message: 'Dry run: record not deleted' };
 			}
 			await restRequest(ctx, instanceSettings, { endpoint: `/api/now/table/${table}/${sysId}`, method: 'DELETE' });
 			ctx.log(`Agent API: Deleted ${table}/${sysId} (${display})`);
@@ -574,7 +574,7 @@ const delete_record: CommandHandler = {
 		const previews = matches.map((r) => ({ sys_id: normaliseSysId(r.sys_id), display: r.name || r.number || r.short_description || normaliseSysId(r.sys_id) }));
 
 		if (dryRun) {
-			return { dryRun: true, deleted: false, table, count: previews.length, limit: effectiveLimit, matches: previews, message: `Dry run — ${previews.length} record(s) would be deleted` };
+			return { dryRun: true, deleted: false, table, count: previews.length, limit: effectiveLimit, matches: previews, message: `Dry run: ${previews.length} record(s) would be deleted` };
 		}
 
 		const results: Array<{ sys_id: string; display: string; deleted: boolean; error?: string }> = [];
@@ -589,7 +589,7 @@ const delete_record: CommandHandler = {
 			}
 		}
 		ctx.log(`Agent API: Bulk delete on ${table} — ${results.length - failures}/${results.length} deleted`);
-		if (failures > 0 && failures < results.length) {
+		if (failures > 0) {
 			throw new AgentError('E_PARTIAL_FAILURE', `Deleted ${results.length - failures} of ${results.length}; ${failures} failed`, { results });
 		}
 		return { deleted: failures === 0, table, count: results.length, deletedCount: results.length - failures, results };

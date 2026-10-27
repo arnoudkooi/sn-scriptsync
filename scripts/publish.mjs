@@ -7,6 +7,7 @@
  *   marketplace  vsix + publish to the VS Code Marketplace (vsce)
  *   openvsx      vsix + publish to Open VSX (npx ovsx; token via OVSX_PAT)
  *   npm          Build + test, then publish packages/snu (@snutils/snu) to npm
+ *                (runs 'npm login' first when 'npm whoami' fails)
  *   all          marketplace + openvsx + npm
  *
  * Usage:
@@ -19,9 +20,14 @@
  * Version bumps are manual and stay yours: bump package.json (extension) and/or
  * packages/snu/package.json first. The script refuses to publish a version that
  * is already live.
+ *
+ * npm login and a 2FA-protected npm publish open a browser. The script points
+ * npm at the 'SN Utils' Chrome profile (SNU_CHROME_PROFILE=<name or directory>
+ * picks another one; npm_config_browser=<command> bypasses the lookup).
  */
 import { execSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +61,7 @@ if (wants.has('marketplace') || wants.has('openvsx')) wants.add('vsix');
 // ---------- helpers ----------
 function run(cmd, opts = {}) {
   log(`${C.gray}$ ${cmd}${opts.cwd ? `   (in ${path.relative(ROOT, opts.cwd) || '.'})` : ''}${C.reset}`);
-  const res = spawnSync(cmd, { shell: true, stdio: 'inherit', cwd: opts.cwd || ROOT });
+  const res = spawnSync(cmd, { shell: true, stdio: 'inherit', cwd: opts.cwd || ROOT, env: opts.env || process.env });
   if (res.status !== 0) fail(`Command failed: ${cmd}`);
 }
 
@@ -255,15 +261,86 @@ if (wants.has('openvsx')) {
 }
 
 // ---------- npm ----------
+// npm login (web auth) and a 2FA-protected npm publish open a browser. Prefer
+// the 'SN Utils' Chrome profile, the one signed in to npm, over whatever macOS
+// treats as the default browser and profile. npm's 'browser' config is a shell
+// command it appends the URL to; running the Chrome binary with
+// --profile-directory also works while Chrome is already open.
+const CHROME_PROFILE_PATTERN = /^sn[\s_-]?utils\b/i;
+
+function chromeLocations() {
+  const home = os.homedir();
+  if (process.platform === 'darwin') {
+    return {
+      userData: path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'),
+      binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    };
+  }
+  if (process.platform === 'win32') {
+    return {
+      userData: path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Google', 'Chrome', 'User Data'),
+      binary: path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    };
+  }
+  return {
+    userData: path.join(home, '.config', 'google-chrome'),
+    binary: ['google-chrome', 'google-chrome-stable'].map((b) => capture(`command -v ${b}`)).find(Boolean) || null,
+  };
+}
+
+function resolveChromeProfile() {
+  const { userData, binary } = chromeLocations();
+  if (!binary || !fs.existsSync(binary)) return { error: 'Google Chrome not found' };
+  let cache;
+  try {
+    cache = readJson(path.join(userData, 'Local State')).profile?.info_cache || {};
+  } catch (err) {
+    return { error: `could not read the Chrome profile list (${err.code || err.message})` };
+  }
+  const wanted = process.env.SNU_CHROME_PROFILE;
+  const entries = Object.entries(cache);
+  const hit = entries.find(([dir, info]) => (wanted
+    ? dir === wanted || (info?.name || '').toLowerCase() === wanted.toLowerCase()
+    : CHROME_PROFILE_PATTERN.test(info?.name || '')));
+  if (!hit) {
+    const names = entries.map(([, info]) => info?.name).filter(Boolean);
+    return { error: `no Chrome profile named ${wanted ? `'${wanted}'` : "'SN Utils'"} (profiles: ${names.join(', ') || 'none'})` };
+  }
+  return { dir: hit[0], name: hit[1].name, binary };
+}
+
+function npmBrowserEnv() {
+  if (process.env.npm_config_browser) {
+    log(`${C.gray}Browser for npm: npm_config_browser is set, using it as-is.${C.reset}`);
+    return process.env;
+  }
+  const profile = resolveChromeProfile();
+  if (profile.error) {
+    warn(`Browser for npm: ${profile.error}. npm will open the system default browser.`);
+    return process.env;
+  }
+  log(`${C.gray}Browser for npm: Chrome profile '${profile.name}' (${profile.dir})${C.reset}`);
+  const quote = (s) => `"${s.replace(/"/g, '\\"')}"`;
+  return { ...process.env, npm_config_browser: `${quote(profile.binary)} --profile-directory=${quote(profile.dir)}` };
+}
+
 if (wants.has('npm')) {
   head('npm (@snutils/snu)');
-  const who = capture('npm whoami');
+  const npmEnv = DRY_RUN ? process.env : npmBrowserEnv();
+  let who = capture('npm whoami');
   if (!who && !DRY_RUN) {
-    warn("Not logged in to npm ('npm whoami' failed). Run 'npm login' first, or set an automation token via NPM_TOKEN/.npmrc.");
-    if (!(await confirm('Try npm publish anyway?'))) fail('Aborted npm publish.');
-  } else if (who) {
-    ok(`npm user: ${who}`);
+    warn("Not logged in to npm ('npm whoami' failed). Starting 'npm login'.");
+    // Web login: npm prints the URL, opens it in the browser chosen above and
+    // waits for the approval. Needs a TTY, like the confirmations here.
+    log(`${C.gray}$ npm login${C.reset}`);
+    const res = spawnSync('npm', ['login'], { stdio: 'inherit', cwd: ROOT, env: npmEnv });
+    who = res.status === 0 ? capture('npm whoami') : null;
+    if (!who) {
+      warn("Still not logged in after 'npm login'. Run it by hand, or set an automation token via NPM_TOKEN/.npmrc.");
+      if (!(await confirm('Try npm publish anyway?'))) fail('Aborted npm publish.');
+    }
   }
+  if (who) ok(`npm user: ${who}`);
   if (DRY_RUN) {
     // npm publish --dry-run still rejects an already-published version, so use
     // pack --dry-run: same tarball, no registry check.
@@ -273,7 +350,7 @@ if (wants.has('npm')) {
     warn('npm publish skipped.');
   } else {
     // prepublishOnly re-runs build + tests as a final gate.
-    run('npm publish', { cwd: SNU_DIR });
+    run('npm publish', { cwd: SNU_DIR, env: npmEnv });
     ok(`Published ${snuPkg.name} ${snuPkg.version}`);
   }
 }

@@ -4,8 +4,8 @@ import { SyncFileState } from './syncTracker';
 
 /** What Pending Saves shows for a file that is not simply waiting. */
 export interface QueueFileStatus {
-    state: SyncFileState;
-    /** Why a save failed or was not confirmed; shown next to the file. */
+    state: SyncFileState | 'held' | 'changed';
+    /** Why this file is waiting, failed or unconfirmed. */
     detail?: string;
 }
 
@@ -81,10 +81,16 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
         this.updateBadge();
     }
 
-    updateQueue(files: Set<string>, delayMs: number) {
+    updateQueue(files: Set<string>, delayMs: number, preserveCountdown = false) {
         this.pendingFiles = new Set(files);
         for (const filePath of Array.from(this.fileStatus.keys())) {
             if (!this.pendingFiles.has(filePath)) this.fileStatus.delete(filePath);
+        }
+
+        // Adding a held file must not hide another file's active countdown.
+        if (preserveCountdown) {
+            this.refresh();
+            return;
         }
 
         // delayMs <= 0 means "monitor only": keep a queue/badge, but don't start a countdown.
@@ -127,17 +133,26 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
         this.refresh();
     }
 
-    /** Show a file as syncing, failed or unconfirmed; 'pending' clears the mark. */
-    setFileStatus(filePath: string, state: SyncFileState, detail?: string) {
+    /** 'pending' clears an earlier status; other states explain why it remains. */
+    setFileStatus(filePath: string, state: QueueFileStatus['state'], detail?: string) {
         if (state === 'pending') this.fileStatus.delete(filePath);
         else this.fileStatus.set(filePath, { state, detail });
         this.refresh();
     }
 
-    private syncingCount(): number {
-        let count = 0;
-        this.fileStatus.forEach(status => { if (status.state === 'syncing') count++; });
-        return count;
+    setPendingStatus(filePath: string, heldReason?: string, newerChanges = false) {
+        const previous = this.fileStatus.get(filePath);
+        // A watcher notification must not hide an outstanding save or its error.
+        if (!newerChanges && ['syncing', 'failed', 'unconfirmed'].includes(previous?.state)) return;
+        if (heldReason) {
+            this.setFileStatus(filePath, 'held', newerChanges
+                ? `The previous version was saved. New changes are waiting. ${heldReason}`
+                : heldReason);
+        } else if (newerChanges || previous?.state === 'changed') {
+            this.setFileStatus(filePath, 'changed', 'The previous version was saved. This file has newer changes that have not been confirmed saved.');
+        } else {
+            this.setFileStatus(filePath, 'pending');
+        }
     }
 
     private startCountdown() {
@@ -161,39 +176,32 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
     private updateBadge() {
         if (this.view) {
             const count = this.totalCount();
-            // With no file countdown in play (monitor-only), surface a manual-sync
-            // hint instead of a timer.
-            const noCountdown = this.isMonitorOnly;
             if (count > 0) {
-                if (this._isPaused && this.pendingFiles.size > 0) {
-                    const remainingSeconds = Math.max(0, Math.ceil(this.pausedTimeRemaining / 1000));
-                    this.view.badge = {
-                        tooltip: `${count} pending - PAUSED (${remainingSeconds}s remaining)`,
-                        value: count
-                    };
-                    this.view.description = `⏸ Paused (${remainingSeconds}s)`;
-                } else if (noCountdown) {
-                    const syncing = this.syncingCount();
-                    this.view.badge = {
-                        tooltip: syncing > 0
-                            ? `${count} pending - waiting for ${syncing} to be confirmed`
-                            : `${count} pending - manual sync (Sync Now)`,
-                        value: count
-                    };
-                    this.view.description = syncing > 0 ? `Syncing ${syncing}…` : `Monitoring`;
-                } else {
-                    const remainingSeconds = Math.max(0, Math.ceil((this.currentDeadline - Date.now()) / 1000));
-                    this.view.badge = {
-                        tooltip: `${count} pending save${count !== 1 ? 's' : ''} - syncing in ${remainingSeconds}s`,
-                        value: count
-                    };
-                    this.view.description = `Syncing in ${remainingSeconds}s`;
+                let syncing = 0, held = 0, attention = 0, waiting = 0;
+                for (const file of this.pendingFiles) {
+                    const state = this.fileStatus.get(file)?.state;
+                    if (state === 'syncing') syncing++;
+                    else if (state === 'held') held++;
+                    else if (state === 'failed' || state === 'unconfirmed') attention++;
+                    else waiting++;
                 }
+                if (this.isMonitorOnly) { held += waiting; waiting = 0; }
+                const parts: string[] = [];
+                if (syncing) parts.push(`${syncing} syncing`);
+                if (waiting) parts.push(this._isPaused ? `${waiting} paused` : `${waiting} auto-sync in ${this.remainingSeconds()}s`);
+                if (held) parts.push(`${held} waiting for Sync Now`);
+                if (attention) parts.push(`${attention} need attention`);
+                this.view.description = parts.join(' · ');
+                this.view.badge = { tooltip: parts.join('\n'), value: count };
             } else {
                 this.view.badge = undefined;
                 this.view.description = undefined;
             }
         }
+    }
+
+    private remainingSeconds(): number {
+        return Math.max(0, Math.ceil((this.currentDeadline - Date.now()) / 1000));
     }
 
     getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
@@ -214,7 +222,9 @@ export class QueueTreeViewProvider implements vscode.TreeDataProvider<vscode.Tre
                 relativePath,
                 filePath,
                 vscode.TreeItemCollapsibleState.None,
-                this.fileStatus.get(filePath)
+                this.fileStatus.get(filePath),
+                this._isPaused ? 'Auto-sync paused' : this.isMonitorOnly
+                    ? 'Waiting for Sync Now' : `Auto-sync in ${this.remainingSeconds()}s`
             );
         });
 
@@ -232,11 +242,12 @@ export class QueueItem extends vscode.TreeItem {
         public readonly relativePath: string,
         public readonly filePath: string,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-        status?: QueueFileStatus
+        status?: QueueFileStatus,
+        waitingLabel = 'Waiting for Sync Now'
     ) {
         super(label, collapsibleState);
-        this.tooltip = this.relativePath;
-        this.description = this.relativePath;
+        this.tooltip = `${this.relativePath}\n${waitingLabel}. Use Sync Now or the check mark to sync this file.`;
+        this.description = `${waitingLabel} · ${this.relativePath}`;
         this.iconPath = new vscode.ThemeIcon('cloud-upload');
         this.contextValue = 'queueItem';
 
@@ -255,6 +266,13 @@ export class QueueItem extends vscode.TreeItem {
             this.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
             this.description = `Unconfirmed: ${status.detail || 'no answer from the helper tab'}`;
             this.tooltip = `${this.relativePath}\nNot confirmed: ${status.detail || 'no answer from the helper tab'}\nCheck the helper tab log, then sync it again with the check mark.`;
+        } else if (status?.state === 'held') {
+            this.iconPath = new vscode.ThemeIcon('hand');
+            this.description = `Waiting for Sync Now · ${this.relativePath}`;
+            this.tooltip = `${this.relativePath}\n${status.detail || 'This file needs your approval to sync.'}\nReview the changes, then use Sync Now or the check mark. Auto-sync will not send this file.`;
+        } else if (status?.state === 'changed') {
+            this.description = `New changes pending · ${this.relativePath}`;
+            this.tooltip = `${this.relativePath}\n${status.detail}\n${waitingLabel}. Use Sync Now or the check mark to sync this file.`;
         }
 
         // Clicking a pending file should open/activate it in the editor.

@@ -62,11 +62,11 @@ function request(command: string, params: any = {}) {
  * its context from the runtime, so replies go through the real pending registry
  * rather than the harness queue.
  */
-async function respondTo(action: string, response: any) {
-	for (let i = 0; i < 100 && !harness.sent.some((m) => m.action === action); i++) {
+async function respondTo(action: string, response: any, predicate: (m: any) => boolean = () => true) {
+	for (let i = 0; i < 100 && !harness.sent.some((m) => m.action === action && predicate(m)); i++) {
 		await new Promise((r) => setImmediate(r));
 	}
-	const msg = harness.sent.find((m) => m.action === action);
+	const msg = harness.sent.find((m) => m.action === action && predicate(m));
 	assert.ok(msg, `expected the command to send a ${action} message`);
 	pendingRegistry.resolve(msg.agentRequestId, response);
 }
@@ -275,4 +275,108 @@ test('sdk_deploy is still refused when the instance does not allow creates', asy
 
 	assert.strictEqual(resp.code, 'E_DISABLED');
 	assert.strictEqual(harness.sent.length, 0, 'nothing reached the instance');
+});
+
+// ---------------------------------------------------------------------------
+// A Batch API call (POST /api/now/v1/batch) carries its own requests, DELETE
+// included. The policy saw one POST, so the deletes inside it met neither the
+// deleteRecords gate nor the Review Queue.
+// ---------------------------------------------------------------------------
+
+const BATCH_DELETE = {
+	endpoint: '/api/now/v1/batch',
+	method: 'POST',
+	body: { batch_request_id: 'b1', rest_requests: [
+		{ id: '1', method: 'DELETE', url: '/api/now/table/incident/abc', headers: [] },
+		{ id: '2', method: 'GET', url: '/api/now/table/incident?sysparm_limit=1', headers: [] },
+	] },
+};
+
+test('a batch with DELETE sub-requests is refused when the instance does not allow deletes', async () => {
+	useRuntime({ gates: { ...ALL_OFF, restRequest: 'auto' } });
+
+	const resp = await dispatchAgentCommand(request('rest_request', BATCH_DELETE));
+
+	assert.strictEqual(resp.code, 'E_DISABLED');
+	assert.strictEqual(harness.sent.length, 0, 'nothing reached the instance');
+});
+
+test('a batch with DELETE sub-requests is held for review even when REST writes are automatic', async () => {
+	useRuntime({ gates: { ...ALL_OFF, restRequest: 'auto', deleteRecords: 'approve' } });
+
+	const resp = await dispatchAgentCommand(request('rest_request', BATCH_DELETE));
+
+	assert.strictEqual(resp.code, 'E_REVIEW_PENDING');
+	const review = harness.sent.find((m) => m.action === 'reviewRequest');
+	assert.ok(review, 'a review was raised');
+	assert.strictEqual(review.reviewKind, 'rest_batch');
+	assert.strictEqual(review.risk, 'delete');
+	assert.ok(!harness.sent.some((m) => m.action === 'agentRestApi'), 'the batch was not sent');
+
+	pendingRegistry.reject(review.agentRequestId, 'E_USER_REJECTED', 'test teardown');
+	await new Promise((r) => setImmediate(r));
+});
+
+test('a batch of plain writes still only needs the REST write permission', async () => {
+	useRuntime({ gates: { ...ALL_OFF, restRequest: 'auto' } });
+	const params = { ...BATCH_DELETE, body: { rest_requests: [
+		{ id: '1', method: 'PATCH', url: '/api/now/table/incident/abc', body: 'e30=' },
+	] } };
+
+	const pending = dispatchAgentCommand(request('rest_request', params));
+	await respondTo('agentRestApi', { success: true, status: 200, data: { serviced_requests: [] } });
+	const resp = await pending;
+
+	assert.strictEqual(resp.status, 'success');
+	assert.ok(!harness.sent.some((m) => m.action === 'reviewRequest'), 'no review for a write');
+});
+
+// Regression: the helper used to execute a reviewed dry run as a real delete.
+test('a delete_record dry run reads the record without a review', async () => {
+	useRuntime({ gates: { ...ALL_OFF, deleteRecords: 'approve' } });
+
+	const pending = dispatchAgentCommand(request('delete_record', { table: 'incident', sys_id: 'abc', dryRun: true }));
+	await respondTo('agentRestApi', { success: true, status: 200, data: { result: { sys_id: 'abc', number: 'INC0001' } } });
+	const resp = await pending;
+
+	assert.strictEqual(resp.status, 'success');
+	assert.deepStrictEqual(resp.result, { dryRun: true, deleted: false, table: 'incident', sys_id: 'abc', display: 'INC0001', message: 'Dry run: record not deleted' });
+	assert.ok(!harness.sent.some((m) => m.action === 'reviewRequest'), 'no review for a dry run');
+	assert.ok(!harness.sent.some((m) => m.method === 'DELETE'), 'nothing was deleted');
+});
+
+const EQUIVALENT_BATCH_ENDPOINTS = [
+	'/api/now/v1/./batch', '/api/now/v1/x/../batch', '/api/now/v1/%2e/batch',
+	'/api/now/v1/x/%2e%2e/batch', '/api/now/v1/batch#ignored',
+];
+
+for (const endpoint of EQUIVALENT_BATCH_ENDPOINTS) {
+	test(`normalized batch target obeys delete permission and review: ${endpoint}`, async () => {
+		const params = { ...BATCH_DELETE, endpoint };
+		useRuntime({ gates: { ...ALL_OFF, restRequest: 'auto' } });
+		const denied = await dispatchAgentCommand(request('rest_request', params));
+		assert.strictEqual(denied.code, 'E_DISABLED');
+		assert.strictEqual(harness.sent.length, 0);
+		useRuntime({ gates: { ...ALL_OFF, restRequest: 'auto', deleteRecords: 'approve' } });
+		const held = await dispatchAgentCommand(request('rest_request', params));
+		assert.strictEqual(held.code, 'E_REVIEW_PENDING');
+		const review = harness.sent.find(m => m.action === 'reviewRequest');
+		assert.strictEqual(review?.reviewKind, 'rest_batch');
+		assert.ok(!harness.sent.some(m => m.action === 'agentRestApi'));
+		pendingRegistry.reject(review!.agentRequestId, 'E_USER_REJECTED', 'test teardown');
+		await new Promise(r => setImmediate(r));
+	});
+}
+
+test('approved single delete reads its target and returns the full deletion outcome', async () => {
+	useRuntime({ gates: { ...ALL_OFF, deleteRecords: 'approve' } });
+	const pending = dispatchAgentCommand(request('delete_record', { table: 'incident', sys_id: 'abc', awaitReview: true }));
+	await respondTo('reviewRequest', { success: true, approvedNotExecuted: true });
+	await respondTo('agentRestApi', { success: true, status: 200, data: { result: { sys_id: 'abc', number: 'INC0001' } } }, m => m.method === 'GET');
+	await respondTo('agentRestApi', { success: true, status: 204, data: null }, m => m.method === 'DELETE');
+	const result = await pending;
+	assert.strictEqual(result.status, 'success');
+	assert.deepStrictEqual(result.result, { deleted: true, table: 'incident', sys_id: 'abc', display: 'INC0001' });
+	assert.deepStrictEqual(harness.sent.filter(m => m.action === 'agentRestApi').map(m => m.method), ['GET', 'DELETE']);
+	assert.strictEqual(harness.sent.filter(m => m.action === 'reviewRequest').length, 1);
 });

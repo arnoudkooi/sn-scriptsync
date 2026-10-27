@@ -3,7 +3,7 @@ name: snu-agent-api
 description: "SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_records / update_records for many rows, create_artifact, create_application, analyze_artifact_type, rest_request, screenshots, etc.). Read this before calling any Agent API command."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=31 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=32 -->
 
 # SN ScriptSync — Agent API
 
@@ -911,7 +911,7 @@ The extension automatically includes `?sysparm_transaction_scope=<SCOPE_SYS_ID>`
 
 ### `delete_record` ⚠️ (DESTRUCTIVE — guarded)
 
-Delete a record by `table` + `sys_id`, or bulk-delete by query. **Disabled by default.** Enable `sn-scriptsync.deleteRecords.enabled` in VS Code settings to allow it.
+Delete a record by `table` + `sys_id`, or bulk-delete by query. **Disabled by default.** Enable `sn-scriptsync.deleteRecords.enabled` in VS Code settings to allow it. Both hosts (VS Code and the standalone `snu` bridge) implement the single and the bulk form.
 
 **Single delete:**
 ```json
@@ -933,7 +933,7 @@ The display value (name/number/short_description) is read back first and echoed 
 }
 ```
 
-**Preview without deleting:** add `"dryRun": true` to return the matches that *would* be deleted.
+**Preview without deleting:** add `"dryRun": true` to return the matches that *would* be deleted. A dry run only reads, so it is never held for review; the delete permission must still be granted.
 
 **Parameters:**
 - `table` (required).
@@ -946,6 +946,12 @@ The display value (name/number/short_description) is read back first and echoed 
 **Response (single):**
 ```json
 { "status": "success", "result": { "deleted": true, "table": "incident", "sys_id": "abc...", "display": "INC0010001" } }
+```
+
+**Response (bulk):** an outcome per record. `deleted` is `true` only when every match was removed; when some fail the command answers `E_PARTIAL_FAILURE` with the same `results` list in `details`.
+```json
+{ "status": "success", "result": { "deleted": true, "table": "incident", "count": 2, "deletedCount": 2,
+  "results": [ { "sys_id": "abc...", "display": "INC0010001", "deleted": true }, { "sys_id": "def...", "display": "INC0010002", "deleted": true } ] } }
 ```
 
 **Errors:**
@@ -1654,6 +1660,7 @@ Make an arbitrary ServiceNow REST call through the connected browser session (re
 - `GET` — always allowed.
 - `POST` / `PUT` / `PATCH` — require `sn-scriptsync.restRequest.enabled` (VS Code) or `SNU_ALLOW_REST_REQUEST=1` (standalone `snu` host).
 - `DELETE` — requires `sn-scriptsync.deleteRecords.enabled` (VS Code) or `SNU_ALLOW_DELETE_RECORDS=1` (standalone `snu` host).
+- `POST /api/now/v1/batch` (the Batch API) is gated by the requests inside its `rest_requests` array, not by the outer `POST`: a batch holding a `DELETE` sub-request, or whose body cannot be read, needs the delete permission as well as the REST write permission and goes through the Review Queue with its sub-requests listed on the card. A batch of reads and writes needs the REST write permission only. For bulk deletes prefer `delete_record` with `query` + `limit`: one review, an outcome per record.
 
 Both hosts implement this command. Over MCP it is also reachable as the `snu_rest_request` tool, and a plain record insert has a dedicated wrapper, `snu_create_record`, that returns the inserted record instead of a raw HTTP envelope.
 

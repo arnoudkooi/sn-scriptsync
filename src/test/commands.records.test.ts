@@ -215,3 +215,21 @@ test('a failed scope-name lookup falls back to the sys_id rather than failing th
 
 	assert.strictEqual(result.effectiveScope, APP_SYS_ID, 'a name is a nicety, never a reason to fail');
 });
+
+test('bulk delete reports an error and each outcome when every row is refused', async () => {
+	harness.reply({ success: true, status: 200, data: { result: [{ sys_id: 'a1' }, { sys_id: 'b2' }] } });
+	harness.reply({ success: false, status: 403, error: 'ACL denied' });
+	harness.reply({ success: false, status: 409, error: 'Referenced record' });
+	await assert.rejects(
+		() => command('delete_record').handle(harness.context(), { table: 'incident', query: 'active=false', limit: 2, confirm: true }),
+		(err: any) => {
+			assert.strictEqual(err.code, 'E_PARTIAL_FAILURE');
+			assert.strictEqual(err.message, 'Deleted 0 of 2; 2 failed');
+			assert.deepStrictEqual(err.details.results.map((r: any) => [r.sys_id, r.deleted, r.error]), [
+				['a1', false, 'ACL denied'], ['b2', false, 'Referenced record'],
+			]);
+			return true;
+		},
+	);
+	assert.strictEqual(harness.sent.filter(m => m.method === 'DELETE').length, 2);
+});
