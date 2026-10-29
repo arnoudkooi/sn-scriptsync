@@ -3,7 +3,7 @@ name: snu-reference
 description: "Extended reference appendix: detailed file-structure notes, table metadata caching, agent best-practices, and edge cases not covered by the core. Read this when you need depth the other skills do not cover."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=32 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=35 -->
 
 # SN ScriptSync — Deep Reference
 
@@ -75,6 +75,7 @@ The `structure.json` file contains cached table metadata from ServiceNow:
 - ✅ `/tn` - Toggle technical names on forms
 - ✅ `/bg` - Open background scripts
 - ✅ `/token` - Open helper tab for connection
+- ✅ `/rnd` or `/rnd -a` - Fill empty mandatory or all empty editable form fields with test data. UI16/Portal are Free; Workspace requires Pro or an active trial and returns `E_PRO_REQUIRED` otherwise. Inspect the completion summary and leave saving as a separate action.
 - ❌ `/click` - NOT a real command (does not exist)
 - ❌ Any other undocumented commands
 

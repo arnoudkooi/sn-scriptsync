@@ -1,5 +1,9 @@
 ## 🤖 Live Form Automation & Visual Verification
 
+### Fill test data with `/rnd`
+
+Use `run_slash_command` with `/rnd` for empty mandatory fields or `/rnd -a` for all empty editable fields. UI16 and Service Portal are Free; Configurable Workspace requires Pro, Enterprise or an active Pro trial. Workspace follows the active record tab and cancels pending fills if that form changes. A blocked Workspace fill returns `E_PRO_REQUIRED` before any fields are written. Inspect the completion summary and leave saving as a separate action. See the `snu-agent-api` skill for the response contract.
+
 ### 📸 Verify visually EARLY — don't loop blind
 - When building or automating anything visual (UI Pages, forms, widgets), or when a call
   doesn't behave as expected, take a screenshot to confirm the real page state instead of

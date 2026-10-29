@@ -385,15 +385,16 @@ const run_slash_command: CommandHandler = {
 	},
 	async handle(ctx, params) {
 		const command = params?.command;
-		const url = params?.url || 'https://*.service-now.com/*';
 		const tabId = params?.tabId;
 		const autoRun = params?.autoRun !== false;
 		const focus = params?.focus === true;
 
-		if (!command) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: command');
+		if (typeof command !== 'string' || !command.trim()) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: command');
+		const tokenRefresh = autoRun && /^\/?token(?:\s|$)/i.test(command.trim());
+		const url = params?.url || (tokenRefresh ? undefined : 'https://*.service-now.com/*');
 
 		const correlationId = `agent_${ctx.request.id}`;
-		const pending = ctx.waitForBrowserResponse<any>(correlationId);
+		const pending = ctx.waitForBrowserResponse<any>(correlationId, 70_000);
 
 		ctx.sendToBrowser({
 			action: 'runSlashCommand',
@@ -406,11 +407,17 @@ const run_slash_command: CommandHandler = {
 		});
 		ctx.log(`Agent API: Sent slash command request: ${command}`);
 		const response = await pending;
+		if (response?.success === false) throw new AgentError(response.code || 'E_COMMAND_FAILED', response.error || 'Slash command failed', { status: 'error' });
+		const statuses = ['dispatched', 'completed', 'cancelled', 'error'];
+		const reportedStatus = response?.status ?? response?.summary?.status;
 		return {
+			// Keep the legacy delivery flag; status describes the actual outcome.
 			executed: true,
+			status: statuses.includes(reportedStatus) ? reportedStatus : 'dispatched',
 			slashCommand: response?.command ?? command,
 			tabId: response?.tabId,
 			autoRun: response?.autoRun ?? autoRun,
+			...(response?.summary ? { summary: response.summary } : {}),
 		};
 	},
 };

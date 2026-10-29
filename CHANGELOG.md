@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+## Unreleased
+
+- **Know when an agent slash command has finished:** responses distinguish delivery, completion, cancellation and errors. Technical-name toggles, opened Background Scripts/XML tabs and token refreshes include their results with the updated SN Utils extension. <!-- reported-by: Arnoud Kooi / chat 2026-10-29 --> <!-- web: skip -->
+
+- **Receive test-data fill results in your agent:** `/rnd` returns the original form, fill counts and completion, cancellation or error status with SN Utils 10.3.0.0. UI16 and Service Portal are Free; Workspace requires Pro or an active trial, with a clear license error before any fill when access is unavailable. <!-- reported-by: Arnoud Kooi / SNU0000010219 follow-up --> <!-- web: skip -->
+
 ## 4.10.1 (2026-10-28)
 
 - **See how agents use ScriptSync:** with an updated SN Utils helper, completed agent commands contribute to daily usage totals by command, outcome and bridge. Internal retries and review polling do not add extra commands, and no request content is included. Collection follows the extension Usage Data setting. <!-- reported-by: Arnoud Kooi / chat 2026-10-27 --> <!-- web: skip -->
