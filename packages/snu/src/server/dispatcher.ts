@@ -1866,8 +1866,13 @@ export class StandaloneDispatcher {
           activeOnly: req.params?.activeOnly === true,
           limit: Number.isInteger(limit) && limit > 0 ? limit : 50,
         };
-        if (typeof req.params?.tables === 'string' && req.params.tables.trim()) {
-          options.tables = req.params.tables.trim();
+        const tables = req.params?.tables;
+        if (tables !== undefined && typeof tables !== 'string' && !(Array.isArray(tables) && tables.every(t => typeof t === 'string'))) {
+          throw Object.assign(new Error('tables must be a comma-separated string or an array of table names'), { code: 'E_INVALID_PARAMS' });
+        }
+        const tableNames = (typeof tables === 'string' ? tables.split(',') : tables ?? []).map((t: string) => t.trim()).filter(Boolean);
+        if (tableNames.length) {
+          options.tables = [...new Set(tableNames)].join(',');
         }
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({

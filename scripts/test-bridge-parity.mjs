@@ -68,6 +68,25 @@ test('shared hosts produce compatible helper requests, results and policies', as
   await t.test('#164 code search uses searchTerm and nested options on both hosts', () => compare('code_search',
     { term: 'GlideRecord', activeOnly: true, tables: 'sys_script_include, sys_script', limit: 20 },
     { success: true, searchTerm: 'GlideRecord', stats: { count: 1 }, words: [], results: [{ sys_id: sysId }] }));
+  await t.test('#167 code search preserves string and array table filters on both hosts', async () => {
+    for (const tables of [' sys_script_include, sys_script,sys_script_include, ', [' sys_script_include ', 'sys_script', 'sys_script_include', '']]) {
+      await compare('code_search', { term: 'GlideAggregate', tables, limit: 5 },
+        { success: true, searchTerm: 'GlideAggregate', stats: { tables: 2 }, words: ['GlideAggregate'], results: [] });
+      assert.equal(sent.at(-1).options.tables, 'sys_script_include,sys_script');
+    }
+    for (const tables of ['', ' , ', [], [' ', '']]) {
+      await compare('code_search', { term: 'GlideAggregate', tables }, { success: true, results: [] });
+      assert.equal(sent.at(-1).options.tables, undefined);
+    }
+    for (const tables of [null, 123, {}, ['sys_script_include', 123]]) {
+      const before = [sent.length, harness.sent.length];
+      await assert.rejects(handlers.find(handler => handler.name === 'code_search').handle(harness.context(), { term: 'GlideAggregate', tables }),
+        error => error.code === 'E_INVALID_PARAMS');
+      const response = await dispatcher.dispatch({ id: 'invalid_tables', command: 'code_search', params: { term: 'GlideAggregate', tables } });
+      assert.equal(response.code, 'E_INVALID_PARAMS');
+      assert.deepEqual([sent.length, harness.sent.length], before);
+    }
+  });
   await t.test('a single delete reads the display value back on both hosts', () => {
     const record = { success: true, status: 200, data: { result: { sys_id: sysId, number: 'INC0001' } } };
     harness.reply(record); // the read-back; compare() queues the delete's own reply

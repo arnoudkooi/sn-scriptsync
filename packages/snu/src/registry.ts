@@ -66,7 +66,7 @@ export const TOOLS: ToolDefinition[] = [
       type: 'object',
       properties: {
         term: { type: 'string', description: 'Search keyword or phrase (min 2 chars)' },
-        tables: { type: 'string', description: 'Optional comma-separated table names to filter search' },
+        tables: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }], description: 'Optional exact table names as a comma-separated string or array' },
         limit: { type: 'integer', minimum: 1, maximum: 500, default: 50, description: 'Max hits to return' },
         activeOnly: { type: 'boolean', default: false, description: 'Only search active records' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },

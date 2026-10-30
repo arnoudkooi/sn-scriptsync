@@ -172,7 +172,8 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v32 -> v33: random-fill completion summaries and Workspace support.
 //   v33 -> v34: slash-command delivery/completion statuses and built-in results.
 //   v34 -> v35: Workspace /rnd entitlement, active-form behavior and Pro errors.
-const INSTRUCTIONS_VERSION = 35;
+//   v35 -> v36: code_search exact table filters, array input and helper compatibility.
+const INSTRUCTIONS_VERSION = 36;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the

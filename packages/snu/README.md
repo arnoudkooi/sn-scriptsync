@@ -101,7 +101,11 @@ Restart or refresh the MCP client after changing its configuration. The server s
 4. Keep the helper tab open while the agent is working.
 5. Ask the agent to call `snu_get_context` before doing other work. It reports the connected instance, helper status, license tier, host policy, per-instance setting, and their deny-wins combined result.
 
-You normally do **not** need to run `snu serve` separately. `snu --mcp` first looks for the ScriptSync bridge supplied by VS Code or an existing standalone daemon. If neither is available, it starts an in-process standalone bridge automatically. Run `snu serve` only when you also want a persistent bridge for separate terminal commands.
+You normally do **not** need to run `snu serve` separately. `snu --mcp` first looks for the ScriptSync bridge supplied by VS Code or an existing standalone bridge. If neither is available, it starts an in-process standalone bridge automatically.
+
+Several Claude or other MCP sessions normally produce several `snu --mcp` processes, sharing one bridge. An automatically started bridge lives inside the MCP process that created it; closing that process also stops the bridge. To keep the bridge independent of those sessions, run `snu serve` in a separate terminal **before** starting them, and leave that terminal running. `snu serve` runs in the foreground; if a bridge is already active, it reports that bridge instead of moving it to a separate process.
+
+When a bridge is replaced, connected clients rediscover its port and token after an `X-Agent-Token` rejection or connection failure. A token rejection or refused connection is retried once. Other network failures clear cached discovery for the next call without replaying the command, because a write may already have run. Recovery diagnostics go to stderr without including tokens. This reconnects clients to an available bridge; it does not start a replacement bridge or restore the browser session.
 
 The `/token` connection must be made after a bridge is running. If the MCP client or standalone bridge is restarted, run `/token` again. Session credentials remain in memory and are cleared when the helper disconnects.
 

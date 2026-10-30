@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+## Unreleased
+
+- **Limit agent code search to selected tables:** both bridge hosts and MCP accept table names as a comma-separated string or an array. Requires the updated SN Utils browser extension to apply the filter; an older helper can use `table:<name>` in the search term. ([#167](https://github.com/arnoudkooi/sn-scriptsync/issues/167)) <!-- reported-by: MarcoMoro / GitHub #167 --> <!-- web: skip -->
+
+## `@snutils/snu` 0.6.2 (2026-10-30)
+
+- **Recover MCP clients after a bridge replacement:** `@snutils/snu` refreshes cached bridge discovery after a rejected agent token or network failure. Commands rejected by the bridge token check or refused before connecting are retried once; ambiguous network failures are not replayed, avoiding duplicate writes. <!-- reported-by: user report / chat 2026-10-30 --> <!-- web: skip -->
+- **Limit code search to selected tables in the standalone bridge:** `snu_code_search` and the standalone bridge accept table names as a comma-separated string or an array, as described above. <!-- reported-by: MarcoMoro / GitHub #167 --> <!-- web: skip -->
+
 ## 4.10.2 (2026-10-30)
 
 - **Know when an agent slash command has finished:** responses distinguish delivery, completion, cancellation and errors. Technical-name toggles, opened Background Scripts/XML tabs and token refreshes include their results with the updated SN Utils extension. <!-- reported-by: Arnoud Kooi / chat 2026-10-29 --> <!-- web: skip -->

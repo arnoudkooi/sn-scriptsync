@@ -208,7 +208,7 @@ export async function createMcpServer(): Promise<McpServer> {
     'Fast SN Utils GraphQL field-index code search across Script Includes, Business Rules, Client Scripts, UI Actions, and Flow Actions. Requires SN Utils Pro.',
     {
       term: z.string().min(2).describe('Search keyword or phrase (min 2 chars)'),
-      tables: z.string().optional().describe('Optional comma-separated table names to filter search'),
+      tables: z.union([z.string(), z.array(z.string())]).optional().describe('Optional exact table names as a comma-separated string or array'),
       limit: z.number().int().min(1).max(500).default(50).optional().describe('Max hits to return'),
       activeOnly: z.boolean().default(false).optional().describe('Only search active records'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),

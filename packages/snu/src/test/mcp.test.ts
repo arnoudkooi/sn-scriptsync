@@ -13,6 +13,30 @@ test('MCP: server instantiates cleanly with all tools', async () => {
   assert.strictEqual(typeof server.connect, 'function');
 });
 
+test('MCP: code search accepts string and array table filters and rejects malformed arrays', async t => {
+  const server = await createMcpServer();
+  const client = new Client({ name: 'search-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const calls: any[] = [];
+  const original = ScriptSyncClient.prototype.execute;
+  (ScriptSyncClient.prototype as any).execute = async (mapped: any) => {
+    calls.push(mapped);
+    return { result: { results: [] } };
+  };
+  t.after(() => { ScriptSyncClient.prototype.execute = original; });
+  for (const tables of ['sys_script_include,sys_script', ['sys_script_include', 'sys_script']]) {
+    const response = await client.callTool({ name: 'snu_code_search', arguments: { term: 'GlideAggregate', tables } });
+    assert.ok(!response.isError);
+    assert.deepStrictEqual(calls[calls.length - 1].params.tables, tables);
+  }
+  const response = await client.callTool({ name: 'snu_code_search', arguments: { term: 'GlideAggregate', tables: ['sys_script_include', 42] } });
+  assert.ok(response.isError);
+  assert.strictEqual(calls.length, 2);
+});
+
 test('MCP: upgraded validation preserves field dictionaries and rejects invalid or oversized input before dispatch', async t => {
   const server = await createMcpServer();
   const client = new Client({ name: 'validation-test', version: '1.0.0' });

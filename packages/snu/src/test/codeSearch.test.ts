@@ -98,3 +98,16 @@ test('code_search: a short term is refused before reaching the browser', async (
     assert.strictEqual(reached, false);
   });
 });
+
+test('code_search: array table filters are normalized before reaching the helper', async () => {
+  await withBridge((request, reply) => {
+    assert.strictEqual(request.searchTerm, 'GlideAggregate');
+    assert.deepStrictEqual(request.options, { activeOnly: false, limit: 5, tables: 'sys_script_include,sys_script' });
+    reply({ success: true, stats: { tables: 2 }, results: [] });
+  }, async (dispatcher) => {
+    const response = await dispatcher.dispatch({ id: 'cs_array', command: 'code_search', params: {
+      term: 'GlideAggregate', tables: [' sys_script_include ', 'sys_script', 'sys_script_include', ''], limit: 5,
+    } });
+    assert.strictEqual(response.status, 'success');
+  });
+});

@@ -159,6 +159,9 @@ export class ScriptSyncClientError extends Error {
   }
 }
 
+/** A rejection by the HTTP token gate, before any command was dispatched. */
+class BridgeTokenRejectedError extends ScriptSyncClientError {}
+
 /**
  * Global port file path (~/.sn-scriptsync/agent-port.json).
  * Written when a Pro/Trial/Enterprise license is connected in the browser.
@@ -364,11 +367,21 @@ export async function checkHealth(port: number, expectedPid?: number): Promise<H
   }
 }
 
+/** Only a refused connection proves that the command was never sent. */
+function isConnectionRefused(error: any): boolean {
+  if (error instanceof AggregateError) {
+    return error.errors.length > 0 && error.errors.every(isConnectionRefused);
+  }
+  if (error?.code === 'ECONNREFUSED') return true;
+  return error?.cause ? isConnectionRefused(error.cause) : false;
+}
+
 /**
  * ScriptSync Client for sending typed commands to the bridge.
  */
 export class ScriptSyncClient {
   private discoveryResult?: DiscoveryResult;
+  private discoveryPromise?: Promise<DiscoveryResult>;
 
   constructor(private options?: DiscoveryOptions) {}
 
@@ -388,19 +401,55 @@ export class ScriptSyncClient {
   }
 
   async getDiscovery(): Promise<DiscoveryResult> {
-    if (!this.discoveryResult) {
-      this.discoveryResult = await discoverBridge(this.options);
+    if (this.discoveryResult) return this.discoveryResult;
+    // Concurrent tool calls must share discovery, including after a restart.
+    if (!this.discoveryPromise) {
+      this.discoveryPromise = discoverBridge(this.options).then(result => {
+        this.discoveryResult = result;
+        return result;
+      }).finally(() => {
+        this.discoveryPromise = undefined;
+      });
     }
-    return this.discoveryResult;
+    return this.discoveryPromise;
   }
 
   async execute<T = any>(
     mapped: MappedCommand,
     timeoutMs?: number
   ): Promise<AgentResponse<T>> {
-    const discovery = await this.getDiscovery();
-    const url = `http://127.0.0.1:${discovery.port}/api`;
     const requestId = `snu_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+    for (let attempt = 0; ; attempt++) {
+      const discovery = await this.getDiscovery();
+      try {
+        return await this.executeWithDiscovery<T>(mapped, discovery, requestId, timeoutMs);
+      } catch (err: any) {
+        // ServiceNow can also report E_UNAUTHORIZED after dispatch. Only the
+        // HTTP token gate's rejection proves the command did not run.
+        const rejectedToken = err instanceof BridgeTokenRejectedError;
+        const networkError = err instanceof ScriptSyncClientError && err.code === 'E_NETWORK_ERROR';
+        if (rejectedToken || networkError) {
+          // A late failure from an old request must not evict a newer discovery.
+          if (this.discoveryResult === discovery) this.discoveryResult = undefined;
+        }
+        // A socket reset / generic "fetch failed" can happen AFTER a write ran.
+        // Invalidate for the next call, but only replay requests proven unsent.
+        if (attempt === 0 && (rejectedToken || (networkError && isConnectionRefused(err.cause)))) {
+          console.error(`[snu] Bridge ${rejectedToken ? 'rejected the cached agent token' : 'connection was refused'}; rediscovering and retrying once.`);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  private async executeWithDiscovery<T>(
+    mapped: MappedCommand,
+    discovery: DiscoveryResult,
+    requestId: string,
+    timeoutMs?: number
+  ): Promise<AgentResponse<T>> {
+    const url = `http://127.0.0.1:${discovery.port}/api`;
     const payload: AgentRequest = {
       id: requestId,
       command: mapped.command,
@@ -444,6 +493,10 @@ export class ScriptSyncClient {
       }
 
       if (json.status === 'error' || !res.ok) {
+        if (res.status === 401 && json.code === 'E_UNAUTHORIZED'
+            && !json.id && !json.command && json.error?.includes('X-Agent-Token')) {
+          throw new BridgeTokenRejectedError(json.error, json.code, res.status, json.details);
+        }
         // Auto-fallback: If multiple instances exist and none was specified, check if there is a unique recently-active defaultInstance
         if (json.code === 'E_INSTANCE_REQUIRED' && !mapped.instance && mapped.command !== 'list_instances') {
           try {
@@ -491,10 +544,12 @@ export class ScriptSyncClient {
           'E_TIMEOUT'
         );
       }
-      throw new ScriptSyncClientError(
+      const networkError = new ScriptSyncClientError(
         `Failed to communicate with ScriptSync Agent API: ${err?.message || err}`,
         'E_NETWORK_ERROR'
       );
+      networkError.cause = err;
+      throw networkError;
     } finally {
       clearTimeout(timer);
     }

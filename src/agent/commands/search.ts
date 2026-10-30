@@ -81,8 +81,13 @@ const code_search: CommandHandler = {
 			activeOnly: params?.activeOnly === true,
 			limit: Number.isInteger(params?.limit) && params.limit > 0 ? params.limit : 50,
 		};
-		if (typeof params?.tables === 'string' && params.tables.trim()) {
-			options.tables = params.tables.trim();
+		const tables = params?.tables;
+		if (tables !== undefined && typeof tables !== 'string' && !(Array.isArray(tables) && tables.every(t => typeof t === 'string'))) {
+			throw new AgentError('E_INVALID_PARAMS', 'tables must be a comma-separated string or an array of table names');
+		}
+		const tableNames = (typeof tables === 'string' ? tables.split(',') : tables ?? []).map((t: string) => t.trim()).filter(Boolean);
+		if (tableNames.length) {
+			options.tables = [...new Set(tableNames)].join(',');
 		}
 
 		const correlationId = `agent_${ctx.request.id}`;

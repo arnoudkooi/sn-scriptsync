@@ -3,7 +3,7 @@ name: snu-agent-api
 description: "SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_records / update_records for many rows, create_artifact, create_application, analyze_artifact_type, rest_request, screenshots, etc.). Read this before calling any Agent API command."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=35 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=36 -->
 
 # SN ScriptSync — Agent API
 
@@ -1594,7 +1594,7 @@ Run the SN Utils GraphQL field-index code search across ServiceNow script tables
 - `term` (required): Search term. Supports the same `table:` / field filters as the code search page (e.g. `table:sys_script_include setPreference`). Minimum 2 characters.
 - `activeOnly` (optional, default `false`): Only match active records.
 - `limit` (optional, default `50`): Max records per table.
-- `tables` (optional): Comma-separated table-name filter to narrow the search scope.
+- `tables` (optional, string or string[]): Exact table names as a comma-separated string or an array, for example `"sys_script_include,sys_script"` or `["sys_script_include", "sys_script"]`. Empty values leave the search scope unrestricted. Inline `table:` filters in `term` further narrow this selection; unknown names produce no matches. Applying this parameter requires an updated SN Utils browser extension; with an older helper, use `table:<name>` in `term`.
 
 **Response:**
 ```json
