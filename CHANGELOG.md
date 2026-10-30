@@ -1,6 +1,6 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.10.2 (2026-10-30)
 
 - **Know when an agent slash command has finished:** responses distinguish delivery, completion, cancellation and errors. Technical-name toggles, opened Background Scripts/XML tabs and token refreshes include their results with the updated SN Utils extension. <!-- reported-by: Arnoud Kooi / chat 2026-10-29 --> <!-- web: skip -->
 
