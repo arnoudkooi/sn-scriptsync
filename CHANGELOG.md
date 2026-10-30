@@ -1,6 +1,6 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.10.3 (2026-10-30)
 
 - **Limit agent code search to selected tables:** both bridge hosts and MCP accept table names as a comma-separated string or an array. Requires the updated SN Utils browser extension to apply the filter; an older helper can use `table:<name>` in the search term. ([#167](https://github.com/arnoudkooi/sn-scriptsync/issues/167)) <!-- reported-by: MarcoMoro / GitHub #167 --> <!-- web: skip -->
 
