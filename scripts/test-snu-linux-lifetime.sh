@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Preserves the Linux session-lifetime release check first run for snu 0.6.3.
+# Preserves the Linux session-lifetime release check for snu 0.6.2.
 # A starts a detached bridge, B attaches, A's process group is terminated,
 # the same bridge must answer another process, then stop and remove its files.
 # Run only in a disposable Docker container; see packages/snu/README.md.
