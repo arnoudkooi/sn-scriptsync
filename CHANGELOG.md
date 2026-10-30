@@ -4,6 +4,13 @@
 
 - **Limit agent code search to selected tables:** both bridge hosts and MCP accept table names as a comma-separated string or an array. Requires the updated SN Utils browser extension to apply the filter; an older helper can use `table:<name>` in the search term. ([#167](https://github.com/arnoudkooi/sn-scriptsync/issues/167)) <!-- reported-by: MarcoMoro / GitHub #167 --> <!-- web: skip -->
 
+## `@snutils/snu` 0.6.3 (2026-10-30)
+
+- **Keep the bridge running when an MCP session closes:** on macOS and Linux, `snu --mcp` now starts a shared background bridge when none is available. Other sessions keep their bridge connection when the session that started it exits. **Windows remains in-process by default**; set `SNU_MCP_BRIDGE=detached` to opt in. Set `SNU_MCP_BRIDGE=inprocess` on any platform to keep the previous behavior. <!-- reported-by: user report / chat 2026-10-30 --> <!-- web: skip -->
+- **Start a background bridge explicitly:** `snu serve --detach` and `snu restart --detach` wait for the bridge to answer, report its PID and log file, and return. Use `snu status` and `snu stop` to manage it. The bridge retains the starting session's working directory. <!-- web: skip -->
+- **Handle simultaneous starts and spawn failures:** startup rechecks a port holder before reclaiming it, giving a newly starting bridge time to answer. Failed background spawns are caught so MCP can fall back to an in-process bridge. <!-- web: skip -->
+- **Validation:** process-lifetime checks passed on macOS and Linux; the repeatable Linux check is saved in `scripts/test-snu-linux-lifetime.sh`. Windows process lifetime and browser-backed ServiceNow execution were not validated by the Linux container checks. <!-- web: skip -->
+
 ## `@snutils/snu` 0.6.2 (2026-10-30)
 
 - **Recover MCP clients after a bridge replacement:** `@snutils/snu` refreshes cached bridge discovery after a rejected agent token or network failure. Commands rejected by the bridge token check or refused before connecting are retried once; ambiguous network failures are not replayed, avoiding duplicate writes. <!-- reported-by: user report / chat 2026-10-30 --> <!-- web: skip -->

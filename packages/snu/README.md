@@ -8,7 +8,7 @@ Unified CLI and Model Context Protocol (MCP) server for ServiceNow development, 
 
 - **Zero Manual Credentials:** Connects to your live browser session via SN Utils, automatically inheriting authenticated SSO/MFA sessions, cookies, update set, and application scope.
 - **Dual Mode (CLI + MCP):** Use it as a terminal command tool (`snu query`, `snu search`, `snu schema`) or as a local stdio MCP server (`snu --mcp`) in any compatible AI client.
-- **Works Attached & Standalone:** Operates seamlessly when VS Code is open (Attached Mode), or completely standalone without VS Code (Standalone Mode with in-process bridge and auto-handover).
+- **Works Attached & Standalone:** Operates seamlessly when VS Code is open (Attached Mode), or completely standalone without VS Code (Standalone Mode with a shared background bridge and auto-handover).
 - **26 Typed Tools:** Code search, schema inspection, record queries and writes, attachments, workspace pulls, NOW SDK deployment, background scripts, live form automation, negotiation, and review results.
 
 ---
@@ -38,8 +38,8 @@ npx @snutils/snu search "GlideRecord"
 ```bash
 npm install -g @snutils/snu
 
-# Standalone: keep this running, then run /token in ServiceNow
-snu serve
+# Standalone: start the bridge in the background, then run /token in ServiceNow
+snu serve --detach
 
 # In another terminal, run 'snu' anywhere
 snu context
@@ -101,9 +101,16 @@ Restart or refresh the MCP client after changing its configuration. The server s
 4. Keep the helper tab open while the agent is working.
 5. Ask the agent to call `snu_get_context` before doing other work. It reports the connected instance, helper status, license tier, host policy, per-instance setting, and their deny-wins combined result.
 
-You normally do **not** need to run `snu serve` separately. `snu --mcp` first looks for the ScriptSync bridge supplied by VS Code or an existing standalone bridge. If neither is available, it starts an in-process standalone bridge automatically.
+You normally do **not** need to run `snu serve` separately. `snu --mcp` first looks for the ScriptSync bridge supplied by VS Code or an existing standalone bridge, and attaches to it; a bridge that answers its health endpoint is never replaced. If nothing answers, on macOS and Linux it starts a standalone bridge as a **separate background process** (the same as `snu serve --detach`) and attaches to that. On Windows it starts the bridge inside the MCP process by default for now; see below.
 
-Several Claude or other MCP sessions normally produce several `snu --mcp` processes, sharing one bridge. An automatically started bridge lives inside the MCP process that created it; closing that process also stops the bridge. To keep the bridge independent of those sessions, run `snu serve` in a separate terminal **before** starting them, and leave that terminal running. `snu serve` runs in the foreground; if a bridge is already active, it reports that bridge instead of moving it to a separate process.
+Several Claude or other MCP sessions normally produce several `snu --mcp` processes, all sharing that one bridge. With a background bridge, closing the session that started it does not stop it or change its token, so the other sessions stay connected. If two sessions start at the same moment, only one bridge binds the helper port; the other session attaches to it. The background bridge keeps running until `snu stop`, and serves files relative to the working directory of the session that started it. Its output goes to `~/.sn-scriptsync/snu-bridge.log`.
+
+`SNU_MCP_BRIDGE` in the MCP server's environment overrides the platform default:
+
+- `SNU_MCP_BRIDGE=inprocess` keeps the bridge inside the MCP process, where it stops with that session. This is the Windows default.
+- `SNU_MCP_BRIDGE=detached` starts the background bridge. Use it to opt in on Windows.
+
+With an in-process bridge, closing the session that owns it stops the bridge for every session; the others recover only once a new bridge exists (for example after `snu serve --detach`, or when the next `snu --mcp` starts). `snu serve --detach` works on every platform. `snu --mcp` also falls back to an in-process bridge when the background process cannot be started.
 
 When a bridge is replaced, connected clients rediscover its port and token after an `X-Agent-Token` rejection or connection failure. A token rejection or refused connection is retried once. Other network failures clear cached discovery for the next call without replaying the command, because a write may already have run. Recovery diagnostics go to stderr without including tokens. This reconnects clients to an available bridge; it does not start a replacement bridge or restore the browser session.
 
@@ -213,8 +220,11 @@ snu context
 # Report client, bridge and helper versions, plus supported bridge commands
 snu negotiate
 
-# Start a persistent standalone bridge daemon
+# Start a persistent standalone bridge daemon (foreground; Ctrl+C stops it)
 snu serve
+
+# Or start it in the background and return; it outlives the terminal
+snu serve --detach
 
 # Inspect, gracefully restart, or stop the active bridge
 snu status
@@ -229,7 +239,7 @@ snu update
 snu search "OAuthUtil" --tables sys_script_include,sys_ui_action --limit 20
 ```
 
-`snu serve` is idempotent: if a healthy bridge already owns the ports, it reports that process instead of failing with `EADDRINUSE`. `snu stop` and `snu restart` also support editor-hosted bridges in VS Code and Cursor: they send authenticated `yield` or `restart` commands so the editor releases or restarts its bridge without closing the editor. The CLI never sends process termination signals to an editor host.
+`snu serve` is idempotent: if a healthy bridge already owns the ports, it reports that process instead of failing with `EADDRINUSE`. `snu serve --detach` (and `snu restart --detach`) start the bridge as a detached process with no console window on Windows, wait until it answers its health endpoint, print its PID and log file (`~/.sn-scriptsync/snu-bridge.log`), and return. Use `snu status` to inspect it and `snu stop` to stop it. `snu stop` and `snu restart` also support editor-hosted bridges in VS Code and Cursor: they send authenticated `yield` or `restart` commands so the editor releases or restarts its bridge without closing the editor. The CLI never sends process termination signals to an editor host.
 
 If neither the current workspace nor the global descriptor locates the bridge, `snu` probes the HTTP health endpoint on port 1977 (or the lifecycle command's `--port`). An editor-hosted bridge can identify its workspace there; `snu` uses that workspace's descriptor only when its port and PID match the live bridge. An explicit `--port-file` always takes precedence. If the descriptor is missing or invalid, stop the bridge from that editor's sn-scriptsync status bar.
 
@@ -345,6 +355,18 @@ Session credentials stay on your machine. The standalone bridge keeps the `/toke
 ## Development checks
 
 From the repository root, run `npm test` for the editor host, `npm run build --prefix packages/snu && npm test --prefix packages/snu` for the CLI/standalone package, and `npm run test:bridge-parity` to compare both hosts' helper requests, results and permission policies. The parity checks cover batch updates, binary attachments and the #164 search request contract.
+
+The Linux process-lifetime check in `scripts/test-snu-linux-lifetime.sh` runs in a disposable Docker container. It starts two MCP sessions, terminates the first session's whole process group, verifies the same bridge still answers `snu negotiate`, then checks `snu stop` and descriptor cleanup. Run it from the repository root after building the package:
+
+```bash
+npm run build --prefix packages/snu
+tar -cf - -C "$PWD/packages/snu" package.json package-lock.json bin dist \
+  -C "$PWD/scripts" test-snu-linux-lifetime.sh | \
+  docker run --rm --init -i node:20 bash -euc \
+  'mkdir /app; tar -xf - -C /app; cd /app; npm ci --ignore-scripts --no-audit --no-fund; bash ./test-snu-linux-lifetime.sh /app'
+```
+
+The command streams a copy of the built package into the container without mounting the checkout. Dependencies and discovery files stay inside the container; no host ports are published. These checks exercise local bridge lifecycle, not browser-backed ServiceNow commands. Windows keeps the in-process default until its session-lifetime behavior has been tested through an MCP host on Windows.
 
 ## License
 

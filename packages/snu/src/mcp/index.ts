@@ -6,6 +6,14 @@ import { ScriptSyncClient, discoverBridge, checkHealth } from '../client.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { reclaimPort } from '../cli/portReclaim.js';
 import { resolveBridgeAttachment } from '../cli/attachment.js';
+import {
+  mcpBridgeMode,
+  spawnDetachedBridge,
+  waitForDetachedBridge,
+  probeServingBridge,
+  servingGuard,
+  isPidAlive,
+} from '../cli/detach.js';
 import { VERSION } from '../version.js';
 
 // Surfaced verbatim by MCP clients. This is the only guidance an agent that
@@ -505,13 +513,43 @@ export async function startMcpServer(): Promise<void> {
       // Only now, with nothing answering, may a held port be reclaimed: it is
       // bound by something that is not serving. Editor hosts and foreign
       // processes are still refused by reclaimPort itself.
-      const reclaimed = await reclaimPort(1978, {});
-      if (reclaimed.status === 'reclaimed' && reclaimed.listener) {
+      // The guard covers a bridge another session started after our probe.
+      let haveBridge = false;
+      const reclaimed = await reclaimPort(1978, {
+        isServing: servingGuard(() => probeServingBridge(process.cwd(), 1977)),
+      });
+      if (reclaimed.status === 'serving') {
+        console.error(`[snu-mcp] Another session started a bridge (PID ${reclaimed.listener?.pid}) while this one was starting; attached to it.`);
+        haveBridge = true;
+      } else if (reclaimed.status === 'reclaimed' && reclaimed.listener) {
         console.error(`[snu-mcp] Stopped a non-responding bridge (PID ${reclaimed.listener.pid}) to free port 1978.`);
       }
-      const standalone = new StandaloneBridge();
-      const { httpPort, wsPort } = await standalone.start();
-      console.error(`[snu-mcp] In-process standalone bridge active on HTTP ${httpPort} / WS ${wsPort}.`);
+      // A bridge hosted in this process would die with this session and take
+      // every other session's connection (and token) with it. Start it as its
+      // own detached process instead, shared until `snu stop`; fall back to
+      // in-process only when that cannot be done.
+      if (!haveBridge && mcpBridgeMode() === 'detached') {
+        try {
+          const spawned = await spawnDetachedBridge({ cwd: process.cwd() });
+          const ready = await waitForDetachedBridge(spawned.pid, {
+            probe: () => probeServingBridge(process.cwd(), 1977),
+            isAlive: isPidAlive,
+          });
+          haveBridge = true;
+          console.error(
+            ready.ownChild
+              ? `[snu-mcp] Started a detached standalone bridge (PID ${ready.health.pid}); it outlives this session. Stop it with \`snu stop\`.`
+              : `[snu-mcp] Another session started a bridge first (PID ${ready.health.pid}); attached to it.`
+          );
+        } catch (spawnErr: any) {
+          console.error(`[snu-mcp] Could not start a detached bridge: ${spawnErr?.message || spawnErr}. Falling back to in-process.`);
+        }
+      }
+      if (!haveBridge) {
+        const standalone = new StandaloneBridge();
+        const { httpPort, wsPort } = await standalone.start();
+        console.error(`[snu-mcp] In-process standalone bridge active on HTTP ${httpPort} / WS ${wsPort}.`);
+      }
     } catch (startErr: any) {
       console.error(
         `[snu-mcp] Could not start in-process bridge: ${startErr?.message || startErr}. ` +

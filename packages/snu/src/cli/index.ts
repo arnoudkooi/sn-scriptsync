@@ -20,6 +20,14 @@ import {
   waitForDiscovery,
 } from './daemon.js';
 import { findPortListener, reclaimPort, terminateListener, classifyListener, ReclaimResult, PortListener } from './portReclaim.js';
+import {
+  isDetachedChild,
+  spawnDetachedBridge,
+  waitForDetachedBridge,
+  probeServingBridge,
+  servingGuard,
+  isPidAlive,
+} from './detach.js';
 import { checkForCliUpdate, installLatestWithNpm } from './selfUpdate.js';
 import { runSetup } from './setup.js';
 import { collectDoctorSources, buildDoctorReport, formatDoctorReport } from './doctor.js';
@@ -84,8 +92,8 @@ export function buildParseArgsOptions(tool: { cliOptions?: Record<string, { type
 
 /** Options each bridge lifecycle command accepts. Anything else is a typo. */
 export const LIFECYCLE_OPTIONS: Record<string, string[]> = {
-  serve: ['port', 'ws', 'force'],
-  restart: ['port', 'ws', 'force'],
+  serve: ['port', 'ws', 'force', 'detach'],
+  restart: ['port', 'ws', 'force', 'detach'],
   stop: ['port', 'ws', 'force'],
   status: ['port', 'ws'],
 };
@@ -124,6 +132,7 @@ export function printHelp(): void {
   snu <command> [arguments...] [options...]
   snu --mcp                           Start Model Context Protocol (MCP) server on stdio
   snu serve [--port <p>] [--ws <p>]   Start persistent standalone bridge daemon
+  snu serve --detach                  Start it in the background and return (stop with \`snu stop\`)
   snu status                          Show the active local bridge process
   snu doctor                          Diagnose bridge, ownership and session problems (redacted)
   snu auth status                     Verify ServiceNow still accepts the session (read-only probe)
@@ -246,6 +255,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       ws: { type: 'string' },
       check: { type: 'boolean' },
       force: { type: 'boolean' },
+      detach: { type: 'boolean' },
     },
     allowPositionals: true,
     strict: false,
@@ -325,15 +335,21 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     // `snu --mcp` and something else removed the global port file), which used
     // to leave `snu stop` claiming "already stopped" while the port stayed
     // bound.
-    const reclaimBridgePorts = async (): Promise<{
+    //
+    // `spareServing` is for serve: it is about to start a bridge, and must not
+    // stop one a racing session started after discovery came up empty.
+    const reclaimBridgePorts = async (spareServing = false): Promise<{
       reclaimed: PortListener[];
       blocked?: { port: number; result: ReclaimResult };
+      serving?: boolean;
     }> => {
       const reclaimed: PortListener[] = [];
       const seenPids = new Set<number>();
+      const isServing = spareServing ? servingGuard(() => probeServingBridge(process.cwd(), ports.http)) : undefined;
       for (const port of bridgePorts) {
-        const result = await reclaimPort(port, { force: forceReclaim });
+        const result = await reclaimPort(port, { force: forceReclaim, isServing });
         if (result.status === 'free') continue;
+        if (result.status === 'serving') return { reclaimed, serving: true };
         if (result.status === 'reclaimed') {
           if (result.listener && !seenPids.has(result.listener.pid)) {
             seenPids.add(result.listener.pid);
@@ -562,12 +578,53 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       }
 
       // serve / restart: make sure the ports are actually free before binding,
-      // even when discovery saw nothing.
-      const { reclaimed, blocked } = await reclaimBridgePorts();
-      if (reclaimed.length && !isJsonMode) {
-        reclaimed.forEach((l) => console.log(`\nStopped orphaned bridge ${describeListener(l)} to free the port.`));
+      // even when discovery saw nothing. A detached child skips this: its
+      // parent already did it, and a child that reclaimed could stop a bridge
+      // a racing session started a moment earlier. It binds or exits instead.
+      if (!isDetachedChild()) {
+        const { reclaimed, blocked, serving } = await reclaimBridgePorts(lifecycleCommand === 'serve');
+        if (reclaimed.length && !isJsonMode) {
+          reclaimed.forEach((l) => console.log(`\nStopped orphaned bridge ${describeListener(l)} to free the port.`));
+        }
+        if (serving) {
+          const health = await probeServingBridge(process.cwd(), ports.http);
+          if (isJsonMode) {
+            outputJson({ running: true, alreadyRunning: true, hostKind: health?.hostKind, pid: health?.pid });
+          } else {
+            console.log(`\nAnother bridge just started${health ? ` (PID ${health.pid})` : ''}; leaving it running.\n`);
+          }
+          await printUpdateNotice(updateNotice);
+          return;
+        }
+        if (blocked) throw explainBlocked(blocked.port, blocked.result);
       }
-      if (blocked) throw explainBlocked(blocked.port, blocked.result);
+
+      if (lifecycleValues.detach === true && !isDetachedChild()) {
+        const spawned = await spawnDetachedBridge({ cwd: process.cwd(), httpPort: ports.http, wsPort: ports.ws });
+        const ready = await waitForDetachedBridge(spawned.pid, {
+          probe: () => probeServingBridge(process.cwd(), ports.http),
+          isAlive: isPidAlive,
+        });
+        if (isJsonMode) {
+          outputJson({
+            running: true,
+            detached: true,
+            alreadyRunning: !ready.ownChild,
+            hostKind: ready.health.hostKind,
+            pid: ready.health.pid,
+            logFile: spawned.logFile,
+          });
+        } else if (ready.ownChild) {
+          console.log(`\n\x1b[1m\x1b[32m[snu] Standalone bridge started in the background\x1b[0m`);
+          console.log(`  • PID:         ${ready.health.pid}`);
+          if (spawned.logFile) console.log(`  • Log:         ${spawned.logFile}`);
+          console.log('\n\x1b[90mIt keeps running after this terminal closes. Stop it with `snu stop`.\x1b[0m\n');
+        } else {
+          console.log(`\nAnother bridge started first (PID ${ready.health.pid}); using that one.\n`);
+        }
+        await printUpdateNotice(updateNotice);
+        return;
+      }
 
       await startStandalone();
     } catch (err: any) {

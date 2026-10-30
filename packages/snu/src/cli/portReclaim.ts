@@ -162,7 +162,8 @@ export async function terminateListener(
 }
 
 export interface ReclaimResult {
-  status: 'free' | 'reclaimed' | 'refused_vscode' | 'refused_foreign' | 'failed';
+  /** 'serving': the holder answered as a healthy bridge, so it was left alone. */
+  status: 'free' | 'reclaimed' | 'serving' | 'refused_vscode' | 'refused_foreign' | 'failed';
   listener?: PortListener;
 }
 
@@ -171,6 +172,13 @@ export interface ReclaimOptions {
   force?: boolean;
   findImpl?: (port: number) => Promise<PortListener | null>;
   terminateImpl?: (pid: number, port: number) => Promise<boolean>;
+  /**
+   * Last check before a signal is sent: true leaves the listener alone. A
+   * caller that is about to *start* a bridge passes this, because between its
+   * own "nothing answers" decision and this point another session may have
+   * started a bridge that is still coming up.
+   */
+  isServing?: (listener: PortListener) => Promise<boolean>;
 }
 
 /**
@@ -188,6 +196,7 @@ export async function reclaimPort(port: number, options: ReclaimOptions = {}): P
   const kind = classifyListener(listener.command);
   if (kind === 'vscode') return { status: 'refused_vscode', listener };
   if (kind === 'unknown' && !options.force) return { status: 'refused_foreign', listener };
+  if (options.isServing && (await options.isServing(listener))) return { status: 'serving', listener };
 
   const stopped = await terminate(listener.pid, port);
   return { status: stopped ? 'reclaimed' : 'failed', listener };

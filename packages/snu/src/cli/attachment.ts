@@ -95,7 +95,7 @@ export async function resolveBridgeAttachment(probes: AttachmentProbes): Promise
 
 	return {
 		mode: 'create-standalone',
-		reason: 'No bridge is answering on the known ports; starting an in-process standalone bridge.',
+		reason: 'No bridge is answering on the known ports; starting a standalone bridge.',
 		mayReclaimPorts: true,
 	};
 }
