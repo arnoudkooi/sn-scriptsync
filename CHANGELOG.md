@@ -1,8 +1,16 @@
 # CHANGELOG.md
 
-## Unreleased
+## 4.10.4 (2026-11-02)
 
-- **Clearer `update_record` errors:** both hosts list only the required parameters that are missing. Standalone persistence verification failures return `E_VERIFY_FAILED` (HTTP 422), with the existing reason and acknowledged-write details, so agents can distinguish an unverified save from an execution error. ([#166](https://github.com/arnoudkooi/sn-scriptsync/issues/166#issuecomment-6519879557)) <!-- reported-by: MarcoMoro / GitHub #166 --> <!-- web: skip -->
+- **See which update parameters are missing:** agent `update_record` errors list only the required values that were not supplied. Empty content remains a deliberate clear, and multi-field requests point to `update_record_batch`. ([#166](https://github.com/arnoudkooi/sn-scriptsync/issues/166#issuecomment-6519879557)) <!-- reported-by: MarcoMoro / GitHub #166 --> <!-- web: skip -->
+- **Keep agent guidance current:** refreshed instructions explain the standalone bridge's distinct persistence-verification error, including how to inspect an acknowledged write before deciding whether to retry. <!-- reported-by: MarcoMoro / GitHub #166 --> <!-- web: skip -->
+- **See release notes on Linux:** the welcome panel shows the installed extension's changes on case-sensitive filesystems and continues to work from a development checkout. <!-- reported-by: release packaging review / chat 2026-11-02 --> <!-- web: skip -->
+
+## `@snutils/snu` 0.6.3 (2026-11-02)
+
+- **Distinguish unverified saves from failed writes:** an acknowledged write whose stored value cannot be confirmed returns `E_VERIFY_FAILED` (HTTP 422), preserving the reason and acknowledged-write details. Agents can inspect the saved state before retrying. A refused write remains a command error. ([#166](https://github.com/arnoudkooi/sn-scriptsync/issues/166#issuecomment-6519879557)) <!-- reported-by: MarcoMoro / GitHub #166 --> <!-- web: skip -->
+- **See which update parameters are missing:** the standalone bridge lists only missing required values and accepts empty content as an explicit clear, matching the VS Code host. <!-- reported-by: MarcoMoro / GitHub #166 --> <!-- web: skip -->
+- **Keep dependency installs patched:** the dependency lock uses the patched Hono HTTP adapter. The SNU MCP server uses stdio and does not use the affected static-file serving API. <!-- reported-by: Dependabot / GitHub alert #48 --> <!-- web: skip -->
 
 ## 4.10.3 (2026-10-30)
 

@@ -2345,8 +2345,14 @@ function showWelcomePanel(context: vscode.ExtensionContext, version: string, isF
 
 function getChangelogHighlightsHtml(context: vscode.ExtensionContext, version: string): string {
 	try {
-		const file = path.join(context.extensionPath, 'CHANGELOG.md');
-		const md = fs.readFileSync(file, 'utf8');
+		let md: string;
+		try {
+			// VSIX packaging normalizes the changelog filename to lowercase.
+			md = fs.readFileSync(path.join(context.extensionPath, 'changelog.md'), 'utf8');
+		} catch (error) {
+			if (error.code !== 'ENOENT') throw error;
+			md = fs.readFileSync(path.join(context.extensionPath, 'CHANGELOG.md'), 'utf8');
+		}
 		const lines = md.split(/\r?\n/);
 		// The changelog also carries `@snutils/snu` sections. Prefer the section of
 		// the running extension version; otherwise the first extension section.
