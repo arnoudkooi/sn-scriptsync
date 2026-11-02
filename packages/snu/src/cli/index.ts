@@ -282,7 +282,12 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       },
     });
 
-    const { httpPort, wsPort } = await standalone.start();
+    const { httpPort, wsPort } = await standalone.start().catch(async err => {
+      // Startup can fail after one listener has opened. Close it so setting
+      // exitCode in the lifecycle handler can still let the process exit.
+      await standalone.stop();
+      throw err;
+    });
     if (isJsonMode) {
       outputJson({ running: true, hostKind: 'standalone', pid: process.pid, httpPort, wsPort });
     } else {
@@ -629,7 +634,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       await startStandalone();
     } catch (err: any) {
       outputError(err, isJsonMode);
-      process.exit(1);
+      process.exitCode = 1;
     }
     return;
   }
@@ -643,7 +648,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       await printUpdateNotice(updateNotice);
     } catch (err: any) {
       outputError(err, isJsonMode);
-      process.exit(1);
+      process.exitCode = 1;
     }
     return;
   }
@@ -698,7 +703,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       await printUpdateNotice(updateNotice);
     } catch (err: any) {
       outputError(err, isJsonMode);
-      process.exit(1);
+      process.exitCode = 1;
     }
     return;
   }
@@ -761,7 +766,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       await printUpdateNotice(updateNotice);
     } catch (err: any) {
       outputError(err, isJsonMode);
-      process.exit(1);
+      process.exitCode = 1;
     }
     return;
   }
@@ -797,7 +802,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       console.log('If a standalone bridge is active, run `snu restart` to use the new version.\n');
     } catch (err: any) {
       outputError(err, isJsonMode);
-      process.exit(1);
+      process.exitCode = 1;
     }
     return;
   }
@@ -1130,6 +1135,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     await printUpdateNotice(updateNotice);
   } catch (err: any) {
     outputError(err, isJsonMode);
-    process.exit(1);
+    // Let pending output and HTTP handles drain. Forced exit can truncate
+    // piped errors and trigger a libuv shutdown assertion on Windows (#168).
+    process.exitCode = 1;
   }
 }

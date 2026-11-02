@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## `@snutils/snu` 0.6.4 (2026-11-02)
+
+- **Exit cleanly after CLI errors:** command failures set exit status 1 and let Node finish flushing output and shutting down, addressing the reported Windows libuv assertion after `E_VERIFY_FAILED`. The same handling applies to lifecycle commands and fatal launcher errors. ([#168](https://github.com/arnoudkooi/sn-scriptsync/issues/168)) <!-- reported-by: chrisp28103 / GitHub #168 --> <!-- web: skip -->
+- Close partially started standalone bridges on startup failure so an open listener cannot keep the failed command alive.
+
 ## 4.10.4 (2026-11-02)
 
 - **See which update parameters are missing:** agent `update_record` errors list only the required values that were not supplied. Empty content remains a deliberate clear, and multi-field requests point to `update_record_batch`. ([#166](https://github.com/arnoudkooi/sn-scriptsync/issues/166#issuecomment-6519879557)) <!-- reported-by: MarcoMoro / GitHub #166 --> <!-- web: skip -->
