@@ -93,11 +93,13 @@ test('update_record rejects the fields shape from issue #166 before sending a PA
       h.send({ agentRequestId: request.agentRequestId, success: true, data: { result: { script: 'old script' } } });
     }
   });
-  const response = await h.dispatcher.dispatch({ id: 'invalid-update', command: 'update_record',
-    params: { table: 'sys_script_fix', sys_id: sysId, fields: { script: 'x'.repeat(25_000) }, await: true } });
-  assert.equal(response.status, 'error');
-  assert.equal(response.code, 'E_INVALID_PARAMS');
-  assert.match(response.error!, /field, content/);
+  for (const awaitParams of [{}, { await: true }]) {
+    const response = await h.dispatcher.dispatch({ id: 'invalid-update', command: 'update_record',
+      params: { table: 'sys_script_fix', sys_id: sysId, fields: { script: 'x'.repeat(25_000) }, ...awaitParams } });
+    assert.equal(response.status, 'error');
+    assert.equal(response.code, 'E_INVALID_PARAMS');
+    assert.equal(response.error, 'Missing required params: field, content. Use update_record_batch for a fields object.');
+  }
   assert.ok(!h.messages.some(m => m.action === 'agentRestApi'));
   assert.equal(h.pending.size(), 0);
 });
@@ -110,6 +112,7 @@ test('update_record validates required params and accepts empty content', async 
     delete incomplete[key];
     const response = await h.dispatcher.dispatch({ id: `missing-${key}`, command: 'update_record', params: incomplete });
     assert.equal(response.code, 'E_INVALID_PARAMS', key);
+    assert.equal(response.error, `Missing required params: ${key}. Use update_record_batch for a fields object.`);
   }
   const result = h.dispatcher.dispatch({ id: 'clear-script', command: 'update_record', params: { ...params, await: true } });
   const request = await h.message('agentRestApi');
@@ -183,7 +186,7 @@ test('update_record never reports success for a mismatch or unreadable field, ev
       const response = await h.dispatcher.dispatch({ id: 'mismatched-update', command: 'update_record',
         params: { table: 'sys_script_fix', sys_id: sysId, field: 'script', content, await: true } });
       assert.equal(response.status, 'error');
-      assert.equal(response.code, 'E_COMMAND_FAILED');
+      assert.equal(response.code, 'E_VERIFY_FAILED');
       assert.equal(response.result, undefined);
       assert.equal(response.details?.writeAcknowledged, true);
       assert.equal(response.details?.verified, false);
@@ -213,7 +216,7 @@ test('update_record explains a failed verification read without retrying an ackn
       const response = await h.dispatcher.dispatch({ id: 'unverified-update', command: 'update_record',
         params: { table: 'sys_script_fix', sys_id: sysId, field: 'script', content: 'new', await: true } });
       assert.equal(response.status, 'error');
-      assert.equal(response.code, 'E_COMMAND_FAILED');
+      assert.equal(response.code, 'E_VERIFY_FAILED');
       assert.equal(response.details?.reason, 'read_failed');
       assert.equal(response.details?.writeAcknowledged, true);
       assert.equal(response.details?.verified, false);
@@ -221,6 +224,49 @@ test('update_record explains a failed verification read without retrying an ackn
       assert.match(response.error!, /write may already have taken effect/);
       assert.equal(h.messages.filter(m => m.method === 'PATCH').length, 1);
       assert.equal(h.pending.size(), 0);
+    });
+  }
+});
+
+test('update_record HTTP errors distinguish failed verification from a failed write', async t => {
+  for (const [reason, status, code] of [
+    ['value_mismatch', 422, 'E_VERIFY_FAILED'],
+    ['field_unreadable', 422, 'E_VERIFY_FAILED'],
+    ['read_failed', 422, 'E_VERIFY_FAILED'],
+    ['patch_failed', 500, 'E_COMMAND_FAILED'],
+  ] as const) {
+    await t.test(reason, async t => {
+      const h = await helper(t);
+      const http = new StandaloneHttpBridge({ port: 0, token: 'test-agent', dispatcher: h.dispatcher });
+      const port = await http.start();
+      t.after(() => http.close());
+      h.ws.on('message', raw => {
+        const request = JSON.parse(String(raw));
+        if (request.action !== 'agentRestApi') return;
+        const failed = request.method === 'PATCH' ? reason === 'patch_failed' : reason === 'read_failed';
+        h.send({ agentRequestId: request.agentRequestId, success: !failed, status: failed ? 500 : 200,
+          error: failed ? 'ServiceNow request failed' : undefined,
+          data: { result: request.method === 'PATCH' ? { script: 'new' }
+            : reason === 'field_unreadable' ? {} : { script: 'old' } } });
+      });
+      const response = await fetch(`http://127.0.0.1:${port}/api`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Agent-Token': 'test-agent' },
+        body: JSON.stringify({ id: 'http-update', command: 'update_record',
+          params: { table: 'sys_script_fix', sys_id: sysId, field: 'script', content: 'new', await: true } }),
+      });
+      const body: any = await response.json();
+      assert.equal(response.status, status);
+      assert.equal(body.status, 'error');
+      assert.equal(body.code, code);
+      assert.equal(body.result, undefined);
+      if (reason !== 'patch_failed') {
+        assert.equal(body.details.writeAcknowledged, true);
+        assert.equal(body.details.verified, false);
+        assert.equal(body.details.reason, reason);
+        if (reason === 'read_failed') assert.equal(body.details.causeCode, 'E_COMMAND_FAILED');
+      }
+      assert.deepEqual(h.messages.filter(m => m.action === 'agentRestApi').map(m => m.method),
+        reason === 'patch_failed' ? ['PATCH'] : ['PATCH', 'GET']);
     });
   }
 });

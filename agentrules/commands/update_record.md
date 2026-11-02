@@ -49,13 +49,13 @@ Use `field` plus `content`. A `fields` object belongs to `update_record_batch`; 
 
 **Standalone persistence verification:** the standalone host waits for the PATCH, then separately reads the field using raw stored values and compares it to `content`, even when `await` is omitted. A match returns `updated: true`, `awaited: true`, `verified: true`, `persisted: { "<field>": <saved value> }` and an empty `warnings` list. Empty content remains a deliberate clear; script whitespace is significant.
 
-A mismatch, unreadable field or failed read returns `E_COMMAND_FAILED` with `details.writeAcknowledged: true`, `verified: false` and a `reason` (`value_mismatch`, `field_unreadable` or `read_failed`). A failed read also includes `causeCode`. The write may already have taken effect: inspect the record and any ACL/business rule before retrying. Journal fields such as `work_notes` must be checked through the new `sys_journal_field` entry, not by equality against the parent record field; never repeat a journal write just because that comparison failed.
+A mismatch, unreadable field or failed read returns `E_VERIFY_FAILED` (HTTP 422) with `details.writeAcknowledged: true`, `verified: false` and a `reason` (`value_mismatch`, `field_unreadable` or `read_failed`). A failed read also includes `causeCode`. The write may already have taken effect: inspect the record and any ACL/business rule before retrying. Journal fields such as `work_notes` must be checked through the new `sys_journal_field` entry, not by equality against the parent record field; never repeat a journal write just because that comparison failed.
 
 **Do not verify twice:** a successful `verified: true` result with matching `persisted` content already completes persistence verification. No extra `get_record` is needed. Only on hosts or save results without that confirmation, call `get_record` and compare the content before reporting it saved. A PATCH success or increased `sys_mod_count` alone is insufficient. Collect any pending approval before checking for the resulting change.
 
 **Errors:**
-- `E_INVALID_PARAMS` - missing sys_id/table/field/content
+- `E_INVALID_PARAMS` - lists only missing sys_id/table/field/content parameters; empty content is a deliberate clear
 - `E_DISABLED` - the `updateRecords` gate is off for this host or instance
 - `E_BROWSER_DISCONNECTED` - no helper tab available
 - `E_INSTANCE_NOT_FOUND` - `_settings.json` missing
-- `E_COMMAND_FAILED` - standalone persistence verification failed; inspect `details` and read the saved state before deciding whether to retry
+- `E_VERIFY_FAILED` (HTTP 422) - standalone persistence verification failed; inspect `details` and read the saved state before deciding whether to retry

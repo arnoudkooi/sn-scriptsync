@@ -3,7 +3,7 @@ name: snu-agent-api
 description: "SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_records / update_records for many rows, create_artifact, create_application, analyze_artifact_type, rest_request, screenshots, etc.). Read this before calling any Agent API command."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=36 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=37 -->
 
 # SN ScriptSync — Agent API
 
@@ -121,6 +121,7 @@ HTTP status codes map to codes:
 | `E_UNKNOWN_COMMAND` / `E_NOT_FOUND` | 404 | No such command, or the target record doesn't exist |
 | `E_REFERENCE_INTEGRITY` | 409 | Write/delete blocked by a reference or data-integrity constraint |
 | `E_INSTANCE_REQUIRED` / `E_INSTANCE_NOT_FOUND` | 422 | Instance not resolvable |
+| `E_VERIFY_FAILED` | 422 | Standalone `update_record` was acknowledged but persistence could not be verified. Inspect `details.reason` and the saved state before retrying; the write may already have taken effect |
 | `E_DISABLED` | 423 | Feature disabled via settings (e.g. deletes, background scripts) |
 | `E_PAUSED` | 423 | The user paused agent access in the ScriptSync helper tab. Stop and tell the user — do not retry until they press Resume agents there |
 | `E_PARTIAL_FAILURE` | 207 | Batch partially succeeded — inspect per-item results |
@@ -561,16 +562,16 @@ Use `field` plus `content`. A `fields` object belongs to `update_record_batch`; 
 
 **Standalone persistence verification:** the standalone host waits for the PATCH, then separately reads the field using raw stored values and compares it to `content`, even when `await` is omitted. A match returns `updated: true`, `awaited: true`, `verified: true`, `persisted: { "<field>": <saved value> }` and an empty `warnings` list. Empty content remains a deliberate clear; script whitespace is significant.
 
-A mismatch, unreadable field or failed read returns `E_COMMAND_FAILED` with `details.writeAcknowledged: true`, `verified: false` and a `reason` (`value_mismatch`, `field_unreadable` or `read_failed`). A failed read also includes `causeCode`. The write may already have taken effect: inspect the record and any ACL/business rule before retrying. Journal fields such as `work_notes` must be checked through the new `sys_journal_field` entry, not by equality against the parent record field; never repeat a journal write just because that comparison failed.
+A mismatch, unreadable field or failed read returns `E_VERIFY_FAILED` (HTTP 422) with `details.writeAcknowledged: true`, `verified: false` and a `reason` (`value_mismatch`, `field_unreadable` or `read_failed`). A failed read also includes `causeCode`. The write may already have taken effect: inspect the record and any ACL/business rule before retrying. Journal fields such as `work_notes` must be checked through the new `sys_journal_field` entry, not by equality against the parent record field; never repeat a journal write just because that comparison failed.
 
 **Do not verify twice:** a successful `verified: true` result with matching `persisted` content already completes persistence verification. No extra `get_record` is needed. Only on hosts or save results without that confirmation, call `get_record` and compare the content before reporting it saved. A PATCH success or increased `sys_mod_count` alone is insufficient. Collect any pending approval before checking for the resulting change.
 
 **Errors:**
-- `E_INVALID_PARAMS` - missing sys_id/table/field/content
+- `E_INVALID_PARAMS` - lists only missing sys_id/table/field/content parameters; empty content is a deliberate clear
 - `E_DISABLED` - the `updateRecords` gate is off for this host or instance
 - `E_BROWSER_DISCONNECTED` - no helper tab available
 - `E_INSTANCE_NOT_FOUND` - `_settings.json` missing
-- `E_COMMAND_FAILED` - standalone persistence verification failed; inspect `details` and read the saved state before deciding whether to retry
+- `E_VERIFY_FAILED` (HTTP 422) - standalone persistence verification failed; inspect `details` and read the saved state before deciding whether to retry
 
 ### `update_record_batch`
 

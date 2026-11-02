@@ -186,6 +186,7 @@ for (const failure of [
   { status: 401, code: 'E_UNAUTHORIZED', error: 'ServiceNow rejected the background script', details: { notStarted: false } },
   { status: 403, code: 'E_SECURITY', error: 'Permission denied' },
   { status: 500, code: 'E_COMMAND_FAILED', error: 'Command failed' },
+  { status: 422, code: 'E_VERIFY_FAILED', error: 'Persistence verification failed', details: { writeAcknowledged: true, verified: false, reason: 'value_mismatch' } },
   { status: 202, code: 'E_REVIEW_PENDING', error: 'Approval required', details: { reviewId: 'review-1' } },
   { status: 504, code: 'E_TIMEOUT', error: 'Helper timed out', details: { retrySafe: false } },
 ]) {

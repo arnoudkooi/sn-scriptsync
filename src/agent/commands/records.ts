@@ -107,8 +107,10 @@ const update_record: CommandHandler = {
 	},
 	async handle(ctx, params) {
 		const { sys_id, table, field, content } = params || {};
-		if (!sys_id || !table || !field || content === undefined) {
-			throw new AgentError('E_INVALID_PARAMS', 'Missing required params: sys_id, table, field, content');
+		const missing = ['sys_id', 'table', 'field'].filter(key => !params?.[key]);
+		if (content === undefined) missing.push('content');
+		if (missing.length) {
+			throw new AgentError('E_INVALID_PARAMS', `Missing required params: ${missing.join(', ')}. Use update_record_batch for a fields object.`);
 		}
 
 		if (ctx.reviewWritesEnabled() && !isReviewBypass(params)) {

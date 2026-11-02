@@ -110,6 +110,7 @@ HTTP status codes map to codes:
 | `E_UNKNOWN_COMMAND` / `E_NOT_FOUND` | 404 | No such command, or the target record doesn't exist |
 | `E_REFERENCE_INTEGRITY` | 409 | Write/delete blocked by a reference or data-integrity constraint |
 | `E_INSTANCE_REQUIRED` / `E_INSTANCE_NOT_FOUND` | 422 | Instance not resolvable |
+| `E_VERIFY_FAILED` | 422 | Standalone `update_record` was acknowledged but persistence could not be verified. Inspect `details.reason` and the saved state before retrying; the write may already have taken effect |
 | `E_DISABLED` | 423 | Feature disabled via settings (e.g. deletes, background scripts) |
 | `E_PAUSED` | 423 | The user paused agent access in the ScriptSync helper tab. Stop and tell the user — do not retry until they press Resume agents there |
 | `E_PARTIAL_FAILURE` | 207 | Batch partially succeeded — inspect per-item results |

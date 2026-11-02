@@ -1995,8 +1995,10 @@ export class StandaloneDispatcher {
       // Update Record
       if (req.command === 'update_record') {
         const { table, sys_id, field, content } = req.params || {};
-        if (!sys_id || !table || !field || content === undefined) {
-          throw Object.assign(new Error('Missing required params: sys_id, table, field, content. Use update_record_batch for a fields object.'), { code: 'E_INVALID_PARAMS' });
+        const missing = ['sys_id', 'table', 'field'].filter(key => !req.params?.[key]);
+        if (content === undefined) missing.push('content');
+        if (missing.length) {
+          throw Object.assign(new Error(`Missing required params: ${missing.join(', ')}. Use update_record_batch for a fields object.`), { code: 'E_INVALID_PARAMS' });
         }
         const pendingPromise = this.pending.register({ id: correlationId, command: req.command, timeoutMs: 70_000 });
         this.ws.sendToBrowser({
@@ -2041,7 +2043,7 @@ export class StandaloneDispatcher {
           record = read.data?.result;
         } catch (err: any) {
           throw Object.assign(new Error(`The write to ${table}/${sys_id}.${field} was acknowledged, but persistence could not be verified: ${err.message}. Read the record before deciding whether to retry; the write may already have taken effect.`), {
-            code: 'E_COMMAND_FAILED', details: { ...verificationDetails, reason: 'read_failed', causeCode: err.code },
+            code: 'E_VERIFY_FAILED', details: { ...verificationDetails, reason: 'read_failed', causeCode: err.code },
           });
         }
         // Table API raw values can be primitives or { value, display_value }.
@@ -2059,7 +2061,7 @@ export class StandaloneDispatcher {
         if (actual === undefined || actual !== rawValue(content)) {
           const reason = actual === undefined ? 'field_unreadable' : 'value_mismatch';
           throw Object.assign(new Error(`Persistence verification failed for ${table}/${sys_id}.${field}: ${actual === undefined ? 'the read-back did not include a readable field value' : 'the saved value differs from the requested content'}. Inspect the record and any ACL/business rule before retrying; the write was acknowledged and may have had side effects.`), {
-            code: 'E_COMMAND_FAILED', details: { ...verificationDetails, reason },
+            code: 'E_VERIFY_FAILED', details: { ...verificationDetails, reason },
           });
         }
         return {

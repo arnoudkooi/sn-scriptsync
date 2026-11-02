@@ -42,6 +42,7 @@ export type AgentErrorCode =
 	| 'E_RECORD_NOT_SAVED'
 	| 'E_FILE_OUTSIDE_WORKSPACE'
 	| 'E_COMMAND_FAILED'
+	| 'E_VERIFY_FAILED'
 	// Browser debugger (CDP) family — see commands/cdp.ts.
 	| 'E_PRO_REQUIRED'
 	| 'E_CDP_UNAVAILABLE'
@@ -72,6 +73,7 @@ export function httpStatusForCode(code?: string): number {
 		case 'E_INVALID_QUERY':
 			return 400;
 		case 'E_QUERY_UNVERIFIABLE':
+		case 'E_VERIFY_FAILED':
 			return 422;
 		case 'E_UNAUTHORIZED':
 		case 'E_SECURITY':

@@ -25,6 +25,8 @@ const standalonePolicy = require('../packages/snu/dist/server/policy.js');
 const { StandaloneDispatcher } = require('../packages/snu/dist/server/dispatcher.js');
 const { StandaloneWsBridge } = require('../packages/snu/dist/server/wsBridge.js');
 const { PendingRegistry } = require('../packages/snu/dist/server/pendingRegistry.js');
+const { httpStatusForCode: editorHttpStatus } = require('../out/agent/errors.js');
+const { httpStatusForCode: standaloneHttpStatus } = require('../packages/snu/dist/server/httpBridge.js');
 const sysId = '0123456789abcdef0123456789abcdef';
 const handlers = [...recordsCommands, ...browserCommands, ...searchCommands, ...bulkCommands, ...profileCommands, ...attachmentCommands, ...backgroundCommands, ...queryCommands];
 
@@ -57,6 +59,38 @@ test('shared hosts produce compatible helper requests, results and policies', as
     assert.deepEqual(operation(sent.at(-1)), operation(harness.sent.at(-1)));
     assert.deepEqual(standalone.result, editorResult);
   };
+  await t.test('update_record names only missing parameters before either host sends a write', async () => {
+    const complete = { sys_id: sysId, table: 'sys_script_fix', field: 'script', content: '' };
+    const cases = [
+      [undefined, 'sys_id, table, field, content'],
+      [{}, 'sys_id, table, field, content'],
+      [{ sys_id: sysId, table: 'sys_script_fix', fields: { script: 'new' } }, 'field, content'],
+      [{ ...complete, sys_id: '', field: '' }, 'sys_id, field'],
+      ...Object.keys(complete).map(key => {
+        const params = { ...complete };
+        delete params[key];
+        return [params, key];
+      }),
+    ];
+    for (const [params, missing] of cases) {
+      const message = `Missing required params: ${missing}. Use update_record_batch for a fields object.`;
+      const editorSent = harness.sent.length;
+      const standaloneSent = sent.length;
+      await assert.rejects(handlers.find(handler => handler.name === 'update_record').handle(harness.context(), params),
+        { code: 'E_INVALID_PARAMS', message });
+      const response = await dispatcher.dispatch({ id: 'invalid-update', command: 'update_record', params, instance: 'testinst' });
+      assert.equal(response.code, 'E_INVALID_PARAMS');
+      assert.equal(response.error, message);
+      assert.equal(harness.sent.length, editorSent);
+      assert.equal(sent.length, standaloneSent);
+    }
+  });
+  await t.test('verification errors have the same HTTP status on both hosts', () => {
+    assert.equal(editorHttpStatus('E_VERIFY_FAILED'), 422);
+    assert.equal(standaloneHttpStatus('E_VERIFY_FAILED'), 422);
+    assert.equal(editorHttpStatus('E_COMMAND_FAILED'), 500);
+    assert.equal(standaloneHttpStatus('E_COMMAND_FAILED'), 500);
+  });
   await t.test('multiple fields on one record use the same awaited PATCH', () => compare('update_record_batch',
     { table: 'sp_widget', sys_id: sysId, fields: { script: 'a\nb\n', css: 'a{}', sys_scope: 'global' }, await: true },
     { success: true, status: 200, data: { result: { script: 'a\nb\n', css: 'a{}' } } }));

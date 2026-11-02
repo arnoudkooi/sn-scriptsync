@@ -146,7 +146,7 @@ test('MCP: update persistence failures preserve the acknowledged-write details a
     assert.strictEqual(mapped.command, 'update_record');
     assert.strictEqual(mapped.params.await, true);
     assert.ok(timeoutMs > 85_000, 'client allows time for PATCH and verification GET');
-    throw new ScriptSyncClientError('Persistence verification failed; inspect the saved state before retrying.', 'E_COMMAND_FAILED', 500,
+    throw new ScriptSyncClientError('Persistence verification failed; inspect the saved state before retrying.', 'E_VERIFY_FAILED', 422,
       { writeAcknowledged: true, verified: false, reason: 'value_mismatch', field: 'script' });
   };
   t.after(() => { ScriptSyncClient.prototype.execute = original; });
@@ -155,6 +155,7 @@ test('MCP: update persistence failures preserve the acknowledged-write details a
   } });
   assert.ok(response.isError);
   const text = (response.content as any[])[0].text as string;
+  assert.ok(text.includes('E_VERIFY_FAILED'));
   assert.ok(text.includes('writeAcknowledged'));
   assert.ok(text.includes('value_mismatch'));
   assert.ok(text.includes('inspect the saved state'));
