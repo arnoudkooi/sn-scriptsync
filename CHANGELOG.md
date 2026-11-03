@@ -1,5 +1,16 @@
 # CHANGELOG.md
 
+## 4.10.5 (2026-11-03)
+
+- **Run NOW SDK tasks safely across project paths:** builds and deploys pass paths and arguments directly to Node, so spaces and special characters are not interpreted as shell commands. <!-- reported-by: CodeQL / release review 2026-11-03 --> <!-- web: skip -->
+- **Keep agent requests within supported wait limits:** invalid or excessive timeouts are bounded, including when a pending request receives more time to finish. <!-- reported-by: CodeQL / release review 2026-11-03 --> <!-- web: skip -->
+- **Read background-script results cleanly:** incomplete markup is removed from plain-text output while printed text is preserved. <!-- reported-by: CodeQL / release review 2026-11-03 --> <!-- web: skip -->
+
+## `@snutils/snu` 0.6.5 (2026-11-03)
+
+- **Apply the same SDK and agent-response protections in the CLI and MCP server:** the standalone bridge includes the safe SDK execution, bounded request waits, and plain-text output handling described above. <!-- reported-by: CodeQL / release review 2026-11-03 --> <!-- web: skip -->
+- **Understand CLI output and failures:** the CLI documentation clarifies JSON output streams and exit statuses, including how to inspect an acknowledged write that could not be verified before deciding whether to retry. <!-- reported-by: release documentation review / chat 2026-11-03 --> <!-- web: skip -->
+
 ## `@snutils/snu` 0.6.4 (2026-11-02)
 
 - **Exit cleanly after CLI errors:** command failures set exit status 1 and let Node finish flushing output and shutting down, addressing the reported Windows libuv assertion after `E_VERIFY_FAILED`. The same handling applies to lifecycle commands and fatal launcher errors. ([#168](https://github.com/arnoudkooi/sn-scriptsync/issues/168)) <!-- reported-by: chrisp28103 / GitHub #168 --> <!-- web: skip -->
