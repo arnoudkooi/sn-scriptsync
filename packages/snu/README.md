@@ -257,6 +257,8 @@ snu query incident "priority=1^active=true" --fields number,short_description,sy
 snu query incident --json | jq '.records[].number'
 ```
 
+With `-j` / `--json`, successful results are written as JSON to stdout with exit status 0. Command errors are written as JSON to stderr with exit status 1. Callers should capture both streams and check the exit status; a pipeline that reads only stdout will not receive error JSON.
+
 ### Record Operations
 ```bash
 # Fetch record by sys_id

@@ -189,7 +189,8 @@ export function printHelp(): void {
   -y, --yes                           Skip the confirmation prompt
 
 \x1b[1mGLOBAL OPTIONS:\x1b[0m
-  -j, --json                          Output strict JSON on stdout for scripting/agents
+  -j, --json                          JSON results to stdout; JSON errors to stderr
+                                     Exit status: 0 on success, 1 on error
   -i, --instance <name>               Target specific instance folder
   --port-file <path>                  Explicit path to sn-agent-port.json
   -h, --help                          Show help
