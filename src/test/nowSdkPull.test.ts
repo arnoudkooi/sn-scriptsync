@@ -62,15 +62,15 @@ test('stagePull converts in a copy and never touches the project', async () => {
 	fs.writeFileSync(path.join(project, 'node_modules', '@servicenow', 'sdk', 'package.json'), JSON.stringify({ version: '4.13.0' }));
 	fs.mkdirSync(path.join(project, 'src'), { recursive: true });
 	fs.writeFileSync(path.join(project, 'src', 'include.js'), "return 'v1'");
-	const bin = path.join(project, 'node_modules', '.bin');
+	const bin = path.join(project, 'node_modules', '@servicenow', 'sdk', 'bin');
 	fs.mkdirSync(bin, { recursive: true });
 	// Fake now-sdk: "transform --from <dir>" copies the downloaded script into src/.
-	fs.writeFileSync(path.join(bin, 'now-sdk'), [
-		'#!/bin/sh',
-		'[ "$1" = "transform" ] && [ "$2" = "--from" ] || exit 2',
-		'cp "$3/update/include.js" src/include.js',
-		'cp "$3/update/include.js" src/added.js',
-	].join('\n'), { mode: 0o755 });
+	fs.writeFileSync(path.join(bin, 'index.js'), [
+		'const fs = require("fs"), path = require("path");',
+		'if (process.argv[2] !== "transform" || process.argv[3] !== "--from") process.exit(2);',
+		'fs.copyFileSync(path.join(process.argv[4], "update", "include.js"), "src/include.js");',
+		'fs.copyFileSync(path.join(process.argv[4], "update", "include.js"), "src/added.js");',
+	].join('\n'));
 
 	const staged = await stagePull(project, makeZip([{ name: 'update/include.js', content: "return 'v2-instance'", deflate: true }]));
 	try {

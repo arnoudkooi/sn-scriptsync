@@ -27,26 +27,27 @@ function makeProject(name: string, withCli = true): string {
 	fs.writeFileSync(path.join(root, 'now.config.json'), JSON.stringify({ scope: 'x_1849902_flspk', scopeId: SCOPE_ID, name: 'Spike' }));
 	fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name, version: '0.0.1' }));
 	if (withCli) {
-		const bin = path.join(root, 'node_modules', '.bin');
+		const bin = path.join(root, 'node_modules', '@servicenow', 'sdk', 'bin');
 		fs.mkdirSync(bin, { recursive: true });
 		fs.mkdirSync(path.join(root, 'node_modules', '@servicenow', 'sdk'), { recursive: true });
 		fs.writeFileSync(path.join(root, 'node_modules', '@servicenow', 'sdk', 'package.json'), JSON.stringify({ version: '4.13.0' }));
 		const script = [
-			'#!/bin/sh',
-			'if [ "$1" = "build" ]; then',
-			'  mkdir -p dist/app/update',
-			`  touch dist/app/update/sys_hub_flow_${FLOW_ID}.xml dist/app/update/sys_script_include_${'d'.repeat(32)}.xml`,
-			`  printf '%s' '<record_update table="sys_script_include"><sys_script_include action="INSERT_OR_UPDATE"><sys_id>${'a'.repeat(32)}</sys_id><name>Util</name><script>v1</script></sys_script_include></record_update>' > dist/app/update/sys_script_include_${'a'.repeat(32)}.xml`,
-			'  echo "Build completed successfully"',
-			'elif [ "$1" = "pack" ]; then',
-			'  mkdir -p target',
-			`  printf 'PK\\003\\004 /scope/sys_app_${SCOPE_ID}.xml' > target/spike_0_0_1.zip`,
-			'  echo "Single artifact emitted as \\"$(pwd)/target/spike_0_0_1.zip\\"."',
-			'elif [ "$1" = "transform" ]; then',
-			'  mkdir -p src/fluent/generated && cp "$3"/update/* src/fluent/generated/',
-			'fi',
+			'const fs = require("fs"), path = require("path");',
+			'if (process.argv[2] === "build") {',
+			'  fs.mkdirSync("dist/app/update", { recursive: true });',
+			`  fs.writeFileSync("dist/app/update/sys_hub_flow_${FLOW_ID}.xml", "");`,
+			`  fs.writeFileSync("dist/app/update/sys_script_include_${'d'.repeat(32)}.xml", "");`,
+			`  fs.writeFileSync("dist/app/update/sys_script_include_${'a'.repeat(32)}.xml", '<record_update table="sys_script_include"><sys_script_include action="INSERT_OR_UPDATE"><sys_id>${'a'.repeat(32)}</sys_id><name>Util</name><script>v1</script></sys_script_include></record_update>');`,
+			'  console.log("Build completed successfully");',
+			'} else if (process.argv[2] === "pack") {',
+			'  fs.mkdirSync("target", { recursive: true });',
+			`  fs.writeFileSync("target/spike_0_0_1.zip", "PK\\x03\\x04 /scope/sys_app_${SCOPE_ID}.xml");`,
+			'  console.log(`Single artifact emitted as "${path.resolve("target/spike_0_0_1.zip")}".`);',
+			'} else if (process.argv[2] === "transform") {',
+			'  fs.cpSync(path.join(process.argv[4], "update"), "src/fluent/generated", { recursive: true });',
+			'}',
 		].join('\n');
-		fs.writeFileSync(path.join(bin, 'now-sdk'), script, { mode: 0o755 });
+		fs.writeFileSync(path.join(bin, 'index.js'), script);
 	}
 	return root;
 }

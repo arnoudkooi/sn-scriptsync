@@ -11,6 +11,14 @@ export interface PendingEntry<T = any> {
 /** Time an approved command gets to run, counted from the approval. */
 export const APPROVED_EXECUTION_TIMEOUT_MS = 300_000;
 
+/** Longest supported bulk run (30 minutes), plus its browser reply grace. */
+export const MAX_PENDING_TIMEOUT_MS = 30 * 60_000 + 30_000;
+
+function boundedTimeout(timeoutMs: number = 60_000): number {
+  if (!Number.isFinite(timeoutMs)) return 60_000;
+  return Math.max(1, Math.min(timeoutMs, MAX_PENDING_TIMEOUT_MS));
+}
+
 export class PendingRegistry {
   private entries = new Map<string, PendingEntry>();
 
@@ -20,7 +28,7 @@ export class PendingRegistry {
     instanceFolder?: string;
     timeoutMs?: number;
   }): Promise<T> {
-    const timeoutMs = opts.timeoutMs ?? 60_000;
+    const timeoutMs = boundedTimeout(opts.timeoutMs);
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.entries.delete(opts.id);
@@ -49,6 +57,7 @@ export class PendingRegistry {
   extend(id: string, timeoutMs: number): boolean {
     const entry = this.entries.get(id);
     if (!entry) return false;
+    timeoutMs = boundedTimeout(timeoutMs);
     clearTimeout(entry.timer);
     entry.timeoutMs = timeoutMs;
     entry.timer = setTimeout(() => {

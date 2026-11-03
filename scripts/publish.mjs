@@ -31,6 +31,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
+import { quoteShellArg } from './shell-quote.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SNU_DIR = path.join(ROOT, 'packages', 'snu');
@@ -320,8 +321,12 @@ function npmBrowserEnv() {
     return process.env;
   }
   log(`${C.gray}Browser for npm: Chrome profile '${profile.name}' (${profile.dir})${C.reset}`);
-  const quote = (s) => `"${s.replace(/"/g, '\\"')}"`;
-  return { ...process.env, npm_config_browser: `${quote(profile.binary)} --profile-directory=${quote(profile.dir)}` };
+  try {
+    return { ...process.env, npm_config_browser: `${quoteShellArg(profile.binary)} ${quoteShellArg(`--profile-directory=${profile.dir}`)}` };
+  } catch (err) {
+    warn(`Browser for npm: ${err.message}. npm will open the system default browser.`);
+    return process.env;
+  }
 }
 
 if (wants.has('npm')) {

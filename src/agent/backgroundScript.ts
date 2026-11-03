@@ -11,7 +11,7 @@
  */
 
 export interface ParsedScriptOutput {
-	/** Lines printed with gs.print / gs.info, without the `*** Script: ` prefix. */
+	/** Plain text, never safe HTML. Lines printed without the `*** Script: ` prefix. */
 	stdout: string;
 	warnings: string[];
 	errors: string[];
@@ -63,7 +63,9 @@ export function parseScriptOutput(raw: string): ParsedScriptOutput {
 	const idMatch = EXECUTION_ID.exec(text);
 	const lines = printedBody(text)
 		.split(/<BR\s*\/?>|\r?\n/i)
-		.map((line) => decodeEntities(line.replace(/<[^>]*>/g, '')).replace(/\s+$/, ''))
+		// Include unterminated tags so malformed markup cannot leave a raw
+		// opening tag behind. Decode afterwards to preserve printed text.
+		.map((line) => decodeEntities(line.replace(/<[^>]*(?:>|$)/g, '')).replace(/\s+$/, ''))
 		.filter((line) => line.trim() !== '');
 
 	const stdout: string[] = [];

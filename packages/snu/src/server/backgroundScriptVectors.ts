@@ -104,6 +104,21 @@ export const SCRIPT_OUTPUT_VECTORS: ScriptOutputVector[] = [
 		expect: { stdout: 'hello', logLines: [], executionId: null, status: 'completed' },
 	},
 	{
+		name: 'unterminated tags do not survive markup removal',
+		output: '<PRE>*** Script: hello<script<BR/>*** Script: world<img src=x</PRE>',
+		expect: { stdout: 'hello\nworld', logLines: [], executionId: null, status: 'completed' },
+	},
+	{
+		name: 'nested malformed markup does not create an opening tag',
+		output: '<PRE>*** Script: <scr<script>ipt>alert(1)</script></PRE>',
+		expect: { stdout: 'ipt>alert(1)', logLines: [], executionId: null, status: 'completed' },
+	},
+	{
+		name: 'encoded markup is preserved as printed text, not sanitized HTML',
+		output: '<PRE>*** Script: &lt;script&gt;literal&lt;/script&gt; &amp;lt;b&amp;gt;</PRE>',
+		expect: { stdout: '<script>literal</script> &lt;b&gt;', logLines: [], executionId: null, status: 'completed' },
+	},
+	{
 		name: 'empty output',
 		output: '',
 		expect: { stdout: '', warnings: [], errors: [], logLines: [], executionId: null, status: 'completed' },

@@ -52,25 +52,13 @@ export interface DeployOutcome {
 }
 
 function localCli(root: string): string {
-	const bin = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'now-sdk.cmd' : 'now-sdk');
+	// Run the SDK's JavaScript entry point directly, never a shell shim. This
+	// path is shared by supported SDK 4.x releases, including Windows installs.
+	const bin = path.resolve(root, 'node_modules', '@servicenow', 'sdk', 'bin', 'index.js');
 	if (!fs.existsSync(bin)) {
 		throw new NowSdkProjectError(`The ServiceNow SDK is not installed in ${path.basename(root)}. Run npm install in the project first.`);
 	}
 	return bin;
-}
-
-/**
- * Quote a command or argument for the Windows shell (cmd.exe), which has to
- * run the .cmd shim. Inside double quotes, spaces, `&`, `|`, `<`, `>` and `^`
- * are literal, so a path like C:\Users\Jane Doe\AppData\Local\Temp stays one
- * argument. `"` cannot be escaped there and `%` still expands variables, so
- * both are refused instead.
- */
-export function quoteForWindowsShell(value: string): string {
-	if (/["%\r\n]/.test(value)) {
-		throw new NowSdkProjectError(`Cannot run the ServiceNow SDK with "${value}": the path contains a character the Windows shell cannot pass safely (" or %). Move the project or temp folder to a path without it.`);
-	}
-	return `"${value}"`;
 }
 
 /** Run the project's own `now-sdk` with fixed arguments; resolves with its output. */
@@ -78,15 +66,11 @@ export function runNowSdk(root: string, args: string[], onOutput?: (text: string
 	const bin = localCli(root);
 	return new Promise((resolve, reject) => {
 		onOutput?.(`> now-sdk ${args.join(' ')}\n`);
-		const isWin = process.platform === 'win32';
-		// .cmd shims can only be spawned through a shell on Windows. The shell
-		// joins the arguments with spaces, so each one is quoted: a temp folder
-		// under a user name with a space must stay a single argument.
+		// Use Node from PATH, as the SDK's shim does, rather than VS Code's
+		// Electron executable. Paths and arguments stay data on every platform.
 		let child: cp.ChildProcess;
 		try {
-			child = isWin
-				? cp.spawn(quoteForWindowsShell(bin), args.map(quoteForWindowsShell), { cwd: root, shell: true, env: process.env })
-				: cp.spawn(bin, args, { cwd: root, env: process.env });
+			child = cp.spawn('node', ['--', bin, ...args], { cwd: root, shell: false, env: process.env });
 		} catch (e) {
 			reject(e);
 			return;

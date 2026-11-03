@@ -1,6 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import * as pendingRegistry from '../agent/pendingRegistry';
+import { MAX_PENDING_TIMEOUT_MS } from '../agent/pendingRegistry';
+
+for (const [name, requested, expected] of [
+  ['oversized', Number.MAX_SAFE_INTEGER, MAX_PENDING_TIMEOUT_MS],
+  ['bulk deadline plus grace', MAX_PENDING_TIMEOUT_MS, MAX_PENDING_TIMEOUT_MS],
+  ['deploy window', 15 * 60_000, 15 * 60_000],
+  ['NaN', NaN, 60_000],
+  ['infinity', Infinity, 60_000],
+  ['negative infinity', -Infinity, 60_000],
+  ['negative', -10, 1],
+  ['zero', 0, 1],
+  ['non-numeric', '30000' as any, 60_000],
+] as const) {
+	for (const extend of [false, true]) {
+		test(`pending timeout bounds: ${name}, extend=${extend}`, async (t) => {
+			(t.mock.timers.enable as any)({ apis: ['setTimeout'] });
+			const p = pendingRegistry.register({ id: 'bounded', command: 'test', instanceFolder: 'x', timeoutMs: extend ? 1_000 : requested });
+			if (extend) pendingRegistry.extend('bounded', requested);
+			t.mock.timers.tick(expected - 1);
+			assert.ok(pendingRegistry.has('bounded'));
+			t.mock.timers.tick(1);
+			await assert.rejects(p, (e: any) => e.code === 'E_TIMEOUT' && e.message.includes(`${expected}ms`));
+			assert.strictEqual(pendingRegistry.size(), 0);
+		});
+	}
+}
 
 // An approved review must not inherit what was left of the 5-minute review
 // window: a script approved at 4:50 that runs 45 s would otherwise time out.
