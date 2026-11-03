@@ -19,7 +19,9 @@ export const MAX_PENDING_TIMEOUT_MS = 30 * 60_000 + 30_000;
 
 function boundedTimeout(timeoutMs: number = 60_000): number {
 	if (!Number.isFinite(timeoutMs)) return 60_000;
-	return Math.max(1, Math.min(timeoutMs, MAX_PENDING_TIMEOUT_MS));
+	if (timeoutMs > MAX_PENDING_TIMEOUT_MS) return MAX_PENDING_TIMEOUT_MS;
+	if (timeoutMs < 1) return 1;
+	return timeoutMs;
 }
 
 const pending = new Map<string, PendingEntry>();
