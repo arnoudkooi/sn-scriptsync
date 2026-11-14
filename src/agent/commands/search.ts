@@ -2,6 +2,7 @@ import * as path from 'path';
 import { CommandHandler } from '../types';
 import { AgentError, inferCodeFromMessage } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
+import { compactSearchResults } from '../resultShaping';
 
 const eu = new ExtensionUtils();
 
@@ -67,7 +68,8 @@ const code_search: CommandHandler = {
 			'sysClassName, active, missingWords and parentRef; each match has matchingWords, a context excerpt, and lineMatches ' +
 			'({ lineNumber, content, isMatch }) for line-level rendering. Matches are excerpts, not full field bodies — use ' +
 			'get_record / query_records to pull the complete script of a specific hit. The first search after the helper tab opens ' +
-			'may take longer while the field index builds; subsequent searches reuse the cached index.',
+			'may take longer while the field index builds; subsequent searches reuse the cached index. Full results can be very ' +
+			'large for a common term: pass compact: true to get only { table, label, count, names } per table, then read the hits you need.',
 	},
 	async handle(ctx, params) {
 		const term: string = (params?.term ?? params?.query ?? '').toString().trim();
@@ -115,7 +117,8 @@ const code_search: CommandHandler = {
 			term: response?.searchTerm ?? term,
 			stats: response?.stats ?? {},
 			words: response?.words ?? [],
-			results: response?.results ?? [],
+			results: params?.compact === true ? compactSearchResults(response?.results) : response?.results ?? [],
+			...(params?.compact === true ? { compact: true } : {}),
 		};
 	},
 };

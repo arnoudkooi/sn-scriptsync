@@ -56,11 +56,12 @@ export const TOOLS: ToolDefinition[] = [
     description:
       'Fast SN Utils GraphQL field-index code search across Script Includes, Business Rules, Client Scripts, UI Actions, and Flow Actions. Requires SN Utils Pro.',
     cliCommand: 'search',
-    cliUsage: 'snu search <term> [--tables <t1,t2>] [--limit <n>] [--active-only] [--instance <i>] [--json]',
+    cliUsage: 'snu search <term> [--tables <t1,t2>] [--limit <n>] [--active-only] [--compact] [--instance <i>] [--json]',
     cliOptions: {
       tables: { type: 'string', short: 't', description: 'Comma-separated table filter' },
       limit: { type: 'string', short: 'l', description: 'Max results (default: 50)' },
       'active-only': { type: 'boolean', short: 'a', description: 'Search active records only' },
+      compact: { type: 'boolean', short: 'c', description: 'Table, match count and record names only (much smaller output)' },
     },
     inputSchema: {
       type: 'object',
@@ -69,6 +70,7 @@ export const TOOLS: ToolDefinition[] = [
         tables: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }], description: 'Optional exact table names as a comma-separated string or array' },
         limit: { type: 'integer', minimum: 1, maximum: 500, default: 50, description: 'Max hits to return' },
         activeOnly: { type: 'boolean', default: false, description: 'Only search active records' },
+        compact: { type: 'boolean', default: false, description: 'Return only table, match count and record names per table. Use this first: full results include every matching line and can be very large.' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['term'],
@@ -82,6 +84,7 @@ export const TOOLS: ToolDefinition[] = [
         tables: input.tables,
         limit: typeof input.limit === 'number' ? input.limit : input.limit ? parseInt(input.limit, 10) : 50,
         activeOnly: input.activeOnly === true || input['active-only'] === true,
+        ...(input.compact === true ? { compact: true } : {}),
       },
     }),
   },
@@ -140,12 +143,13 @@ export const TOOLS: ToolDefinition[] = [
     agentCommand: 'query_records',
     description: 'Query records from any ServiceNow table with an encoded query string, projection fields, and limit. Every field path in query, fields and orderBy is checked against the table schema first (values are not judged): a path that does not exist fails with E_INVALID_QUERY, one that cannot be checked with E_QUERY_UNVERIFIABLE, and the query is not run, because ServiceNow would ignore the condition and return unfiltered rows. Pass validate: false to skip the check.',
     cliCommand: 'query',
-    cliUsage: 'snu query <table> [query] [--fields <f1,f2>] [--limit <n>] [--order-by <field>] [--no-validate] [--instance <i>] [--json]',
+    cliUsage: 'snu query <table> [query] [--fields <f1,f2>] [--limit <n>] [--order-by <field>] [--no-links] [--no-validate] [--instance <i>] [--json]',
     cliOptions: {
       fields: { type: 'string', short: 'f', description: 'Fields to project (default: sys_id,number,short_description,sys_created_on)' },
       limit: { type: 'string', short: 'l', description: 'Max records to return (default: 10)' },
       'order-by': { type: 'string', short: 'o', description: 'Order by field expression' },
       'no-validate': { type: 'boolean', description: 'Run the query without checking its field paths' },
+      'no-links': { type: 'boolean', description: 'Return references as sys_ids instead of link objects (smaller output)' },
     },
     inputSchema: {
       type: 'object',
@@ -156,6 +160,7 @@ export const TOOLS: ToolDefinition[] = [
         limit: { type: 'integer', minimum: 1, maximum: 500, default: 10, description: 'Max records to return' },
         orderBy: { type: 'string', description: 'Order by field expression (e.g. sys_created_on or ORDERBYDESCsys_created_on)' },
         validate: { type: 'boolean', description: 'false runs the query without checking its field paths (default true)' },
+        referenceLinks: { type: 'boolean', description: 'false returns each reference as its sys_id instead of a { link, value } object, roughly halving reference-heavy results (default true)' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['table'],
@@ -170,8 +175,10 @@ export const TOOLS: ToolDefinition[] = [
         // Left out when not given: the bridge applies its default list, and
         // only fields the caller asked for are validated.
         fields: input.fields || undefined,
-        limit: typeof input.limit === 'number' ? input.limit : input.limit ? parseInt(input.limit, 10) : 10,
+        // Left out when not given, so the result can say the default applied.
+        limit: typeof input.limit === 'number' ? input.limit : input.limit ? parseInt(input.limit, 10) : undefined,
         orderBy: formatOrderBy(input.orderBy || input['order-by']),
+        ...(input.referenceLinks === false || input['no-links'] === true ? { referenceLinks: false } : {}),
         ...(input.validate === false || input['no-validate'] === true ? { validate: false } : {}),
       },
     }),

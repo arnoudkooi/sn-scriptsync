@@ -4,6 +4,7 @@ import { AgentError } from '../errors';
 import { ExtensionUtils } from '../../ExtensionUtils';
 import { Columns, columnsFromMeta, createSchemaCache, parentFromDbObject, queryValidationError, validateQuery } from '../queryValidation';
 import { restRequest } from './_shared';
+import { queryCoverage } from '../resultShaping';
 
 const eu = new ExtensionUtils();
 
@@ -53,6 +54,11 @@ const query_records: CommandHandler = {
 			id: 'q_1',
 			params: { table: 'sys_script_include', query: 'active=true', fields: 'sys_id,name', limit: 10 },
 		},
+		notes:
+			'Without fields the result holds sys_id, number, short_description and sys_created_on; without limit it holds 10 records. ' +
+			'The result says what it left out: limit, more (true when further records match), total when the instance reported it, ' +
+			'defaultFields / defaultLimit when a default applied, and a note in words. Pass referenceLinks:false to get each reference ' +
+			'as its sys_id instead of a { link, value } object, which roughly halves reference-heavy results.',
 	},
 	async handle(ctx, params) {
 		const table = params?.table;
@@ -73,6 +79,9 @@ const query_records: CommandHandler = {
 		}
 
 		let queryString = `sysparm_fields=${fields}&sysparm_limit=${limit}`;
+		// Opt-in: a reference then comes back as its sys_id instead of a
+		// { link, value } object.
+		if (params?.referenceLinks === false) queryString += '&sysparm_exclude_reference_link=true';
 		if (encodedQuery) queryString += `&sysparm_query=${encodedQuery}`;
 		if (orderBy) {
 			if (encodedQuery) {
@@ -103,10 +112,12 @@ const query_records: CommandHandler = {
 			throw new AgentError(code, `${msg}.${hint}`, response?.details);
 		}
 
+		const count = response?.count ?? (response?.records?.length || 0);
 		return {
 			table: response?.tableName ?? table,
-			count: response?.count ?? (response?.records?.length || 0),
+			count,
 			records: response?.records ?? [],
+			...queryCoverage(count, limit, response?.pagination?.totalCount, !params?.fields, params?.limit === undefined),
 		};
 	},
 };

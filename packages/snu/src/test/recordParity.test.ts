@@ -196,3 +196,52 @@ test('delete_record: all rejected rows return an error with every outcome', asyn
     ]);
   });
 });
+
+// A first page or the default projection must never read as "everything".
+test('query_records: says what it left out (total, more, defaults)', async () => {
+  let seen: any = null;
+  await withBridge({}, (request, reply) => {
+    seen = request;
+    reply({ success: true, status: 200, data: { result: [{ sys_id: 'a1' }, { sys_id: 'a2' }] }, pagination: { link: null, totalCount: '42' } });
+  }, async (dispatcher) => {
+    const response = await dispatcher.dispatch({ id: 'q_cov', command: 'query_records', params: { table: 'incident', validate: false } });
+    const result = response.result as any;
+    assert.strictEqual(seen.queryParams.sysparm_limit, '10');
+    assert.strictEqual(seen.queryParams.sysparm_exclude_reference_link, undefined, 'reference links stay unless asked');
+    assert.strictEqual(result.count, 2);
+    assert.strictEqual(result.limit, 10);
+    assert.strictEqual(result.total, 42);
+    assert.strictEqual(result.more, true);
+    assert.strictEqual(result.defaultFields, true);
+    assert.strictEqual(result.defaultLimit, true);
+    assert.match(result.note, /2 of 42/);
+    assert.match(result.note, /default fields/);
+  });
+});
+
+test('query_records: a complete result with chosen fields carries no note; referenceLinks:false drops link objects', async () => {
+  let seen: any = null;
+  await withBridge({}, (request, reply) => {
+    seen = request;
+    reply({ success: true, status: 200, data: { result: [{ sys_id: 'a1', caller_id: 'u1' }] }, pagination: { link: null, totalCount: '1' } });
+  }, async (dispatcher) => {
+    const response = await dispatcher.dispatch({
+      id: 'q_done', command: 'query_records',
+      params: { table: 'incident', fields: 'sys_id,caller_id', limit: 5, referenceLinks: false, validate: false },
+    });
+    assert.strictEqual(seen.queryParams.sysparm_exclude_reference_link, 'true');
+    assert.deepStrictEqual(response.result, { table: 'incident', count: 1, records: [{ sys_id: 'a1', caller_id: 'u1' }], limit: 5, total: 1, more: false });
+  });
+});
+
+test('query_records: without a reported total, reaching the limit means more may match', async () => {
+  await withBridge({}, (_request, reply) => {
+    reply({ success: true, status: 200, data: { result: [{ sys_id: 'a1' }, { sys_id: 'a2' }] } });
+  }, async (dispatcher) => {
+    const response = await dispatcher.dispatch({ id: 'q_lim', command: 'query_records', params: { table: 'incident', fields: 'sys_id', limit: 2, validate: false } });
+    const result = response.result as any;
+    assert.strictEqual(result.more, true);
+    assert.strictEqual(result.total, undefined);
+    assert.match(result.note, /limit of 2 was reached/);
+  });
+});

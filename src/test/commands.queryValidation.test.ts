@@ -45,7 +45,7 @@ test('query_records: an invalid dot-walk fails with E_INVALID_QUERY and the quer
 test('query_records: a valid query returns the unchanged result; columns are cached per instance', async () => {
 	const ctx = instanceAt('https://two.service-now.com');
 	const first = await query.handle(ctx, { table: 'incident', query: 'priority=1^opened_by=javascript:gs.getUserID()', fields: 'number,caller_id.name' });
-	assert.deepEqual(first, { table: 'incident', count: 1, records: [{ sys_id: '1' }] });
+	assert.deepEqual(first, { table: 'incident', count: 1, records: [{ sys_id: '1' }], limit: 10, more: false, defaultLimit: true });
 	harness.sent.length = 0;
 	await query.handle(ctx, { table: 'incident', query: 'priority=2' });
 	assert.deepEqual(harness.sent.map((m) => m.action), ['agentQueryRecords']);

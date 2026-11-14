@@ -3,9 +3,14 @@
 ## 4.10.6 (2026-11-16)
 
 - **Load a custom application built in the Global scope:** Load Scope on a file in the `global` folder asks which Global application to load. Agents can pull such an application by passing its sys_id to `pull_scope`. ([#169](https://github.com/arnoudkooi/sn-scriptsync/issues/169)) <!-- reported-by: GitHub issue #169 --> <!-- web: skip -->
+- **Give agents smaller, clearer read results:** `query_records` reports the total and whether more records match and accepts `referenceLinks: false`; `code_search` accepts `compact: true` for table, count and record names only. <!-- reported-by: Still Learning episode 4 draft review 2026-11-14 --> <!-- web: skip -->
 
 ## `@snutils/snu` 0.6.6 (2026-11-16)
 
+- **See when a query left records out:** `snu query` reports the total and whether more records match, and says when the default fields or the default limit of 10 applied. <!-- reported-by: Still Learning episode 4 draft review 2026-11-14 --> <!-- web: skip -->
+- **Get compact code search results:** `snu search --compact` returns table, match count and record names only, a fraction of the full output. The readable output shows table names and true totals. <!-- reported-by: Still Learning episode 4 draft review 2026-11-14 --> <!-- web: skip -->
+- **Return references as sys_ids:** `snu query --no-links` drops the link objects, roughly halving reference-heavy results. <!-- reported-by: Still Learning episode 4 draft review 2026-11-14 --> <!-- web: skip -->
+- **Keep instance scripts out of your code repository:** `snu serve` warns when started inside a git repository that is not a ScriptSync workspace. <!-- reported-by: Still Learning episode 4 draft review 2026-11-14 --> <!-- web: skip -->
 - **Pull a Global application by sys_id:** the `pull_scope` error for the Global scope explains how to pull one custom Global application instead. ([#169](https://github.com/arnoudkooi/sn-scriptsync/issues/169)) <!-- reported-by: GitHub issue #169 --> <!-- web: skip -->
 
 ## 4.10.5 (2026-11-03)

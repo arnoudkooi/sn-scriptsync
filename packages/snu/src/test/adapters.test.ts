@@ -106,7 +106,8 @@ test('Adapter: snu_query_records handles ORDERBY formatting and defaults', () =>
   assert.strictEqual(m1.params.table, 'incident');
   // The bridge applies the default field list; only caller-supplied fields are validated.
   assert.strictEqual(m1.params.fields, undefined);
-  assert.strictEqual(m1.params.limit, 10);
+  // Left out too: the bridge applies the default of 10 and reports that it did.
+  assert.strictEqual(m1.params.limit, undefined);
   assert.strictEqual(m1.params.orderBy, undefined);
   assert.strictEqual('validate' in m1.params, false);
   assert.strictEqual(tool.mapInput({ table: 'incident', validate: false }).params.validate, false);

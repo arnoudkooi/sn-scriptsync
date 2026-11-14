@@ -9,6 +9,7 @@ import { parseFieldValues } from '../fieldInput.js';
 import { formatHumanOutput, outputJson, outputError } from './format.js';
 import { startMcpServer } from '../mcp/index.js';
 import { StandaloneBridge } from '../server/standalone.js';
+import { repositoryWriteWarning } from '../server/workspaceCheck.js';
 import { getUpdateNotice, shouldCheckForUpdates } from './updateCheck.js';
 import {
   inspectBridge,
@@ -299,6 +300,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       if (wsPort !== HELPER_WS_PORT) {
         console.warn(`\n\x1b[33m  ! The SN Utils helper tab only connects to port ${HELPER_WS_PORT}, so the browser cannot reach this bridge on ${wsPort}.\x1b[0m`);
       }
+      const repoWarning = repositoryWriteWarning(process.cwd());
+      if (repoWarning) console.warn(`\n\x1b[33m  ! ${repoWarning}\x1b[0m`);
       console.log(`\n\x1b[90mRunning standalone. Press Ctrl+C to stop.\x1b[0m\n`);
     }
     await printUpdateNotice(updateNotice);
@@ -624,6 +627,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
           console.log(`\n\x1b[1m\x1b[32m[snu] Standalone bridge started in the background\x1b[0m`);
           console.log(`  • PID:         ${ready.health.pid}`);
           if (spawned.logFile) console.log(`  • Log:         ${spawned.logFile}`);
+          const repoWarning = repositoryWriteWarning(process.cwd());
+          if (repoWarning) console.warn(`\n\x1b[33m  ! ${repoWarning}\x1b[0m`);
           console.log('\n\x1b[90mIt keeps running after this terminal closes. Stop it with `snu stop`.\x1b[0m\n');
         } else {
           console.log(`\nAnother bridge started first (PID ${ready.health.pid}); using that one.\n`);

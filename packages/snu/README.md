@@ -237,7 +237,12 @@ snu update
 
 # GraphQL field-index code search across script tables (Pro)
 snu search "OAuthUtil" --tables sys_script_include,sys_ui_action --limit 20
+
+# Table, match count and record names only: a fraction of the full output
+snu search "OAuthUtil" --compact --json
 ```
+
+Start the bridge from its own folder rather than inside a code repository: pulled instance scripts are written to the folder the bridge runs in. `snu serve` warns when that folder is a git repository without instance folders.
 
 `snu serve` is idempotent: if a healthy bridge already owns the ports, it reports that process instead of failing with `EADDRINUSE`. `snu serve --detach` (and `snu restart --detach`) start the bridge as a detached process with no console window on Windows, wait until it answers its health endpoint, print its PID and log file (`~/.sn-scriptsync/snu-bridge.log`), and return. Use `snu status` to inspect it and `snu stop` to stop it. `snu stop` and `snu restart` also support editor-hosted bridges in VS Code and Cursor: they send authenticated `yield` or `restart` commands so the editor releases or restarts its bridge without closing the editor. The CLI never sends process termination signals to an editor host.
 
@@ -255,7 +260,12 @@ snu query incident "priority=1^active=true" --fields number,short_description,sy
 
 # Output strict JSON for terminal scripting or piping into jq
 snu query incident --json | jq '.records[].number'
+
+# References as sys_ids instead of link objects (smaller output)
+snu query sys_security_acl "active=true" --fields name,sys_scope --no-links --json
 ```
+
+Without `--fields` a query returns `sys_id`, `number`, `short_description` and `sys_created_on`; without `--limit` it returns 10 records. The result reports what it left out: `more` is true when further records match, `total` holds the instance's count when it reported one, and `note` says the same in words.
 
 With `-j` / `--json`, successful results are written as JSON to stdout with exit status 0. Command errors are written as JSON to stderr with exit status 1. Callers should capture both streams and check the exit status; a pipeline that reads only stdout will not receive error JSON.
 

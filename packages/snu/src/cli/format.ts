@@ -226,15 +226,28 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
       lines.push(`${ANSI.gray}No matches found.${ANSI.reset}`);
     } else {
       for (const t of tables) {
-        lines.push(`${ANSI.bold}${ANSI.cyan}${t.label} (${t.table})${ANSI.reset} — ${t.hits?.length || 0} match(es)`);
+        const table = t.tableName ?? t.table;
+        const label = t.tableLabel ?? t.label ?? table;
+        if (result.compact) {
+          const shown = (t.names || []).length;
+          const total = Number(t.count) || shown;
+          lines.push(`${ANSI.bold}${ANSI.cyan}${label} (${table})${ANSI.reset}: ${total} record(s)${total > shown ? `, ${shown} shown` : ''}`);
+          for (const name of t.names || []) lines.push(`  • ${name}`);
+          lines.push('');
+          continue;
+        }
+        const shown = t.hits?.length || 0;
+        const total = Number(t.rowCount) || shown;
+        lines.push(`${ANSI.bold}${ANSI.cyan}${label} (${table})${ANSI.reset} — ${shown} match(es)${total > shown ? ` of ${total}` : ''}`);
         for (const hit of t.hits || []) {
-          const matchField = hit.field ? ` (${hit.field})` : '';
-          lines.push(`  • ${hit.name || hit.sys_id}${matchField} [${hit.sys_id}]`);
-          if (hit.matches && hit.matches.length > 0) {
-            for (const m of hit.matches.slice(0, 3)) {
-              lines.push(`    ${ANSI.gray}Line ${m.line}:${ANSI.reset} ${m.preview?.trim()}`);
-            }
+          const id = hit.sysId ?? hit.sys_id;
+          lines.push(`  • ${hit.name || id} [${id}]`);
+          const found: Array<{ line: any; text: string }> = [];
+          for (const m of hit.matches || []) {
+            for (const l of m.lineMatches || []) if (l?.isMatch) found.push({ line: l.lineNumber, text: String(l.content ?? '') });
+            if (m.line !== undefined) found.push({ line: m.line, text: String(m.preview ?? '') });
           }
+          for (const f of found.slice(0, 3)) lines.push(`    ${ANSI.gray}Line ${f.line}:${ANSI.reset} ${f.text.trim()}`);
         }
         lines.push('');
       }
@@ -287,7 +300,18 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
       })
     );
 
-    return `\n` + formatTable(selectedHeaders, rows) + `\n\n${ANSI.gray}Showing ${records.length} record(s) on ${result.table || 'table'}.${ANSI.reset}\n`;
+    const hints: string[] = [];
+    if (result.more) {
+      hints.push(typeof result.total === 'number'
+        ? `${result.total - records.length} more match; raise --limit to read them.`
+        : `The limit of ${result.limit} was reached, so more may match; raise --limit.`);
+    }
+    if (result.defaultFields) hints.push('Default fields shown; choose your own with --fields.');
+    const summary = typeof result.total === 'number' && result.more
+      ? `Showing ${records.length} of ${result.total} record(s) on ${result.table || 'table'}.`
+      : `Showing ${records.length} record(s) on ${result.table || 'table'}.`;
+    return `\n` + formatTable(selectedHeaders, rows) + `\n\n${ANSI.gray}${summary}${ANSI.reset}` +
+      (hints.length ? `\n${ANSI.yellow}${hints.join(' ')}${ANSI.reset}` : '') + `\n`;
   }
 
   // 5. Run Background Script Output
