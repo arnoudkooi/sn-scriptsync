@@ -6,7 +6,7 @@ import { window, workspace, commands, Disposable, ExtensionContext, StatusBarAli
 import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { ScopeTreeViewProvider } from "./ScopeTreeViewProvider";
-import { discoverScopeFields, readAllPages, FetchPage } from "./ScopeDiscovery";
+import { discoverScopeFields, readAllPages, scalar, FetchPage } from "./ScopeDiscovery";
 import { HelperConnection } from "./HelperConnection";
 import { loadBridgeId } from "./BridgeIdentity";
 import { InfoTreeViewProvider } from "./InfoTreeViewProvider";
@@ -3850,6 +3850,29 @@ function requestInstanceScope(instance, scopeId) {
 }
 
 
+// A custom application built in the Global scope (#169) has scope name "global"
+// but its own sys_id: its files carry sys_scope=<app sys_id>, exactly like a
+// scoped app. A file under <instance>/global/ can't say which of those apps it
+// belongs to, and the Global scope itself is far too large to load, so ask.
+async function pickGlobalApplication(instance: any): Promise<{ sysId: string; name: string } | undefined> {
+	const found = await readAllPages(scopePageFetcher(instance), 'sys_scope', 'scope=global^sys_class_name=sys_app^ORDERBYname', 'sys_id,name');
+	const apps = found.rows
+		.map(row => ({ sysId: scalar(row.sys_id), name: scalar(row.name) }))
+		.filter(app => /^[0-9a-f]{32}$/i.test(app.sysId));
+	if (!apps.length) {
+		vscode.window.showWarningMessage(
+			`No custom applications in the Global scope were found on ${instance.name}. ` +
+			`Load Scope loads one application; the Global scope as a whole is too large to load.`
+		);
+		return undefined;
+	}
+	const picked = await vscode.window.showQuickPick(
+		apps.map(app => ({ label: app.name || app.sysId, description: app.sysId, app })),
+		{ title: 'Load Scope: Global application', placeHolder: 'Select the Global application to load', matchOnDescription: true }
+	);
+	return picked?.app;
+}
+
 function requestScopeArtifacts(includeEmpty = false, scriptObj = null, showWarning = true) {
 	if (scopeLoadActive) { eu.showMessage("A scope load is already in progress.", 3000); return; }
 
@@ -3866,32 +3889,41 @@ function requestScopeArtifacts(includeEmpty = false, scriptObj = null, showWarni
 		} 
 	}
 
-	eu.showMessage("Loading scope artifacts started...", 2000);
-
-
 	if (scriptObj === true) return; //not a valid file 
 
-	var basePath = getWorkspaceRoot() + nodePath.sep + scriptObj.instance.name + nodePath.sep;
-	var scopePath = basePath + scriptObj.scopeName + nodePath.sep ;
-
-	//first request fields
-	let requestJson = <any>{};
-	requestJson.action = 'requestRecords';
-	requestJson.instance = scriptObj.instance;
-
-	//test scope application files
-	requestJson.actionGoal = 'writeInstanceMetaDataScope';
-	requestJson.includeEmpty = includeEmpty;
-	requestJson.filePath = scopePath + 'scope.json';
-	requestJson.scopeName = scriptObj.scopeName;
-	requestJson.tableName = 'sys_metadata';
-	requestJson.queryString = 'sysparm_fields=sys_class_name,sys_name,sys_id,sys_updated_on&sysparm_query=sys_scope='+ scriptObj.scope +'^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYDESCsys_class_name^ORDERBYsys_id';
 	scopeLoadActive = true;
-	const fetchPage = scopePageFetcher(scriptObj.instance);
 	void (async () => {
 		try {
-			const query = new URLSearchParams(requestJson.queryString);
-			const discovery = await readAllPages(fetchPage, 'sys_metadata', query.get('sysparm_query')!, query.get('sysparm_fields')!);
+			let scopeSysId = String(scriptObj.scope || '');
+			let scopeLabel = scriptObj.scopeLabel || '';
+			if (scriptObj.scopeName === 'global' && !/^[0-9a-f]{32}$/i.test(scopeSysId)) {
+				const app = await pickGlobalApplication(scriptObj.instance);
+				if (!app) return;
+				scopeSysId = app.sysId;
+				scopeLabel = app.name;
+			}
+
+			eu.showMessage("Loading scope artifacts started...", 2000);
+
+			var basePath = getWorkspaceRoot() + nodePath.sep + scriptObj.instance.name + nodePath.sep;
+			var scopePath = basePath + scriptObj.scopeName + nodePath.sep ;
+
+			//first request fields
+			let requestJson = <any>{};
+			requestJson.action = 'requestRecords';
+			requestJson.instance = scriptObj.instance;
+
+			//test scope application files
+			requestJson.actionGoal = 'writeInstanceMetaDataScope';
+			requestJson.includeEmpty = includeEmpty;
+			requestJson.filePath = scopePath + 'scope.json';
+			requestJson.scopeName = scriptObj.scopeName;
+			requestJson.scopeSysId = scopeSysId;
+			requestJson.scopeLabel = scopeLabel;
+			requestJson.tableName = 'sys_metadata';
+			const query = 'sys_scope='+ scopeSysId +'^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYDESCsys_class_name^ORDERBYsys_id';
+			const fetchPage = scopePageFetcher(scriptObj.instance);
+			const discovery = await readAllPages(fetchPage, 'sys_metadata', query, 'sys_class_name,sys_name,sys_id,sys_updated_on');
 			await writeInstanceMetaDataScope({ ...requestJson, results: discovery.rows, discoveryComplete: discovery.complete, discoveryWarnings: discovery.warnings });
 		} catch (error: any) {
 			vscode.window.showErrorMessage(`Scope load incomplete: ${error.message}`);
@@ -3972,7 +4004,9 @@ async function writeInstanceMetaDataScope(messageJson){
 
 	let basePath = getWorkspaceRoot() + nodePath.sep + messageJson.instance.name + nodePath.sep;
 	let scopes = eu.getFileAsJson(basePath + 'scopes.json');
-	let scope = scopes[messageJson.scopeName];
+	// The caller's sys_id wins: scopes.json keys on scope name, and every Global
+	// application shares the name "global".
+	let scope = messageJson.scopeSysId || scopes[messageJson.scopeName];
 
 	// always read the correct file here to be sure we dont use it from diffrent instance or scope.
 	metaDataRelations = eu.getFileAsJson(path.join(__filename, '..', '..', 'resources', 'metaDataRelations.json'));
@@ -4011,7 +4045,8 @@ async function writeInstanceMetaDataScope(messageJson){
 	scopeJson = {
 		scopeMeta : {
 			name :  messageJson.scopeName,
-			sysId : scope
+			sysId : scope,
+			...(messageJson.scopeLabel ? { label : messageJson.scopeLabel } : {})
 		},
 		scopeTree : tree,
 		tableDefinitions: schema.definitions,

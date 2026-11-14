@@ -1022,7 +1022,7 @@ const pull_scope: CommandHandler = {
 		}
 		const scopeParam = rawScope.trim();
 		if (scopeParam === 'global') {
-			throw new AgentError('E_INVALID_PARAMS', 'pull_scope targets one application; the global scope is too large to pull whole. Use pull_records with a query instead.');
+			throw new AgentError('E_INVALID_PARAMS', 'pull_scope targets one application; the global scope is too large to pull whole. For a custom application built in the Global scope, pass its sys_id (sys_scope where scope=global and sys_class_name=sys_app) as "scope"; otherwise use pull_records with a query.');
 		}
 		if (!/^[A-Za-z0-9_]+$/.test(scopeParam)) {
 			throw new AgentError('E_INVALID_PARAMS', 'Parameter "scope" must be a scope name (letters, digits, underscore) or a 32-character sys_id.');

@@ -106,6 +106,26 @@ test('pull_scope refuses global and malformed scopes without touching the browse
 	assert.strictEqual(harness.sent.length, 0);
 });
 
+test('pull_scope pulls a Global application by sys_id into the global folder (#169)', async () => {
+	const ctx = harness.context();
+	const APP_ID = 'c'.repeat(32);
+	// 1. scope lookup by sys_id: a custom app whose scope name is "global"
+	harness.reply(rest([{ sys_id: APP_ID, scope: 'global', name: 'Big Global App' }]));
+	// 2. discovery, 3. schema, 4. the one table
+	harness.reply(rest([{ sys_class_name: 'sys_script_include' }]));
+	schema(['sys_script_include']);
+	harness.reply(rest([{ ...scriptRow(1200), 'sys_scope.scope': 'global' }]));
+
+	const result = await command('pull_scope').handle(ctx, { scope: APP_ID });
+
+	assert.deepStrictEqual(result.scope, { name: 'global', sys_id: APP_ID });
+	assert.strictEqual(result.totals.records, 1);
+	// only this application's files are asked for, never sys_scope=global
+	const queries = harness.sent.filter((m) => /sys_metadata|sys_script_include$/.test(m.endpoint)).map((m) => m.queryParams.sysparm_query);
+	assert.ok(queries.length >= 2 && queries.every((q: string) => q.startsWith(`sys_scope=${APP_ID}^`)));
+	assert.ok(fs.existsSync(path.join(harness.instanceFolder, 'global', 'sys_script_include', 'Util1200.script.js')));
+});
+
 test('pull_records still pulls a single page and now passes an explicit offset', async () => {
 	const ctx = harness.context();
 	harness.reply(rest([scriptRow(900)]));
