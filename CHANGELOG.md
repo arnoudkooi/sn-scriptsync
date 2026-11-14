@@ -1,5 +1,13 @@
 # CHANGELOG.md
 
+## 4.10.6 (2026-11-16)
+
+- **Load a custom application built in the Global scope:** Load Scope on a file in the `global` folder asks which Global application to load. Agents can pull such an application by passing its sys_id to `pull_scope`. ([#169](https://github.com/arnoudkooi/sn-scriptsync/issues/169)) <!-- reported-by: GitHub issue #169 --> <!-- web: skip -->
+
+## `@snutils/snu` 0.6.6 (2026-11-16)
+
+- **Pull a Global application by sys_id:** the `pull_scope` error for the Global scope explains how to pull one custom Global application instead. ([#169](https://github.com/arnoudkooi/sn-scriptsync/issues/169)) <!-- reported-by: GitHub issue #169 --> <!-- web: skip -->
+
 ## 4.10.5 (2026-11-03)
 
 - **Run NOW SDK tasks safely across project paths:** builds and deploys pass paths and arguments directly to Node, so spaces and special characters are not interpreted as shell commands. <!-- reported-by: CodeQL / release review 2026-11-03 --> <!-- web: skip -->
