@@ -14,14 +14,14 @@ test.beforeEach(() => { harness.sent.length = 0; });
 test.after(() => harness.cleanup());
 
 /** Answer every browser request by what it asks for, instead of a fixed queue. */
-function instanceAt(url: string, records: any[] = [{ sys_id: '1' }]) {
+function instanceAt(url: string, records: any[] = [{ sys_id: '1' }], pagination?: any) {
 	fs.writeFileSync(path.join(harness.instanceFolder, '_settings.json'), JSON.stringify({ name: 'testinst', url, g_ck: 'token' }));
 	return harness.context({
 		waitForBrowserResponse: async () => {
 			// The handler registers the wait before it sends; answer once the message is out.
 			await new Promise((resolve) => setImmediate(resolve));
 			const message = harness.sent.at(-1)!;
-			if (message.action === 'agentQueryRecords') return { success: true, tableName: message.tableName, count: records.length, records };
+			if (message.action === 'agentQueryRecords') return { success: true, tableName: message.tableName, count: records.length, records, ...(pagination !== undefined ? { pagination } : {}) };
 			if (message.endpoint === '/api/now/table/sys_db_object') {
 				const name = String(message.queryParams.sysparm_query).replace('name=', '');
 				const parent = VECTOR_PARENTS[name];
@@ -70,4 +70,23 @@ test('query_records: a ref_ cast is proven through the table hierarchy before th
 	assert.equal(result.count, 1);
 	assert.ok(harness.sent.some((m) => m.endpoint === '/api/now/table/sys_db_object' && m.queryParams.sysparm_query === 'name=item_option_new'));
 	await assert.rejects(query.handle(instanceAt('https://five.service-now.com'), { table: 'incident', query: 'caller_id.ref_incident.priority=1' }), { code: 'E_INVALID_QUERY' });
+});
+
+test('query_records: the helper\'s total count reaches the result; a missing count is never invented', async () => {
+	const two = [{ sys_id: '1' }, { sys_id: '2' }];
+	const counted = await query.handle(instanceAt('https://six.service-now.com', two, { link: '<https://six.service-now.com/api/now/table/incident?sysparm_offset=2>;rel="next"', totalCount: '42' }),
+		{ table: 'incident', query: 'active=true', fields: 'number', limit: 2, validate: false });
+	assert.equal(counted.total, 42);
+	assert.equal(counted.more, true);
+	assert.match(counted.note, /Showing 2 of 42 matching records/);
+
+	for (const pagination of [{ link: null, totalCount: null }, undefined]) {
+		const atLimit = await query.handle(instanceAt('https://six.service-now.com', two, pagination), { table: 'incident', query: 'active=true', fields: 'number', limit: 2, validate: false });
+		assert.equal('total' in atLimit, false);
+		assert.equal(atLimit.more, true, 'reaching the limit still says more may match');
+		assert.match(atLimit.note, /The limit of 2 was reached/);
+		const below = await query.handle(instanceAt('https://six.service-now.com', two, pagination), { table: 'incident', query: 'active=true', fields: 'number', limit: 5, validate: false });
+		assert.equal('total' in below, false);
+		assert.equal(below.more, false);
+	}
 });

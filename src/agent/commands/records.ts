@@ -1,4 +1,5 @@
-import { discoverScopeFields, readAllPages, pageState, Pagination, FetchPage, FieldDefinition } from '../../ScopeDiscovery';
+import { discoverScopeFields, readAllPages, pageState, Pagination, CountRows, FetchPage, FieldDefinition } from '../../ScopeDiscovery';
+import { countQuery, finishScopeReport, scopeFailureMessage } from '../resultShaping';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -9,6 +10,7 @@ import { Constants } from '../../constants';
 import { safeJoinUnderRoot, sanitizePathComponent } from '../../pathSafety';
 import { mustGetInstanceSettings, getSetting, restRequest, readBackRecord } from './_shared';
 import { rememberScope, resolveScopeSysId } from './scopedapp';
+import { enrichSchemaColumns } from '../schemaColumns';
 import {
 	resolveCreateScope,
 	applyScopeToFields,
@@ -607,11 +609,14 @@ const get_table_metadata: CommandHandler = {
 	name: 'get_table_metadata',
 	requiresBrowser: true,
 	docs: {
-		summary: 'Fetch column metadata for a table. Round-trips via the browser.',
+		summary: 'Fetch column metadata for a table, including inherited columns. Round-trips via the browser.',
+		request: { command: 'get_table_metadata', id: 'schema_1', params: { table: 'incident', choices: false } },
+		notes: 'Returns { columns, fields }. columns is the instance form metadata keyed by column name, as before. fields is the same list normalized to { name, label, type, internalType, reference, mandatory, readOnly, maxLength, defaultValue, choiceCount, choices }, as the standalone bridge returns it; a missing key means unknown, not false. Pass choices: true to include { value, label } choices.',
 	},
 	async handle(ctx, params) {
-		const { table } = params || {};
+		const table = typeof params?.table === 'string' ? params.table.trim() : '';
 		if (!table) throw new AgentError('E_INVALID_PARAMS', 'Missing required param: table');
+		if (!/^[A-Za-z0-9_]+$/.test(table)) throw new AgentError('E_INVALID_PARAMS', 'Param "table" must be a table name such as incident');
 		const instanceSettings = mustGetInstanceSettings(ctx.instanceFolder);
 
 		const correlationId = `agent_${ctx.request.id}`;
@@ -625,7 +630,8 @@ const get_table_metadata: CommandHandler = {
 		});
 		ctx.log(`Agent API: Sent remote request for table metadata: ${table}`);
 		const response = await pending;
-		return { columns: response?.result?.columns || response?.result };
+		const columns = response?.result?.columns || response?.result;
+		return { columns, fields: enrichSchemaColumns(undefined, columns, { choices: params?.choices === true }) };
 	},
 };
 
@@ -1088,16 +1094,21 @@ const pull_scope: CommandHandler = {
 			const result = await restRequest(ctx, instanceSettings, { endpoint: `/api/now/table/${table}`, method: 'GET', queryParams });
 			return { rows: result.data?.result, pagination: result.pagination };
 		};
-		const discovery = await readAllPages(fetchPage, 'sys_metadata', `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`, 'sys_class_name');
+		const countRows: CountRows = async (table, query) => {
+			const result = await restRequest(ctx, instanceSettings, { endpoint: `/api/now/stats/${table}`, method: 'GET', queryParams: { sysparm_query: countQuery(query), sysparm_count: 'true' } });
+			const n = Number(result.data?.result?.stats?.count);
+			return Number.isSafeInteger(n) ? n : undefined;
+		};
+		const discovery = await readAllPages(fetchPage, 'sys_metadata', `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`, 'sys_class_name', countRows);
 		const classCounts = new Map<string, number>();
 		for (const row of discovery.rows) {
 			const cls = normaliseValue(row.sys_class_name);
 			if (/^[a-zA-Z0-9_]+$/.test(cls)) classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
 		}
-		const schema = await discoverScopeFields([...classCounts.keys()], getMetaDataRelations()?.tableFields || {}, fetchPage);
+		const schema = await discoverScopeFields([...classCounts.keys()], getMetaDataRelations()?.tableFields || {}, fetchPage, countRows);
 		const tables = [...classCounts.keys()].filter(t => Object.keys(schema.definitions[t]?.codeFields || {}).length && (!tableFilter || tableFilter.has(t))).sort();
 		const skippedTables = [...classCounts.keys()].filter(t => !Object.keys(schema.definitions[t]?.codeFields || {}).length).sort()
-			.map(table => ({ table, records: classCounts.get(table) || 0, reason: schema.warnings.some(w => w.startsWith(`${table}:`)) ? 'dictionary_unavailable' : 'no_scriptable_fields' }));
+			.map(table => ({ table, records: classCounts.get(table) || 0, reason: schema.established.has(table) ? 'no_scriptable_fields' : 'dictionary_unavailable' }));
 		const missingTables = tableFilter ? [...tableFilter].filter((t) => !classCounts.has(t)).sort() : [];
 
 		const perTable: Array<{ table: string; matchedRecords: number; pulledRecords: number; filesWritten: number; skippedEmpty: number; skippedUnreadable: number; truncated: boolean; records?: PullTableResult['records'] }> = [];
@@ -1125,8 +1136,18 @@ const pull_scope: CommandHandler = {
 				for (const w of page.warnings) warnings.push(`${table}: ${w}`);
 				const paging = pageState(page.pagination, offset, pageLimit, page.matchedRecords);
 				if (paging.nextOffset === undefined) {
-					complete = complete && paging.complete;
-					if (paging.warning) warnings.push(`${table}: ${paging.warning}`);
+					let tableComplete = paging.complete;
+					if (paging.warning) {
+						// No paging headers: the instance count can still prove the table complete.
+						let expected: number | undefined;
+						try { expected = await countRows(table, query); } catch { expected = undefined; }
+						if (expected !== undefined && entry.matchedRecords >= expected) tableComplete = true;
+						else {
+							warnings.push(`${table}: ${paging.warning}`);
+							if (expected !== undefined && reportedTotal === undefined) reportedTotal = expected;
+						}
+					}
+					complete = complete && tableComplete;
 					break;
 				}
 				offset = paging.nextOffset;
@@ -1143,7 +1164,7 @@ const pull_scope: CommandHandler = {
 		}
 		for (const t of missingTables) warnings.push(`${t}: no records of this table in scope ${scopeName}.`);
 
-		return {
+		const report = finishScopeReport({
 			complete: complete && !perTable.some(t => t.truncated) && warnings.length === 0,
 			metadataRecords: discovery.rows.length,
 			scope: { name: scopeName, sys_id: scopeSysId },
@@ -1152,7 +1173,9 @@ const pull_scope: CommandHandler = {
 			totals: { tables: perTable.length, records: totalRecords, filesWritten: totalFiles, skippedEmpty: totalSkippedEmpty, skippedUnreadable: totalSkippedUnreadable },
 			skippedTables,
 			warnings,
-		};
+		}, tableFilter, discovery.complete && discovery.warnings.length === 0);
+		if (report.outcome === 'failed') throw new AgentError('E_DISCOVERY_FAILED', scopeFailureMessage(report), report);
+		return report;
 	},
 };
 

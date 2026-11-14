@@ -23,6 +23,9 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
 - `limit` (optional): Max records to return (default: 10)
 - `orderBy` (optional): Order clause (e.g., `ORDERBYDESCsys_created_on`)
 - `validate` (optional, default `true`): `false` runs the query without checking its field paths.
+- `referenceLinks` (optional, default `true`): `false` returns each reference as its sys_id instead of a `{ link, value }` object, roughly halving reference-heavy results. To read a referenced value, dot-walk in `fields` instead (`target_scope.scope`).
+
+**Keep results small:** always pass `fields` and `limit`. The defaults are four fields and 10 rows, and the result says when they applied.
 
 **Field paths are checked before the query runs.** ServiceNow silently ignores a condition on a field that does not exist and returns unfiltered rows, so every path in `query`, `fields` (when you pass it) and `orderBy` is checked hop by hop against the table schema, including dot-walks and the field inside `ORDERBY`, `DYNAMIC`, `OR`/`NQ` branches. Values are not judged: `javascript:gs.beginningOfToday()` is fine once its field exists. Keyword search (`123TEXTQUERY321`) is supported. A related-list block (`RLQUERY<table>.<field>,…^…^ENDRLQUERY`) is checked against its own table; one without `ENDRLQUERY` is refused. A `ref_<table>` cast passes only when `<table>` really extends the reference target (checked in `sys_db_object`).
 - `E_INVALID_QUERY` — a path does not exist (e.g. `question.cat_item` on `question_choice`: `question` has no `cat_item`; use `question.ref_item_option_new.cat_item`), or a non-reference field is dot-walked. `details.problems` lists each one with the failing `hop` and `table`. The query was not run: fix the path.
@@ -49,6 +52,8 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
   }
 }
 ```
+
+**What the result left out:** besides `table`, `count` and `records`, the result carries `limit`, `more` (true when more records match than were returned), `total` (the instance's own count, when it reports one), `defaultFields` / `defaultLimit` (true when the defaults applied) and a `note` in words. With `more: true`, raise `limit` or narrow the query; never treat the first page as everything.
 
 **Common Query Examples:**
 

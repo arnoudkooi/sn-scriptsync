@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { TOOLS, getToolByName } from '../registry.js';
+import { TOOLS, getToolByName, SCHEMA_DESCRIPTION } from '../registry.js';
 import { ScriptSyncClient, discoverBridge, checkHealth } from '../client.js';
 import { StandaloneBridge } from '../server/standalone.js';
 import { reclaimPort } from '../cli/portReclaim.js';
@@ -213,7 +213,7 @@ export async function createMcpServer(): Promise<McpServer> {
   // 1. Code Search
   server.tool(
     'snu_code_search',
-    'Fast SN Utils GraphQL field-index code search across Script Includes, Business Rules, Client Scripts, UI Actions, and Flow Actions. Requires SN Utils Pro.',
+    'Fast SN Utils GraphQL field-index code search across Script Includes, Business Rules, Client Scripts, UI Actions, and Flow Actions. Requires SN Utils Pro. Inline scripts in flows are not searched: Flow Designer stores the action inputs of a flow compressed. Script steps in custom actions are searched.',
     {
       term: z.string().min(2).describe('Search keyword or phrase (min 2 chars)'),
       tables: z.union([z.string(), z.array(z.string())]).optional().describe('Optional exact table names as a comma-separated string or array'),
@@ -227,9 +227,10 @@ export async function createMcpServer(): Promise<McpServer> {
   // 2. Schema
   server.tool(
     'snu_get_schema',
-    'Fetch column dictionary metadata for a table (types, labels, references, choice lists, mandatory/read-only flags).',
+    SCHEMA_DESCRIPTION,
     {
       table: z.string().describe('ServiceNow table name (e.g. incident, sys_user)'),
+      choices: z.boolean().optional().describe('Include { value, label } choices per choice field (otherwise only choiceCount)'),
       instance: z.string().optional().describe('Target instance name/folder (optional)'),
     },
     async (args) => executeTool('snu_get_schema', args)
@@ -558,8 +559,25 @@ export async function startMcpServer(): Promise<void> {
     }
   }
 
+  await printBridgeWarnings();
   const server = await createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`[snu-mcp] Connected on stdio. ${TOOLS.length} tools registered.`);
+}
+
+/**
+ * Print the bridge's own warnings (for example a workspace inside a code
+ * repository) once, to stderr: stdout carries the MCP protocol. The same
+ * warnings are part of snu_get_context, since client logs may never reach the
+ * agent. Best effort and short: startup never waits on it for long.
+ */
+async function printBridgeWarnings(): Promise<void> {
+  try {
+    const client = new ScriptSyncClient({ cwd: process.cwd() });
+    const response: any = await client.execute({ command: 'check_connection', params: {} }, 3_000);
+    for (const warning of Array.isArray(response?.result?.warnings) ? response.result.warnings : []) {
+      if (typeof warning === 'string') console.error(`[snu-mcp] Warning: ${warning}`);
+    }
+  } catch { /* no bridge yet: snu_get_context reports it when one is up */ }
 }

@@ -1,4 +1,5 @@
 import { describeChange } from '../nowsdk/NowSdkFlows.js';
+import { enrichSchemaColumns } from '../server/schemaColumns.js';
 /**
  * Terminal formatters and JSON output renderer for @snutils/snu CLI
  */
@@ -135,6 +136,12 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
     if (result.helper) {
       lines.push(`  Helper Tier:      ${ANSI.cyan}${result.helper.tier || 'Free'}${ANSI.reset}${result.helper.proFeatures ? ` (${ANSI.green}Pro Active${ANSI.reset})` : ''}`);
     }
+    if (result.usage) {
+      lines.push(`  Usage Data:       collection ${result.usage.collection || 'unknown'}, sharing preference ${result.usage.sharingPreference || 'unknown'} ${ANSI.gray}(SN Utils settings > Usage Data)${ANSI.reset}`);
+    }
+    for (const warning of Array.isArray(result.warnings) ? result.warnings : []) {
+      if (typeof warning === 'string') lines.push(`  ${ANSI.yellow}! ${warning}${ANSI.reset}`);
+    }
 
     if (
       result.security?.instance &&
@@ -257,22 +264,53 @@ export function formatHumanOutput(command: string, result: any, cliCommand?: str
 
   // 3. Schema
   if (command === 'get_table_metadata') {
-    const fields = Array.isArray(result) ? result : result.fields || result.columns || [];
+    // Standalone bridge: an array. VS Code host: { columns (map), fields (array) }.
+    const fields = Array.isArray(result) ? result
+      : Array.isArray(result?.fields) ? result.fields
+      : result?.columns && typeof result.columns === 'object' ? enrichSchemaColumns(undefined, result.columns)
+      : [];
     if (!Array.isArray(fields) || fields.length === 0) {
       return '\n' + JSON.stringify(result, null, 2) + '\n';
     }
 
-    const headers = ['Element', 'Label', 'Type', 'Max Len', 'Mandatory', 'Reference'];
-    const rows = fields.map((f: any) => [
-      f.name || f.element || '',
-      f.label || '',
-      f.type || '',
-      String(f.max_length || f.length || ''),
-      f.mandatory === true || f.mandatory === 'true' ? 'Yes' : 'No',
-      f.reference || '',
-    ]);
+    // A key the instance did not report is unknown: show "?" rather than a
+    // definite "No" or an empty reference.
+    let unknown = false;
+    const known = (value: string | undefined) => {
+      if (value === undefined) { unknown = true; return '?'; }
+      return value;
+    };
+    const yesNo = (value: any) => value === true || value === 'true' ? 'Yes' : value === false || value === 'false' ? 'No' : undefined;
+    const headers = ['Element', 'Label', 'Type', 'Max Len', 'Mandatory', 'Read-only', 'Reference'];
+    const rows = fields.map((f: any) => {
+      const type = f.type || f.internalType || f.internal_type || '';
+      const maxLength = f.maxLength ?? f.max_length;
+      const isReference = type === 'reference' || type === 'glide_list';
+      return [
+        f.name || f.element || '',
+        f.label || '',
+        known(type || undefined),
+        known(maxLength === undefined || maxLength === '' ? undefined : String(maxLength)),
+        known(yesNo(f.mandatory)),
+        known(yesNo(f.readOnly ?? f.read_only)),
+        f.reference ? String(f.reference) : isReference ? known(undefined) : '',
+      ];
+    });
 
-    return `\n${ANSI.bold}Schema Dictionary (${fields.length} columns):${ANSI.reset}\n\n` + formatTable(headers, rows) + '\n';
+    // Requested with --choices: list them under the table, one field per block.
+    const choiceLines: string[] = [];
+    for (const f of fields) {
+      if (!Array.isArray(f.choices) || !f.choices.length) continue;
+      choiceLines.push(`  ${ANSI.bold}${f.name}${ANSI.reset}`);
+      for (const c of f.choices) choiceLines.push(`    ${String(c?.value ?? '')}  ${ANSI.gray}${String(c?.label ?? '')}${ANSI.reset}`);
+    }
+
+    const notes: string[] = [];
+    if (unknown) notes.push('? = not reported by the instance (unknown).');
+    if (fields.some((f: any) => f.exampleValue !== undefined)) notes.push('exampleValue in --json output is a generated sample from the API documentation, not record data.');
+    return `\n${ANSI.bold}Schema Dictionary (${fields.length} columns):${ANSI.reset}\n\n` + formatTable(headers, rows) + '\n'
+      + (choiceLines.length ? `\n${ANSI.bold}Choices:${ANSI.reset}\n${choiceLines.join('\n')}\n` : '')
+      + (notes.length ? `\n${ANSI.gray}${notes.join(' ')}${ANSI.reset}\n` : '');
   }
 
   // 4. Query Records

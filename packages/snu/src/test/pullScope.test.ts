@@ -76,6 +76,7 @@ test('pull_scope: standalone host resolves the scope, discovers tables, pages, a
     const result: any = response.result;
     assert.deepStrictEqual(result.scope, { name: 'x_acme_app', sys_id: SCOPE_ID });
     assert.strictEqual(result.complete, true);
+    assert.strictEqual(result.outcome, 'complete');
     assert.strictEqual(result.totals.records, 101);
     assert.deepStrictEqual(result.skippedTables, [{ table: 'sys_properties', records: 1, reason: 'no_scriptable_fields' }]);
     assert.deepStrictEqual(seen.filter((r) => r.endpoint === '/api/now/table/sys_script_include').map((r) => r.queryParams.sysparm_offset), ['0', '100']);
@@ -122,4 +123,143 @@ test('standalone continues through empty discovery pages and pulls an inherited 
     assert.ok(result.warnings.some((w: string) => w.includes('1000 matching records were not returned')));
     assert.equal(fs.readFileSync(path.join(cwd, 'dev123/x_acme_app/x_acme_script/Util7.markup.xml'), 'utf8'), '<test/>');
   });
+});
+
+// Steve's report (snu 0.6.5): 6,283 metadata records in 121 tables, every
+// dictionary read refused, nothing written, exit 0. Scope and instance names
+// are neutral here.
+function steveHelper(classes: string[], opts: { dictionary: 'fail' | 'ok' }) {
+  const perClass = Math.floor(6283 / classes.length);
+  const metadata: any[] = [];
+  classes.forEach((cls, i) => {
+    const n = i === classes.length - 1 ? 6283 - perClass * (classes.length - 1) : perClass;
+    for (let k = 0; k < n; k++) metadata.push({ sys_class_name: cls });
+  });
+  return (request: any, reply: (payload: any) => void) => {
+    const table = request.endpoint.split('/').pop();
+    const ok = (rows: any[], total = rows.length) => reply({ success: true, status: 200, data: { result: rows }, pagination: { totalCount: String(total) } });
+    if (table === 'sys_scope') return ok([{ sys_id: SCOPE_ID, scope: 'x_acme_app', name: 'Acme' }]);
+    if (table === 'sys_metadata') {
+      const offset = Number(request.queryParams.sysparm_offset);
+      return ok(metadata.slice(offset, offset + 500), metadata.length);
+    }
+    if (table === 'sys_db_object') {
+      const names: string[] = request.queryParams.sysparm_query.split('^')[0].slice(6).split(',');
+      return ok(names.map(name => ({ name, 'super_class.name': '' })));
+    }
+    if (table === 'sys_dictionary') {
+      if (opts.dictionary === 'fail') return reply({ success: false, status: 400, error: 'Pagination not supported' });
+      const names: string[] = request.queryParams.sysparm_query.split('^')[0].slice(6).split(',');
+      return ok(names.map(name => ({ name, element: 'name', internal_type: 'string' })));
+    }
+    if (table === 'sys_script_include') return ok([row(1), row(2)]);
+    reply({ success: false, status: 404, error: `Unexpected table ${table}` });
+  };
+}
+
+test('pull_scope: discovery that leaves nothing to pull is an error with the full report, not a success', async () => {
+  const classes = Array.from({ length: 121 }, (_, i) => `x_acme_t${i}`);
+  await withBridge(steveHelper(classes, { dictionary: 'fail' }), async (dispatcher, cwd) => {
+    const response: any = await dispatcher.dispatch({ id: 'steve', command: 'pull_scope', params: { scope: 'x_acme_app' } });
+    assert.strictEqual(response.status, 'error', JSON.stringify(response).slice(0, 400));
+    assert.strictEqual(response.code, 'E_DISCOVERY_FAILED');
+    assert.match(response.error, /Nothing was pulled from scope x_acme_app: the instance dictionary could not be read for 121 of 121 table\(s\) with records \(6283 metadata records found\)/);
+    assert.match(response.error, /Pagination not supported/);
+    assert.strictEqual(response.details.outcome, 'failed');
+    assert.strictEqual(response.details.metadataRecords, 6283);
+    assert.strictEqual(response.details.skippedTables.length, 121);
+    assert.ok(response.details.skippedTables.every((t: any) => t.reason === 'dictionary_unavailable'));
+    assert.ok(!fs.existsSync(path.join(cwd, 'dev123', 'x_acme_app')), 'no script folder for a failed pull');
+  });
+});
+
+test('pull_scope: bundled definitions pull known tables when the dictionary fails, reported as partial', async () => {
+  const classes = [...Array.from({ length: 120 }, (_, i) => `x_acme_t${i}`), 'sys_script_include'];
+  await withBridge(steveHelper(classes, { dictionary: 'fail' }), async (dispatcher, cwd) => {
+    const response: any = await dispatcher.dispatch({ id: 'steve2', command: 'pull_scope', params: { scope: 'x_acme_app' } });
+    assert.strictEqual(response.status, 'success', JSON.stringify(response).slice(0, 400));
+    assert.strictEqual(response.result.outcome, 'partial');
+    assert.strictEqual(response.result.complete, false);
+    assert.match(response.result.note, /120 table\(s\) were skipped because their dictionary could not be read/);
+    assert.deepStrictEqual(response.result.tables.map((t: any) => t.table), ['sys_script_include']);
+    assert.ok(fs.existsSync(path.join(cwd, 'dev123', 'x_acme_app', 'sys_script_include', 'Util1.script.js')));
+  });
+});
+
+test('pull_scope: a table filter that excludes the failed tables is not a discovery failure', async () => {
+  const classes = Array.from({ length: 3 }, (_, i) => `x_acme_t${i}`);
+  await withBridge(steveHelper(classes, { dictionary: 'fail' }), async (dispatcher) => {
+    const response: any = await dispatcher.dispatch({ id: 'filter', command: 'pull_scope', params: { scope: 'x_acme_app', tables: ['x_acme_other'] } });
+    assert.strictEqual(response.status, 'success', JSON.stringify(response).slice(0, 400));
+    assert.strictEqual(response.result.outcome, 'empty');
+  });
+});
+
+test('pull_scope: a scope with no records, or none with script fields, is empty and succeeds', async () => {
+  await withBridge((request, reply) => {
+    const table = request.endpoint.split('/').pop();
+    if (table === 'sys_scope') return reply({ success: true, data: { result: [{ sys_id: SCOPE_ID, scope: 'x_acme_app' }] } });
+    if (table === 'sys_metadata') return reply({ success: true, data: { result: [] }, pagination: { totalCount: '0' } });
+    reply({ success: false, error: `Unexpected table ${table}` });
+  }, async (dispatcher) => {
+    const response: any = await dispatcher.dispatch({ id: 'empty', command: 'pull_scope', params: { scope: 'x_acme_app' } });
+    assert.strictEqual(response.status, 'success');
+    assert.strictEqual(response.result.outcome, 'empty');
+    assert.match(response.result.note, /Nothing to pull/);
+  });
+
+  const classes = ['x_acme_t0', 'x_acme_t1'];
+  await withBridge(steveHelper(classes, { dictionary: 'ok' }), async (dispatcher) => {
+    const response: any = await dispatcher.dispatch({ id: 'noscript', command: 'pull_scope', params: { scope: 'x_acme_app' } });
+    assert.strictEqual(response.status, 'success', JSON.stringify(response).slice(0, 400));
+    assert.strictEqual(response.result.outcome, 'empty');
+    assert.ok(response.result.skippedTables.every((t: any) => t.reason === 'no_scriptable_fields'));
+  });
+});
+
+test('pull_scope: without paging headers the Aggregate API count proves a short read complete', async () => {
+  const counts: string[] = [];
+  await withBridge((request, reply) => {
+    const parts = request.endpoint.split('/');
+    const table = parts.pop();
+    if (parts.pop() === 'stats') {
+      counts.push(`${table}|${request.queryParams.sysparm_query}`);
+      const n = table === 'sys_metadata' ? 2 : table === 'sys_db_object' ? 1 : 1;
+      return reply({ success: true, data: { result: { stats: { count: String(n) } } } });
+    }
+    const rows = (r: any[]) => reply({ success: true, data: { result: r } }); // no pagination at all
+    if (table === 'sys_scope') return rows([{ sys_id: SCOPE_ID, scope: 'x_acme_app' }]);
+    if (table === 'sys_metadata') return rows([{ sys_class_name: 'sys_script_include' }, { sys_class_name: 'sys_script_include' }]);
+    if (table === 'sys_db_object') return rows([{ name: 'sys_script_include', 'super_class.name': '' }]);
+    if (table === 'sys_dictionary') return rows([{ name: 'sys_script_include', element: 'script', internal_type: 'script' }]);
+    if (table === 'sys_script_include') return reply({ success: true, data: { result: [row(1), row(2)] }, pagination: { totalCount: '2' } });
+    reply({ success: false, error: `Unexpected table ${table}` });
+  }, async (dispatcher) => {
+    const response: any = await dispatcher.dispatch({ id: 'count', command: 'pull_scope', params: { scope: 'x_acme_app' } });
+    assert.strictEqual(response.status, 'success', JSON.stringify(response).slice(0, 400));
+    assert.strictEqual(response.result.outcome, 'complete', JSON.stringify(response.result.warnings));
+    assert.ok(counts.includes(`sys_metadata|sys_scope=${SCOPE_ID}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL`), counts.join('\n'));
+    assert.ok(counts.every(c => !c.includes('ORDERBY')));
+  });
+});
+
+test('pull_scope: an incomplete record list is never reported as an empty scope', async () => {
+  for (const returned of [0, 3]) {
+    await withBridge((request, reply) => {
+      const table = request.endpoint.split('/').pop();
+      if (table === 'sys_scope') return reply({ success: true, data: { result: [{ sys_id: SCOPE_ID, scope: 'x_acme_app' }] } });
+      // The count says 12 more records match than were returned (access controls).
+      if (table === 'sys_metadata') return reply({ success: true, data: { result: Array.from({ length: returned }, () => ({ sys_class_name: 'x_acme_t0' })) }, pagination: { totalCount: String(returned + 12) } });
+      if (table === 'sys_db_object') return reply({ success: true, data: { result: [{ name: 'x_acme_t0', 'super_class.name': '' }] }, pagination: { totalCount: '1' } });
+      if (table === 'sys_dictionary') return reply({ success: true, data: { result: [{ name: 'x_acme_t0', element: 'name', internal_type: 'string' }] }, pagination: { totalCount: '1' } });
+      reply({ success: false, error: `Unexpected table ${table}` });
+    }, async (dispatcher) => {
+      const response: any = await dispatcher.dispatch({ id: 'gap', command: 'pull_scope', params: { scope: 'x_acme_app' } });
+      assert.strictEqual(response.status, 'error', JSON.stringify(response).slice(0, 300));
+      assert.strictEqual(response.code, 'E_DISCOVERY_FAILED');
+      assert.strictEqual(response.details.outcome, 'failed');
+      assert.match(response.error, /could not be read completely .* cannot be called empty/);
+      assert.match(response.error, /12 matching records were not returned/);
+    });
+  }
 });

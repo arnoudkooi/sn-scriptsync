@@ -94,6 +94,27 @@ test('CLI errors drain output and exit naturally with status 1 (#168)', async t 
     assert.deepEqual(JSON.parse(result.stdout), { updated: true });
     assert.equal(result.stderr, '');
   });
+  await t.test('pull-scope that pulled nothing exits 1 with the full report', async () => {
+    const discoveryPreload = path.join(root, 'discovery.cjs');
+    const report = { outcome: 'failed', complete: false, metadataRecords: 6283, tables: [],
+      skippedTables: [{ table: 'sys_script_include', records: 87, reason: 'dictionary_unavailable' }], warnings: ['sys_script_include: Dictionary discovery failed: x'] };
+    fs.writeFileSync(discoveryPreload, `
+      const fs = require('node:fs');
+      process.once('beforeExit', code => { fs.writeFileSync(${JSON.stringify(marker)}, String(code)); });
+      globalThis.fetch = async (url, init) => {
+        if (new URL(url).pathname === '/api/health') return Response.json({ status: 'success', apiVersion: ${AGENT_API_VERSION}, pid: ${process.pid} });
+        const request = JSON.parse(init.body);
+        if (request.command !== 'pull_scope') throw new Error('unexpected ' + request.command);
+        return Response.json({ id: request.id, command: request.command, status: 'error', code: 'E_DISCOVERY_FAILED',
+          error: 'Nothing was pulled from scope x_acme_app', details: ${JSON.stringify(report)} }, { status: 422 });
+      };
+    `);
+    const result = await run(['--json', '-i', 'test-instance', 'pull-scope', 'x_acme_app'], 1, bin, discoveryPreload);
+    assert.equal(result.stdout, '');
+    const error = JSON.parse(result.stderr);
+    assert.equal(error.code, 'E_DISCOVERY_FAILED');
+    assert.deepEqual(error.details, report);
+  });
   await t.test('lifecycle validation error exits without starting a bridge', async () => {
     const result = await run(['--json', 'serve', '--port', 'invalid']);
     assert.equal(JSON.parse(result.stderr).code, 'E_INVALID_PARAMS');

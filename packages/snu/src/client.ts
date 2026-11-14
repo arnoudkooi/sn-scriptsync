@@ -654,6 +654,11 @@ export class ScriptSyncClient {
         : conn.helper || null,
       gates: capabilities?.gates || null,
       instanceGates: capabilities?.instanceGates || null,
+      // Usage Data setting as the helper reports it; unknown without one.
+      usage: capabilities?.usage || { collection: 'unknown', sharingPreference: 'unknown' },
+      // Things the user should know about the bridge itself, such as a
+      // workspace inside a code repository. Relay them.
+      warnings: Array.isArray(conn.warnings) ? conn.warnings.filter((w: unknown) => typeof w === 'string') : [],
       security,
       instances: instancesData.instances || [],
       defaultInstance: instancesData.defaultInstance || null,

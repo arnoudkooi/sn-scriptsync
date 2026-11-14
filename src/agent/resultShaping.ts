@@ -39,3 +39,39 @@ export function queryCoverage(count: number, limit: unknown, totalHeader: unknow
 		...(notes.length ? { note: notes.join(' ') } : {}),
 	};
 }
+
+/** Encoded query for the Aggregate API count: ordering is irrelevant there. */
+export function countQuery(query: string): string {
+	return query.replace(/\^ORDERBY(?:DESC)?[^^]*/g, '');
+}
+
+export type ScopeOutcome = 'complete' | 'partial' | 'failed' | 'empty';
+
+/** Adds `outcome` (and a note when it is not complete) to a pull_scope report.
+ * failed: nothing could be pulled because the dictionary could not be read for
+ * the tables in question. empty: nothing to pull, and that is established.
+ * Mirrors packages/snu/src/server/dispatcher.ts. */
+export function finishScopeReport<T extends { complete: boolean; metadataRecords: number; tables: any[]; skippedTables: Array<{ table: string; reason: string }> }>(report: T, tableFilter?: Set<string> | null, discoveryComplete = true): T & { outcome: ScopeOutcome; note?: string } {
+	const failedTables = report.skippedTables.filter(t => t.reason === 'dictionary_unavailable' && (!tableFilter || tableFilter.has(t.table)));
+	// Empty is a claim about the scope, so it needs a complete record list: with
+	// records missing from it, a table with scripts may be among them.
+	const outcome: ScopeOutcome = report.tables.length === 0
+		? (failedTables.length || !discoveryComplete ? 'failed' : 'empty')
+		: report.complete ? 'complete' : 'partial';
+	const note = outcome === 'partial'
+		? `Some records were not pulled or could not be verified${failedTables.length ? `; ${failedTables.length} table(s) were skipped because their dictionary could not be read` : ''}. See skippedTables and warnings.`
+		: outcome === 'empty' ? 'Nothing to pull: the scope has no records in tables with script fields.' : undefined;
+	return { ...report, outcome, ...(note ? { note } : {}) };
+}
+
+/** Error text for a pull_scope that could not pull anything. */
+export function scopeFailureMessage(report: { metadataRecords: number; scope?: { name?: string }; skippedTables: Array<{ reason: string }>; warnings: string[] }): string {
+	const failed = report.skippedTables.filter(t => t.reason === 'dictionary_unavailable').length;
+	const first = report.warnings.find(w => /dictionary|inheritance|pagination|not returned|stopped after/i.test(w)) || report.warnings[0];
+	const why = failed
+		? `the instance dictionary could not be read for ${failed} of ${report.skippedTables.length} table(s) with records (${report.metadataRecords} metadata records found).`
+		: `the list of its records could not be read completely (${report.metadataRecords} metadata records found), so it cannot be called empty.`;
+	return `Nothing was pulled from scope ${report.scope?.name ?? ''}: ${why}`
+		+ (first ? ` First problem: ${first}` : '')
+		+ ' Details list every table and warning. Pull single tables with pull_records meanwhile.';
+}

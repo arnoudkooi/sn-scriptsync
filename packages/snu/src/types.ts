@@ -35,6 +35,7 @@ export interface HelperCapabilities {
   /** Content-free command counters, enabled by a per-helper collection session. */
   usageMetrics?: 1;
   usageSession?: string;
+  usageMode?: string;
   protocolVersion: number;
   commandReview?: 1;
   rejectionFeedback?: 1;

@@ -1,5 +1,5 @@
 import { classifyProbe, helperFailureHint } from './authProbe.js';
-import { discoverScopeFields, readAllPages, pageState, FetchPage, FieldDefinition } from './scopeDiscovery.js';
+import { discoverScopeFields, readAllPages, pageState, CountRows, FetchPage, FieldDefinition } from './scopeDiscovery.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -18,7 +18,9 @@ import { NowSdkFlowError, NowSdkTransport, deployFlow, pullFlow } from '../nowsd
 import { VERSION } from '../version.js';
 import { STANDALONE_COMMANDS } from './commands.js';
 import { ReviewRegistry } from './reviewRegistry.js';
-import { beginUsage, FinishUsage } from './usageMetrics.js';
+import { beginUsage, FinishUsage, publicCapabilities, usageStatus } from './usageMetrics.js';
+import { enrichSchemaColumns, uiMetaColumns } from './schemaColumns.js';
+import { repositoryWriteWarning } from './workspaceCheck.js';
 import { resolveAttachment } from './attachmentInput.js';
 import { checkDownloadTarget, DownloadRequest, resolveDownloadTarget, saveDownloadedAttachment, validateDownloadParams } from './attachmentOutput.js';
 import { retryAfterTokenRefresh, scriptResult } from './backgroundScript.js';
@@ -151,6 +153,8 @@ function getMetaDataRelations(cwd: string): any {
   if (!metaDataRelationsCache) {
     const candidates = [
       path.resolve(cwd, 'resources', 'metaDataRelations.json'),
+      // Shipped with the package (dist/resources), see scripts/copy-resources.mjs.
+      path.resolve(__dirname, '../resources/metaDataRelations.json'),
       path.resolve(__dirname, '../../../../resources/metaDataRelations.json'),
       path.resolve(__dirname, '../../../resources/metaDataRelations.json'),
     ];
@@ -1221,9 +1225,12 @@ export class StandaloneDispatcher {
                   tier: state.tier,
                   proFeatures: state.proFeatures,
                   cdp: state.cdp,
-                  capabilities: state.capabilities,
+                  capabilities: publicCapabilities(state.capabilities),
                 }
               : null,
+            usage: hasBrowser ? usageStatus(state.capabilities) : usageStatus(undefined),
+            // From this bridge's own workspace, which may not be the caller's folder.
+            warnings: [repositoryWriteWarning(this.cwd)].filter(Boolean),
           },
         };
       }
@@ -1408,7 +1415,8 @@ export class StandaloneDispatcher {
             cdp: state.cdp,
             gates: this.config.gates,
             instanceGates: instanceGatesRecord,
-            capabilities: state.capabilities,
+            capabilities: publicCapabilities(state.capabilities),
+            usage: this.ws.hasBrowserClient() ? usageStatus(state.capabilities) : usageStatus(undefined),
           },
         };
       }
@@ -2252,26 +2260,38 @@ export class StandaloneDispatcher {
 
       // Schema Metadata
       if (req.command === 'get_table_metadata') {
-        const table = req.params?.table;
-        const pendingPromise = this.pending.register({ id: correlationId, command: req.command });
-        this.ws.sendToBrowser({
-          action: 'agentRestApi',
-          agentRequestId: correlationId,
-          endpoint: `/api/now/doc/table/schema/${table}`,
-          method: 'GET',
-          instance: inst.settings,
-          appName: 'SN Utils CLI',
-        });
-        const res = await pendingPromise;
-        if (res.success === false) {
-          throw Object.assign(new Error(res.error || `Schema for table ${table} not found`), { code: 'E_NOT_FOUND' });
+        const table = typeof req.params?.table === 'string' ? req.params.table.trim() : '';
+        if (!/^[A-Za-z0-9_]+$/.test(table)) {
+          throw Object.assign(new Error('Missing or invalid param "table" (a table name such as incident)'), { code: 'E_INVALID_PARAMS' });
         }
+        // Two reads side by side: the API documentation keeps the result's
+        // established keys, the form metadata adds references, flags and
+        // inherited columns. Either may fail on its own.
+        const ask = (id: string, endpoint: string) => {
+          const pendingPromise = this.pending.register({ id, command: req.command });
+          this.ws.sendToBrowser({ action: 'agentRestApi', agentRequestId: id, endpoint, method: 'GET', instance: inst.settings, appName: 'SN Utils CLI' });
+          return pendingPromise;
+        };
+        const [docRead, metaRead] = await Promise.allSettled([
+          ask(correlationId, `/api/now/doc/table/schema/${table}`),
+          ask(crypto.randomUUID(), `/api/now/ui/meta/${table}`),
+        ]);
+        const doc: any = docRead.status === 'fulfilled' && docRead.value?.success !== false ? docRead.value : undefined;
+        const meta: any = metaRead.status === 'fulfilled' && metaRead.value?.success !== false ? metaRead.value : undefined;
+        const docResult = doc ? (doc.data?.result || doc.data) : undefined;
+        const metaColumns = meta ? uiMetaColumns(meta.data) : {};
+        if (!doc && !Object.keys(metaColumns).length) {
+          const failed: any = docRead.status === 'fulfilled' ? docRead.value : { error: (docRead.reason as any)?.message };
+          throw Object.assign(new Error(failed?.error || `Schema for table ${table} not found`), { code: 'E_NOT_FOUND' });
+        }
+        const options = { choices: req.params?.choices === true };
+        const result = doc && !Array.isArray(docResult) ? docResult : enrichSchemaColumns(docResult, metaColumns, options);
         return {
           id: req.id,
           command: req.command,
           status: 'success',
           timestamp: Date.now(),
-          result: res.data?.result || res.data,
+          result,
         };
       }
 
@@ -2345,16 +2365,21 @@ export class StandaloneDispatcher {
         }
 
         const fetchPage: FetchPage = (table, query) => this.restGet(inst, req.command, `/api/now/table/${table}`, query, true);
-        const discovery = await readAllPages(fetchPage, 'sys_metadata', `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`, 'sys_class_name');
+        const countRows: CountRows = async (table, query) => {
+          const data = await this.restGet(inst, req.command, `/api/now/stats/${table}`, { sysparm_query: countQuery(query), sysparm_count: 'true' });
+          const n = Number(data?.result?.stats?.count);
+          return Number.isSafeInteger(n) ? n : undefined;
+        };
+        const discovery = await readAllPages(fetchPage, 'sys_metadata', `sys_scope=${scopeSysId}^sys_class_name!=sys_metadata_delete^sys_update_name!=NULL^ORDERBYsys_id`, 'sys_class_name', countRows);
         const classCounts = new Map<string, number>();
         for (const row of discovery.rows) {
           const cls = String(typeof row.sys_class_name === 'object' ? row.sys_class_name.value : row.sys_class_name || '');
           if (/^[a-zA-Z0-9_]+$/.test(cls)) classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
         }
-        const schema = await discoverScopeFields([...classCounts.keys()], getMetaDataRelations(this.cwd)?.tableFields || {}, fetchPage);
+        const schema = await discoverScopeFields([...classCounts.keys()], getMetaDataRelations(this.cwd)?.tableFields || {}, fetchPage, countRows);
         const tables = [...classCounts.keys()].filter(t => Object.keys(schema.definitions[t]?.codeFields || {}).length && (!tableFilter || tableFilter.has(t))).sort();
         const skippedTables = [...classCounts.keys()].filter(t => !Object.keys(schema.definitions[t]?.codeFields || {}).length).sort()
-          .map(table => ({ table, records: classCounts.get(table) || 0, reason: schema.warnings.some(w => w.startsWith(`${table}:`)) ? 'dictionary_unavailable' : 'no_scriptable_fields' }));
+          .map(table => ({ table, records: classCounts.get(table) || 0, reason: schema.established.has(table) ? 'no_scriptable_fields' : 'dictionary_unavailable' }));
         const missingTables = tableFilter ? [...tableFilter].filter((t) => !classCounts.has(t)).sort() : [];
 
         const perTable: any[] = [];
@@ -2382,8 +2407,18 @@ export class StandaloneDispatcher {
             for (const w of page.warnings) warnings.push(`${table}: ${w}`);
             const paging = pageState(page.pagination, offset, pageLimit, page.matchedRecords);
             if (paging.nextOffset === undefined) {
-              complete = complete && paging.complete;
-              if (paging.warning) warnings.push(`${table}: ${paging.warning}`);
+              let tableComplete = paging.complete;
+              if (paging.warning) {
+                // No paging headers: the instance count can still prove the table complete.
+                let expected: number | undefined;
+                try { expected = await countRows(table, query); } catch { expected = undefined; }
+                if (expected !== undefined && entry.matchedRecords >= expected) tableComplete = true;
+                else {
+                  warnings.push(`${table}: ${paging.warning}`);
+                  if (expected !== undefined && reportedTotal === undefined) reportedTotal = expected;
+                }
+              }
+              complete = complete && tableComplete;
               break;
             }
             offset = paging.nextOffset;
@@ -2398,21 +2433,25 @@ export class StandaloneDispatcher {
         }
         for (const t of missingTables) warnings.push(`${t}: no records of this table in scope ${scopeName}.`);
 
+        const report = finishScopeReport({
+          complete: complete && !perTable.some(t => t.truncated) && warnings.length === 0,
+          metadataRecords: discovery.rows.length,
+          scope: { name: scopeName, sys_id: scopeSysId },
+          folder: path.join(inst.name, scopeName).replace(/\\/g, '/'),
+          tables: perTable,
+          totals: { tables: perTable.length, records: totalRecords, filesWritten: totalFiles, skippedEmpty: totalSkippedEmpty, skippedUnreadable: totalSkippedUnreadable },
+          skippedTables,
+          warnings,
+        }, tableFilter, discovery.complete && discovery.warnings.length === 0);
+        if (report.outcome === 'failed') {
+          throw Object.assign(new Error(scopeFailureMessage(report)), { code: 'E_DISCOVERY_FAILED', details: report });
+        }
         return {
           id: req.id,
           command: req.command,
           status: 'success',
           timestamp: Date.now(),
-          result: {
-            complete: complete && !perTable.some(t => t.truncated) && warnings.length === 0,
-            metadataRecords: discovery.rows.length,
-            scope: { name: scopeName, sys_id: scopeSysId },
-            folder: path.join(inst.name, scopeName).replace(/\\/g, '/'),
-            tables: perTable,
-            totals: { tables: perTable.length, records: totalRecords, filesWritten: totalFiles, skippedEmpty: totalSkippedEmpty, skippedUnreadable: totalSkippedUnreadable },
-            skippedTables,
-            warnings,
-          },
+          result: report,
         };
       }
 
@@ -2662,4 +2701,40 @@ export function queryCoverage(count: number, limit: unknown, totalHeader: unknow
     ...(defaultFields ? { defaultFields: true } : {}),
     ...(notes.length ? { note: notes.join(' ') } : {}),
   };
+}
+
+/** Encoded query for the Aggregate API count: ordering is irrelevant there. */
+export function countQuery(query: string): string {
+  return query.replace(/\^ORDERBY(?:DESC)?[^^]*/g, '');
+}
+
+export type ScopeOutcome = 'complete' | 'partial' | 'failed' | 'empty';
+
+/** Adds `outcome` (and a note when it is not complete) to a pull_scope report.
+ * failed: nothing could be pulled because the dictionary could not be read for
+ * the tables in question. empty: nothing to pull, and that is established.
+ * Mirrored in src/agent/resultShaping.ts. */
+export function finishScopeReport<T extends { complete: boolean; metadataRecords: number; tables: any[]; skippedTables: Array<{ table: string; reason: string }> }>(report: T, tableFilter?: Set<string> | null, discoveryComplete = true): T & { outcome: ScopeOutcome; note?: string } {
+  const failedTables = report.skippedTables.filter(t => t.reason === 'dictionary_unavailable' && (!tableFilter || tableFilter.has(t.table)));
+  // Empty is a claim about the scope, so it needs a complete record list: with
+  // records missing from it, a table with scripts may be among them.
+  const outcome: ScopeOutcome = report.tables.length === 0
+    ? (failedTables.length || !discoveryComplete ? 'failed' : 'empty')
+    : report.complete ? 'complete' : 'partial';
+  const note = outcome === 'partial'
+    ? `Some records were not pulled or could not be verified${failedTables.length ? `; ${failedTables.length} table(s) were skipped because their dictionary could not be read` : ''}. See skippedTables and warnings.`
+    : outcome === 'empty' ? 'Nothing to pull: the scope has no records in tables with script fields.' : undefined;
+  return { ...report, outcome, ...(note ? { note } : {}) };
+}
+
+/** Error text for a pull_scope that could not pull anything. */
+export function scopeFailureMessage(report: { metadataRecords: number; scope?: { name?: string }; skippedTables: Array<{ reason: string }>; warnings: string[] }): string {
+  const failed = report.skippedTables.filter(t => t.reason === 'dictionary_unavailable').length;
+  const first = report.warnings.find(w => /dictionary|inheritance|pagination|not returned|stopped after/i.test(w)) || report.warnings[0];
+  const why = failed
+    ? `the instance dictionary could not be read for ${failed} of ${report.skippedTables.length} table(s) with records (${report.metadataRecords} metadata records found).`
+    : `the list of its records could not be read completely (${report.metadataRecords} metadata records found), so it cannot be called empty.`;
+  return `Nothing was pulled from scope ${report.scope?.name ?? ''}: ${why}`
+    + (first ? ` First problem: ${first}` : '')
+    + ' Details list every table and warning. Pull single tables with pull_records meanwhile.';
 }

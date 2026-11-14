@@ -7,6 +7,7 @@ import * as WebSocket from 'ws';
 import * as vscode from 'vscode';
 import { ScopeTreeViewProvider } from "./ScopeTreeViewProvider";
 import { discoverScopeFields, readAllPages, scalar, FetchPage } from "./ScopeDiscovery";
+import { usageModeOf } from "./agent/usageMetrics";
 import { HelperConnection } from "./HelperConnection";
 import { loadBridgeId } from "./BridgeIdentity";
 import { InfoTreeViewProvider } from "./InfoTreeViewProvider";
@@ -3356,6 +3357,8 @@ async function startBridgeTransports(): Promise<void> {
                     if (helperBuildInfo?.capabilities?.usageMetrics === 1) {
                         helperBuildInfo.capabilities.usageSession = typeof messageJson.usageSession === 'string'
                             && messageJson.usageSession.length <= 64 ? messageJson.usageSession : '';
+                        // Sent with every change of the setting, so no reconnect is needed.
+                        helperBuildInfo.capabilities.usageMode = usageModeOf(messageJson.usageMode);
                     }
                     return;
                 }

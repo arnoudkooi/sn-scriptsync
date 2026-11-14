@@ -714,6 +714,7 @@
 		"compile": "npm run build:agent-docs && tsc -p ./",
 		"test": "tsc -p ./ && node --test out/test/*.test.js scripts/test-shell-quote.mjs",
 		"test:bridge-parity": "tsc -p ./ && npm run build --prefix packages/snu && node --test scripts/test-bridge-parity.mjs",
+		"test:snu-package": "npm run build --prefix packages/snu && node --test scripts/test-snu-package.mjs",
 		"test:fixtures": "node --test scripts/test-artifact-profile-fixtures.mjs",
 		"package": "vsce package",
 		"publish:marketplace": "vsce publish",

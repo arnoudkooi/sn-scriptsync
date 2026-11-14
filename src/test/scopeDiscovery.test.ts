@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { discoverScopeFields, pageState, readAllPages, FetchPage } from '../ScopeDiscovery';
+import { discoverScopeFields, pageState, readAllPages, FetchPage, MAX_PAGES } from '../ScopeDiscovery';
 
 test('short and empty ACL-filtered pages do not end a metadata load', async () => {
     const offsets: string[] = [];
@@ -78,6 +78,78 @@ test('unreadable dictionary uses a warned fallback without modifying the bundled
     assert.match(schema.warnings[0], /Access denied/);
     schema.definitions.catalog_script_client.codeFields!.script.label = 'Edited';
     assert.equal(bundled.catalog_script_client.codeFields.script.label, 'Script');
+});
+
+test('the stored type name is used when its sys_glide_object record is missing', async () => {
+    // Seen live: sys_db_object.sys_class_code has internal_type "sys_class_code"
+    // with no sys_glide_object record, so the dot-walked name comes back empty.
+    const fetch: FetchPage = async (table) => table === 'sys_db_object'
+        ? { rows: [{ name: 'sys_db_object', 'super_class.name': '' }], pagination: { totalCount: '1' } }
+        : { rows: [
+            { name: 'sys_db_object', element: 'sys_class_code', internal_type: 'sys_class_code', 'internal_type.name': '' },
+            { name: 'sys_db_object', element: 'script', internal_type: 'script' },
+        ], pagination: { totalCount: '2' } };
+    const schema = await discoverScopeFields(['sys_db_object'], {}, fetch);
+    assert.deepEqual(schema.warnings, []);
+    assert.ok(schema.established.has('sys_db_object'));
+    assert.deepEqual(Object.keys(schema.definitions.sys_db_object.codeFields!), ['script']);
+});
+
+test('a failed dictionary batch affects only the tables it covers', async () => {
+    const tables = Array.from({ length: 101 }, (_, i) => `x_t${String(i).padStart(3, '0')}`);
+    const fetch: FetchPage = async (table, q) => {
+        const names = q.sysparm_query.split('^')[0].slice(6).split(',');
+        if (table === 'sys_db_object') return { rows: names.map(name => ({ name, 'super_class.name': '' })), pagination: { totalCount: String(names.length) } };
+        if (names.includes('x_t100')) throw new Error('Transaction cancelled: maximum execution time exceeded');
+        return { rows: names.map(name => ({ name, element: 'script', internal_type: 'script' })), pagination: { totalCount: String(names.length) } };
+    };
+    const schema = await discoverScopeFields(tables, {}, fetch);
+    assert.equal(schema.established.size, 100);
+    assert.ok(!schema.established.has('x_t100'));
+    assert.equal(schema.warnings.length, 1);
+    assert.match(schema.warnings[0], /^x_t100: Dictionary discovery failed: Transaction cancelled/);
+    assert.deepEqual(Object.keys(schema.definitions.x_t000.codeFields!), ['script']);
+});
+
+test('an incomplete dictionary read marks its tables failed; an incomplete inheritance read is still used', async () => {
+    const fetch: FetchPage = async (table) => table === 'sys_db_object'
+        // One row the count says exists was not returned (access controls).
+        ? { rows: [{ name: 'x_a', 'super_class.name': '' }, { name: 'x_b', 'super_class.name': '' }], pagination: { totalCount: '3' } }
+        : { rows: [{ name: 'x_a', element: 'script', internal_type: 'script' }], pagination: { totalCount: '5' } };
+    const schema = await discoverScopeFields(['x_a', 'x_b', 'x_c'], {}, fetch);
+    assert.equal(schema.established.size, 0, 'missing dictionary rows could hide script fields');
+    assert.match(schema.warnings.find(w => w.startsWith('x_a:'))!, /Dictionary discovery was incomplete/);
+    assert.match(schema.warnings.find(w => w.startsWith('x_c:'))!, /Table inheritance discovery was incomplete/);
+});
+
+test('without paging headers the instance count decides whether a short read is complete', async () => {
+    const rows = [{ sys_class_name: 'sp_widget' }, { sys_class_name: 'sys_script' }];
+    const fetch: FetchPage = async () => ({ rows });
+    const counted: string[] = [];
+    const exact = await readAllPages(fetch, 'sys_metadata', 'sys_scope=x^ORDERBYsys_id', 'sys_class_name', async (table, query) => { counted.push(`${table}|${query}`); return 2; });
+    assert.equal(exact.complete, true);
+    assert.deepEqual(exact.warnings, []);
+    assert.deepEqual(counted, ['sys_metadata|sys_scope=x^ORDERBYsys_id']);
+
+    const more = await readAllPages(fetch, 'sys_metadata', 'q', 'f', async () => 5);
+    assert.equal(more.complete, false);
+    assert.ok(more.warnings.some(w => /Pagination could not be verified/.test(w)));
+    assert.ok(more.warnings.some(w => /3 matching records were not returned/.test(w)));
+
+    for (const countRows of [undefined, async () => { throw new Error('403'); }, async () => undefined]) {
+        const unknown = await readAllPages(fetch, 'sys_metadata', 'q', 'f', countRows as any);
+        assert.equal(unknown.complete, false);
+        assert.match(unknown.warnings[0], /Pagination could not be verified/);
+    }
+});
+
+test('a read stops at the page cap instead of following pages forever', async () => {
+    let calls = 0;
+    const fetch: FetchPage = async () => { calls++; return { rows: Array.from({ length: 500 }, () => ({})) }; };
+    const result = await readAllPages(fetch, 'sys_dictionary', 'q', 'f');
+    assert.equal(calls, MAX_PAGES);
+    assert.equal(result.complete, false);
+    assert.match(result.warnings[0], new RegExp(`stopped after ${MAX_PAGES} pages`));
 });
 
 test('independently packaged hosts use identical discovery and paging logic', () => {

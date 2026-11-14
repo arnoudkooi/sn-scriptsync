@@ -3,7 +3,7 @@ name: snu-agent-api
 description: "SN ScriptSync HTTP/file Agent API: endpoint discovery, auth, the full error-code table, and the complete command catalog (query_records, get_record, update_record, create_records / update_records for many rows, create_artifact, create_application, analyze_artifact_type, rest_request, screenshots, etc.). Read this before calling any Agent API command."
 ---
 
-<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=37 -->
+<!-- SN-SCRIPTSYNC:SKILL instructionsSchemaVersion=38 -->
 
 # SN ScriptSync — Agent API
 
@@ -122,6 +122,7 @@ HTTP status codes map to codes:
 | `E_REFERENCE_INTEGRITY` | 409 | Write/delete blocked by a reference or data-integrity constraint |
 | `E_INSTANCE_REQUIRED` / `E_INSTANCE_NOT_FOUND` | 422 | Instance not resolvable |
 | `E_VERIFY_FAILED` | 422 | Standalone `update_record` was acknowledged but persistence could not be verified. Inspect `details.reason` and the saved state before retrying; the write may already have taken effect |
+| `E_DISCOVERY_FAILED` | 422 | `pull_scope` could not pull any table, because the instance dictionary or the scope's record list could not be read completely. `details` holds the full report (skipped tables, warnings). Pull single tables with `pull_records` meanwhile |
 | `E_DISABLED` | 423 | Feature disabled via settings (e.g. deletes, background scripts) |
 | `E_PAUSED` | 423 | The user paused agent access in the ScriptSync helper tab. Stop and tell the user — do not retry until they press Resume agents there |
 | `E_PARTIAL_FAILURE` | 207 | Batch partially succeeded — inspect per-item results |
@@ -1242,25 +1243,34 @@ Fetch a single record by `table` + `sys_id`. Cheaper and simpler than `query_rec
 - `E_INVALID_PARAMS` — missing table/sys_id.
 
 ### `get_table_metadata`
-Fetch table field definitions from ServiceNow API.
+Fetch the columns of a table, including the ones it inherits, with type, reference target, mandatory and read-only flags.
 
 **Request:**
 ```json
-{ "id": "8", "command": "get_table_metadata", "params": { "table": "sys_script_include" } }
+{ "id": "8", "command": "get_table_metadata", "params": { "table": "sys_script_include", "choices": false } }
 ```
 
-**Response:**
+**Parameters:**
+- `table` (required): table name.
+- `choices` (optional, default `false`): include `{ value, label }` choices per choice field. Without it a choice field only carries `choiceCount`.
+
+**Response (VS Code host):** `columns` is the instance's form metadata keyed by column name, as before. `fields` is the same list normalized:
 ```json
 {
   "result": {
-    "columns": {
-      "name": { "label": "Name", "type": "string", "mandatory": false, "max_length": 100 },
-      "script": { "label": "Script", "type": "script_plain", "mandatory": false },
-      "active": { "label": "Active", "type": "boolean", "default": "false" }
-    }
+    "columns": { "name": { "label": "Name", "type": "string", "mandatory": false, "max_length": 100 } },
+    "fields": [
+      { "name": "name", "label": "Name", "internalType": "string", "type": "string", "mandatory": false, "readOnly": false, "maxLength": 100 },
+      { "name": "sys_scope", "label": "Application", "internalType": "reference", "type": "reference", "reference": "sys_scope", "mandatory": false, "readOnly": false, "maxLength": 32 }
+    ]
   }
 }
 ```
+
+**Response (standalone bridge, `snu schema`):** an array of the same normalized columns. Each keeps the API documentation keys `name`, `label`, `internalType` and `exampleValue`.
+
+- A key that is missing means **unknown**, not false: the instance did not report it.
+- `exampleValue` is a generated sample from the REST API documentation, the same on every instance. It is never record data. Use `query_records` for real values.
 
 ### `check_name_exists_remote`
 Check if an artifact exists in ServiceNow (queries the actual instance, not just local files).
@@ -1384,11 +1394,21 @@ The command first lists which artifact tables the application actually uses, the
       { "table": "sys_script_include", "matchedRecords": 140, "pulledRecords": 140, "filesWritten": 140, "skippedEmpty": 0, "truncated": false }
     ],
     "totals": { "tables": 2, "records": 152, "filesWritten": 152, "skippedEmpty": 0 },
-    "skippedTables": [ { "table": "sys_properties", "records": 4 } ],
-    "warnings": []
+    "skippedTables": [ { "table": "sys_properties", "records": 4, "reason": "no_scriptable_fields" } ],
+    "warnings": [],
+    "complete": true,
+    "outcome": "complete"
   }
 }
 ```
+
+**`outcome`** says what the pull achieved. Check it, not only the HTTP status:
+- `complete` — every table with script fields was pulled and verified.
+- `partial` — files were written, but something was skipped (`reason: "dictionary_unavailable"`), could not be verified, or hit `limit`. `note` and `warnings` say which. Re-run, or pull the named tables with `pull_records`.
+- `empty` — the scope has no records in tables with script fields, established from a complete record list. Nothing to do.
+- Discovery failure is an **error**, not an outcome: `E_DISCOVERY_FAILED` (HTTP 422, CLI exit 1) when no table could be pulled because the instance dictionary could not be read, or because the list of the scope's records was incomplete, so emptiness could not be established. `details` holds the full report above, including every skipped table and warning. Pull single tables with `pull_records` meanwhile.
+
+When the instance dictionary cannot be read for a table, known tables fall back to the field definitions bundled with sn-scriptsync and `snu`, with a warning; a table is only reported as `no_scriptable_fields` when its dictionary was read completely.
 
 Existing local files for the same records are refreshed in place and keep their file names through `_map.json`; a remote field that is now empty clears the local file. Run it again at any time to re-sync the whole application.
 
@@ -1467,6 +1487,9 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
 - `limit` (optional): Max records to return (default: 10)
 - `orderBy` (optional): Order clause (e.g., `ORDERBYDESCsys_created_on`)
 - `validate` (optional, default `true`): `false` runs the query without checking its field paths.
+- `referenceLinks` (optional, default `true`): `false` returns each reference as its sys_id instead of a `{ link, value }` object, roughly halving reference-heavy results. To read a referenced value, dot-walk in `fields` instead (`target_scope.scope`).
+
+**Keep results small:** always pass `fields` and `limit`. The defaults are four fields and 10 rows, and the result says when they applied.
 
 **Field paths are checked before the query runs.** ServiceNow silently ignores a condition on a field that does not exist and returns unfiltered rows, so every path in `query`, `fields` (when you pass it) and `orderBy` is checked hop by hop against the table schema, including dot-walks and the field inside `ORDERBY`, `DYNAMIC`, `OR`/`NQ` branches. Values are not judged: `javascript:gs.beginningOfToday()` is fine once its field exists. Keyword search (`123TEXTQUERY321`) is supported. A related-list block (`RLQUERY<table>.<field>,…^…^ENDRLQUERY`) is checked against its own table; one without `ENDRLQUERY` is refused. A `ref_<table>` cast passes only when `<table>` really extends the reference target (checked in `sys_db_object`).
 - `E_INVALID_QUERY` — a path does not exist (e.g. `question.cat_item` on `question_choice`: `question` has no `cat_item`; use `question.ref_item_option_new.cat_item`), or a non-reference field is dot-walked. `details.problems` lists each one with the failing `hop` and `table`. The query was not run: fix the path.
@@ -1493,6 +1516,8 @@ Execute an arbitrary encoded query against any ServiceNow table. Use this to fet
   }
 }
 ```
+
+**What the result left out:** besides `table`, `count` and `records`, the result carries `limit`, `more` (true when more records match than were returned), `total` (the instance's own count, when it reports one), `defaultFields` / `defaultLimit` (true when the defaults applied) and a `note` in words. With `more: true`, raise `limit` or narrow the query; never treat the first page as everything.
 
 **Common Query Examples:**
 
@@ -1595,6 +1620,7 @@ Run the SN Utils GraphQL field-index code search across ServiceNow script tables
 - `term` (required): Search term. Supports the same `table:` / field filters as the code search page (e.g. `table:sys_script_include setPreference`). Minimum 2 characters.
 - `activeOnly` (optional, default `false`): Only match active records.
 - `limit` (optional, default `50`): Max records per table.
+- `compact` (optional, default `false`): Return only `{ table, label, count, names }` per table instead of every hit with its matching lines. **Search compact first**: full results for a common term run to hundreds of kilobytes. Then read the records you need with `get_record`.
 - `tables` (optional, string or string[]): Exact table names as a comma-separated string or an array, for example `"sys_script_include,sys_script"` or `["sys_script_include", "sys_script"]`. Empty values leave the search scope unrestricted. Inline `table:` filters in `term` further narrow this selection; unknown names produce no matches. Applying this parameter requires an updated SN Utils browser extension; with an older helper, use `table:<name>` in `term`.
 
 **Response:**
@@ -1647,6 +1673,7 @@ Run the SN Utils GraphQL field-index code search across ServiceNow script tables
 **Notes:**
 - Matches are **excerpts** — `context` plus a handful of `lineMatches`, not full field bodies. To get the complete script of a specific hit, follow up with `get_record` (using the hit's `tableName` + `sysId`).
 - The first search after the helper tab opens may take longer while the field index builds; later searches reuse the cached per-instance index.
+- Inline scripts in flows are not searched: Flow Designer stores a flow's action inputs compressed. Script steps in custom actions are searched.
 
 **Errors:**
 - `E_DISABLED` — no SN Utils Pro/Trial/Enterprise license in the connected browser.

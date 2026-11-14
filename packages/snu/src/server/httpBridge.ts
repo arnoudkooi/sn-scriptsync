@@ -22,6 +22,7 @@ export function httpStatusForCode(code?: string): number {
       return 400;
     case 'E_QUERY_UNVERIFIABLE':
     case 'E_VERIFY_FAILED':
+    case 'E_DISCOVERY_FAILED':
       return 422;
     case 'E_UNAUTHORIZED':
     case 'E_SECURITY':

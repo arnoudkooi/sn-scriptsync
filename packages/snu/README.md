@@ -240,9 +240,16 @@ snu search "OAuthUtil" --tables sys_script_include,sys_ui_action --limit 20
 
 # Table, match count and record names only: a fraction of the full output
 snu search "OAuthUtil" --compact --json
+
+# Pull every scriptable artifact of one application to local files
+snu pull-scope x_acme_app
 ```
 
-Start the bridge from its own folder rather than inside a code repository: pulled instance scripts are written to the folder the bridge runs in. `snu serve` warns when that folder is a git repository without instance folders.
+Search with `--compact` first and read the records you need afterwards: full results for a common term include every matching line and run to hundreds of kilobytes. Inline scripts in flows are not searched, because Flow Designer stores a flow's action inputs compressed; script steps in custom actions are searched.
+
+`snu pull-scope` reports an `outcome`: `complete`, `partial` (files written, but tables were skipped, unverified or truncated; `note` and `warnings` say which) or `empty` (nothing with script fields in the scope, established from a complete record list). When no table could be pulled because the instance dictionary or the scope's record list could not be read completely, it fails with `E_DISCOVERY_FAILED` and exit status 1, and the error details carry the full report. Known tables fall back to the field definitions bundled with the package.
+
+Start the bridge from its own folder rather than inside a code repository: pulled instance scripts are written to the folder the bridge runs in. When that folder is a git repository without instance folders, `snu serve` and `snu --mcp` warn at start, and `snu context` (`snu_get_context`) lists the warning under `warnings`, also for a bridge another session started.
 
 `snu serve` is idempotent: if a healthy bridge already owns the ports, it reports that process instead of failing with `EADDRINUSE`. `snu serve --detach` (and `snu restart --detach`) start the bridge as a detached process with no console window on Windows, wait until it answers its health endpoint, print its PID and log file (`~/.sn-scriptsync/snu-bridge.log`), and return. Use `snu status` to inspect it and `snu stop` to stop it. `snu stop` and `snu restart` also support editor-hosted bridges in VS Code and Cursor: they send authenticated `yield` or `restart` commands so the editor releases or restarts its bridge without closing the editor. The CLI never sends process termination signals to an editor host.
 
@@ -252,8 +259,11 @@ If neither the current workspace nor the global descriptor locates the bridge, `
 
 ### Query & Schema
 ```bash
-# Inspect table dictionary columns, types, references, choices
+# Columns including inherited ones: type, reference target, mandatory, read-only, max length
 snu schema incident
+
+# Also list the values and labels of choice fields
+snu schema incident --choices --json
 
 # Query records with encoded queries and field projections
 snu query incident "priority=1^active=true" --fields number,short_description,sys_created_on --limit 10
@@ -264,6 +274,8 @@ snu query incident --json | jq '.records[].number'
 # References as sys_ids instead of link objects (smaller output)
 snu query sys_security_acl "active=true" --fields name,sys_scope --no-links --json
 ```
+
+In `snu schema`, `?` means the instance did not report that value (unknown), never "No". In `--json` output a missing key means the same. `exampleValue` is a generated sample from the REST API documentation, the same on every instance, not record data.
 
 Without `--fields` a query returns `sys_id`, `number`, `short_description` and `sys_created_on`; without `--limit` it returns 10 records. The result reports what it left out: `more` is true when further records match, `total` holds the instance's count when it reported one, and `note` says the same in words.
 
@@ -361,6 +373,18 @@ snu screenshot
 - **Safe Handover:** When VS Code launches while a standalone bridge is active, VS Code sends an automated `yield` signal to acquire the WebSocket and HTTP ports cleanly without port collisions.
 
 Session credentials stay on your machine. The standalone bridge keeps the `/token` session in memory only, clears it when the helper disconnects, and never writes it to disk or sends it over the internet.
+
+### Usage data
+
+The SN Utils extension counts which commands ran and how they ended. What is recorded per command: its name (such as `query_records`), the outcome category (success, error, cancelled, blocked or dry run) and, for multi-record writes and deletes, how many rows succeeded or failed. Never tables, queries, field values, record ids, scripts or instance names.
+
+You control this in SN Utils under **Settings > Usage Data**:
+
+- **Collect & Share** (default): counts are kept in the browser and shared with SN Utils when a signed-in SN Utils license is active; otherwise they stay in your browser.
+- **Collect Only**: counts stay in your browser.
+- **Off**: nothing is counted; the bridge sends no usage events.
+
+`snu doctor` and `snu context` show the current setting as `collection` and `sharing preference` (on, off or unknown). Unknown means the helper tab is not connected or is an older version that does not report it. A change in the extension reaches a running bridge at once, without reconnecting.
 
 ---
 

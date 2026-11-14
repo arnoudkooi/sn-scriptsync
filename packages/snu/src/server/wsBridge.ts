@@ -1,3 +1,4 @@
+import { usageModeOf } from './usageMetrics.js';
 import { loadBridgeId } from './bridgeIdentity.js';
 import { VERSION } from '../version.js';
 import * as crypto from 'crypto';
@@ -242,6 +243,8 @@ export class StandaloneWsBridge {
       if (this.state.capabilities?.usageMetrics === 1) {
         this.state.capabilities.usageSession = typeof msg.usageSession === 'string'
           && msg.usageSession.length <= 64 ? msg.usageSession : '';
+        // Sent with every change of the setting, so no reconnect is needed.
+        this.state.capabilities.usageMode = usageModeOf(msg.usageMode);
       }
       return;
     }

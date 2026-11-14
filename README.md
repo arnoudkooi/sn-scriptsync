@@ -270,6 +270,12 @@ The extension will automatically:
 2. Create the record in ServiceNow
 3. Update `_map.json` with the new sys_id
 
+### Usage data
+
+The SN Utils extension counts which Agent API commands ran and how they ended: the command name (such as `query_records`), the outcome category (success, error, cancelled, blocked or dry run) and, for multi-record writes and deletes, how many rows succeeded or failed. Never tables, queries, field values, record ids, scripts or instance names.
+
+Choose in SN Utils under **Settings > Usage Data**: **Collect & Share** (default; shared only when a signed-in SN Utils license is active), **Collect Only** (counts stay in your browser) or **Off** (nothing is counted). The Agent API reports the setting in `get_capabilities` as `usage: { collection, sharingPreference }` (`on`, `off` or `unknown` when the helper tab does not report it). A change reaches VS Code at once, without reconnecting.
+
 ### AI Agent Instructions (for AI tools)
 
 Add these instructions to your AI tool's system prompt or rules file for optimal ServiceNow development:

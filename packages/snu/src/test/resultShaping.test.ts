@@ -66,3 +66,35 @@ test('bridge start warns inside a repository that is not a ScriptSync workspace'
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('the bridge reports the warning for its own workspace, and get_context relays it', async () => {
+  const { StandaloneDispatcher } = await import('../server/dispatcher.js');
+  const { ScriptSyncClient } = await import('../client.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'snu-bridge-warning-'));
+  try {
+    const repo = path.join(root, 'repo');
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    const plain = path.join(root, 'plain');
+    fs.mkdirSync(plain);
+    const ws: any = { isServerRunning: () => true, hasBrowserClient: () => false, getHelperState: () => ({ capabilities: { protocolVersion: 1 } }) };
+    const check = async (cwd: string) => (await new StandaloneDispatcher({ cwd, wsBridge: ws, cliFlags: {} } as any)
+      .dispatch({ id: 'c', command: 'check_connection', params: {} }) as any).result;
+    const inRepo = await check(repo);
+    assert.strictEqual(inRepo.warnings.length, 1);
+    assert.match(inRepo.warnings[0], /inside a git repository/);
+    assert.deepStrictEqual((await check(plain)).warnings, []);
+
+    // The caller's folder does not matter: the client relays what the bridge says.
+    const client = new ScriptSyncClient({ cwd: plain });
+    (client as any).execute = async (req: any) => {
+      if (req.command === 'check_connection') return { result: { ...inRepo, serverRunning: true } };
+      if (req.command === 'list_instances') return { result: { instances: [] } };
+      throw new Error('unexpected ' + req.command);
+    };
+    const context = await client.getContext();
+    assert.deepStrictEqual(context.warnings, inRepo.warnings);
+    assert.deepStrictEqual(context.usage, { collection: 'unknown', sharingPreference: 'unknown' });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

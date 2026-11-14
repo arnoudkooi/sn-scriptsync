@@ -43,6 +43,8 @@ export type AgentErrorCode =
 	| 'E_FILE_OUTSIDE_WORKSPACE'
 	| 'E_COMMAND_FAILED'
 	| 'E_VERIFY_FAILED'
+	// pull_scope found records but could not read the dictionary to pull any.
+	| 'E_DISCOVERY_FAILED'
 	// Browser debugger (CDP) family — see commands/cdp.ts.
 	| 'E_PRO_REQUIRED'
 	| 'E_CDP_UNAVAILABLE'
@@ -74,6 +76,7 @@ export function httpStatusForCode(code?: string): number {
 			return 400;
 		case 'E_QUERY_UNVERIFIABLE':
 		case 'E_VERIFY_FAILED':
+		case 'E_DISCOVERY_FAILED':
 			return 422;
 		case 'E_UNAUTHORIZED':
 		case 'E_SECURITY':

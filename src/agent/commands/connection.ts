@@ -1,3 +1,4 @@
+import { publicCapabilities, usageModeOf, usageStatus } from '../usageMetrics';
 import * as fs from 'fs';
 import * as path from 'path';
 import { CommandHandler } from '../types';
@@ -425,8 +426,11 @@ const get_capabilities: CommandHandler = {
 				available: !!cdp.available,
 				reason: cdp.reason || null,
 			},
-			capabilities: r?.capabilities || { protocolVersion: 1 },
+			capabilities: publicCapabilities(r?.capabilities || { protocolVersion: 1 }),
 			instanceGates: r?.instanceGates || {},
+			// A current helper answers with its mode; an older one only told the
+			// host through helperUsageInfo.
+			usage: usageModeOf(r?.usageMode) ? usageStatus({ usageMode: r.usageMode }) : usageStatus(ctx.getHelperBuildInfo?.()?.capabilities),
 		};
 	},
 };

@@ -21,6 +21,7 @@ Run the SN Utils GraphQL field-index code search across ServiceNow script tables
 - `term` (required): Search term. Supports the same `table:` / field filters as the code search page (e.g. `table:sys_script_include setPreference`). Minimum 2 characters.
 - `activeOnly` (optional, default `false`): Only match active records.
 - `limit` (optional, default `50`): Max records per table.
+- `compact` (optional, default `false`): Return only `{ table, label, count, names }` per table instead of every hit with its matching lines. **Search compact first**: full results for a common term run to hundreds of kilobytes. Then read the records you need with `get_record`.
 - `tables` (optional, string or string[]): Exact table names as a comma-separated string or an array, for example `"sys_script_include,sys_script"` or `["sys_script_include", "sys_script"]`. Empty values leave the search scope unrestricted. Inline `table:` filters in `term` further narrow this selection; unknown names produce no matches. Applying this parameter requires an updated SN Utils browser extension; with an older helper, use `table:<name>` in `term`.
 
 **Response:**
@@ -73,6 +74,7 @@ Run the SN Utils GraphQL field-index code search across ServiceNow script tables
 **Notes:**
 - Matches are **excerpts** — `context` plus a handful of `lineMatches`, not full field bodies. To get the complete script of a specific hit, follow up with `get_record` (using the hit's `tableName` + `sysId`).
 - The first search after the helper tab opens may take longer while the field index builds; later searches reuse the cached per-instance index.
+- Inline scripts in flows are not searched: Flow Designer stores a flow's action inputs compressed. Script steps in custom actions are searched.
 
 **Errors:**
 - `E_DISABLED` — no SN Utils Pro/Trial/Enterprise license in the connected browser.

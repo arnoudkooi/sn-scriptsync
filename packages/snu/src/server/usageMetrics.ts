@@ -62,3 +62,34 @@ export function beginUsage(
         } catch { /* Analytics must never change a command's result. */ }
     };
 }
+
+export type UsageState = 'on' | 'off' | 'unknown';
+/**
+ * What the helper reports about its Usage Data setting. sharingPreference is
+ * the user's choice only: whether anything is shared also depends on the
+ * license, which the hosts do not see. A disconnected or older helper that
+ * does not report the setting gives unknown, never off.
+ */
+export interface UsageStatus { collection: UsageState; sharingPreference: UsageState; }
+const USAGE_MODES = new Set(['off', 'collect', 'collect-and-share']);
+
+/** The valid Usage Data mode in a helper message, or undefined. */
+export function usageModeOf(value: unknown): string | undefined {
+    return typeof value === 'string' && USAGE_MODES.has(value) ? value : undefined;
+}
+
+export function usageStatus(capabilities: any): UsageStatus {
+    const mode = usageModeOf(capabilities?.usageMode);
+    if (mode) return { collection: mode === 'off' ? 'off' : 'on', sharingPreference: mode === 'collect-and-share' ? 'on' : 'off' };
+    // An older helper reports only a session: one being present means collection is on.
+    if (capabilities?.usageMetrics === 1 && typeof capabilities?.usageSession === 'string' && capabilities.usageSession)
+        return { collection: 'on', sharingPreference: 'unknown' };
+    return { collection: 'unknown', sharingPreference: 'unknown' };
+}
+
+/** Helper capabilities as they may be shown: never the usage session id. */
+export function publicCapabilities<T>(capabilities: T): T {
+    if (!capabilities || typeof capabilities !== 'object') return capabilities;
+    const { usageSession: _session, usageMode: _mode, ...rest } = capabilities as any;
+    return rest as T;
+}

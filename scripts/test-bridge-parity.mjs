@@ -350,3 +350,32 @@ test('usage metrics use the same privacy and counting rules in both hosts', () =
   assert.equal(fs.readFileSync(path.join(root, 'src/agent/usageMetrics.ts'), 'utf8'),
     fs.readFileSync(path.join(root, 'packages/snu/src/server/usageMetrics.ts'), 'utf8'));
 });
+
+// Schema columns are merged by the same code in both hosts.
+test('schema column normalization is identical in both hosts', () => {
+  assert.equal(fs.readFileSync(path.join(root, 'src/agent/schemaColumns.ts'), 'utf8'),
+    fs.readFileSync(path.join(root, 'packages/snu/src/server/schemaColumns.ts'), 'utf8'));
+});
+
+// pull_scope classifies its report the same way in both hosts.
+test('pull_scope outcomes match across hosts', async () => {
+  const editor = require('../out/agent/resultShaping.js');
+  const standalone = require('../packages/snu/dist/server/dispatcher.js');
+  const base = { complete: false, metadataRecords: 6283, tables: [], warnings: ['t: Dictionary discovery failed: x'],
+    scope: { name: 'x_acme_app' }, skippedTables: [{ table: 't', records: 1, reason: 'dictionary_unavailable' }] };
+  const cases = [base, { ...base, metadataRecords: 0 }, { ...base, tables: [{ table: 'u' }] }, { ...base, tables: [{ table: 'u' }], complete: true },
+    { ...base, skippedTables: [{ table: 't', records: 1, reason: 'no_scriptable_fields' }] }];
+  for (const report of cases) {
+    for (const filter of [null, new Set(['t']), new Set(['other'])]) {
+      for (const discoveryComplete of [true, false]) {
+        assert.deepEqual(editor.finishScopeReport(report, filter, discoveryComplete), standalone.finishScopeReport(report, filter, discoveryComplete));
+      }
+    }
+  }
+  assert.equal(editor.scopeFailureMessage(base), standalone.scopeFailureMessage(base));
+  const noDictionaryFailure = { ...base, metadataRecords: 0, skippedTables: [] };
+  assert.equal(editor.scopeFailureMessage(noDictionaryFailure), standalone.scopeFailureMessage(noDictionaryFailure));
+  assert.equal(standalone.finishScopeReport({ ...base, metadataRecords: 0, skippedTables: [] }, null, false).outcome, 'failed');
+  assert.equal(editor.countQuery('a=1^ORDERBYsys_id^ORDERBYDESCname'), 'a=1');
+  assert.equal(standalone.countQuery('a=1^ORDERBYsys_id^ORDERBYDESCname'), 'a=1');
+});

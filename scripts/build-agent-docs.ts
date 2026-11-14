@@ -175,7 +175,10 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v35 -> v36: code_search exact table filters, array input and helper compatibility.
 //   v36 -> v37: update_record reports only missing params and distinguishes
 //               standalone persistence verification failures with E_VERIFY_FAILED.
-const INSTRUCTIONS_VERSION = 37;
+//   v37 -> v38: smaller results (code_search compact, query_records coverage and
+//               referenceLinks), normalized get_table_metadata columns, pull_scope
+//               outcomes and E_DISCOVERY_FAILED, flow inline script limitation.
+const INSTRUCTIONS_VERSION = 38;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -209,7 +212,7 @@ const CDP_COMMANDS = new Set(['start_network_capture', 'stop_network_capture', '
 // The everyday cheat-sheet that stays inline in the core so common tasks are
 // zero-hop. Keep this short — it is a teaser, not the catalog.
 const EVERYDAY: Array<{ cmd: string; blurb: string }> = [
-	{ cmd: 'query_records', blurb: 'Encoded-query any table (fetch/check/explore records).' },
+	{ cmd: 'query_records', blurb: 'Encoded-query any table. Always pass `fields` and `limit`; `more: true` means rows were left out.' },
 	{ cmd: 'pull_records', blurb: 'Pull records from ServiceNow and write code fields to local files with _map.json sync.' },
 	{ cmd: 'pull_scope', blurb: 'Pull every scriptable artifact of one application scope to local files in one call (paged, refreshable).' },
 	{ cmd: 'get_record', blurb: 'Fetch one record by table + sys_id (e.g. confirm a write).' },
@@ -218,7 +221,7 @@ const EVERYDAY: Array<{ cmd: string; blurb: string }> = [
 	{ cmd: 'create_record', blurb: 'Create a plain data row (incident, task, user) — never drive the form UI to do this.' },
 	{ cmd: 'create_artifact', blurb: 'Create a scriptable artifact incl. config fields via payload (not loose files).' },
 	{ cmd: 'navigate_and_screenshot', blurb: 'Open a page and capture it in one call to verify state.' },
-	{ cmd: 'code_search', blurb: 'Find existing code across script tables — `term` required (Pro). See the snu-agent-api skill for params/response.' },
+	{ cmd: 'code_search', blurb: 'Find existing code across script tables — `term` required (Pro). Pass `compact: true` first, then read the hits you need.' },
 ];
 
 // --- Skill definitions -------------------------------------------------------
@@ -508,17 +511,28 @@ function validateCoverage() {
 	}
 }
 
+// Writes only when the content differs, and remembers whether anything did, so
+// an unchanged rebuild leaves every file (and the manifest timestamp) as it was.
+let outputsChanged = false;
+function writeIfChanged(file: string, content: string) {
+	let current: string | undefined;
+	try { current = fs.readFileSync(file, 'utf8'); } catch { current = undefined; }
+	if (current === content) return;
+	fs.writeFileSync(file, content);
+	outputsChanged = true;
+}
+
 function main() {
 	validateCoverage();
 
 	// Core
 	const core = buildCore();
-	fs.writeFileSync(CORE_OUTPUT, core);
+	writeIfChanged(CORE_OUTPUT, core);
 	const coreLines = core.split('\n').length;
 
 	// Slim reference block for tool-standard files (CLAUDE.md, AGENTS.md, ...).
 	const reference = buildReference();
-	fs.writeFileSync(REFERENCE_OUTPUT, reference);
+	writeIfChanged(REFERENCE_OUTPUT, reference);
 
 	// Skills (fresh dir contents for the generated files; user files, if any, are
 	// left in place — we only rewrite the files we own).
@@ -528,19 +542,24 @@ function main() {
 		const rel = path.join(skill.name, 'SKILL.md');
 		const dest = path.join(SKILLS_DIR, rel);
 		fs.mkdirSync(path.dirname(dest), { recursive: true });
-		fs.writeFileSync(dest, buildSkill(skill));
+		writeIfChanged(dest, buildSkill(skill));
 		manifestFiles.push(rel.split(path.sep).join('/'));
 	}
 
 	// Manifest — paths are relative to the skills dir so the extension can mirror
 	// + reconcile against whatever workspace it runs in.
+	let previous: any;
+	try { previous = JSON.parse(fs.readFileSync(MANIFEST_OUTPUT, 'utf8')); } catch { previous = undefined; }
+	const files = manifestFiles.sort();
+	const sameAsBefore = !outputsChanged && previous?.version === INSTRUCTIONS_VERSION && previous?.marker === SKILL_MARKER
+		&& JSON.stringify(previous?.files) === JSON.stringify(files) && typeof previous?.generatedAt === 'string';
 	const manifest = {
 		version: INSTRUCTIONS_VERSION,
-		generatedAt: new Date().toISOString(),
+		generatedAt: sameAsBefore ? previous.generatedAt : new Date().toISOString(),
 		marker: SKILL_MARKER,
-		files: manifestFiles.sort(),
+		files,
 	};
-	fs.writeFileSync(MANIFEST_OUTPUT, JSON.stringify(manifest, null, 2) + '\n');
+	writeIfChanged(MANIFEST_OUTPUT, JSON.stringify(manifest, null, 2) + '\n');
 
 	console.log(
 		`[build-agent-docs] wrote core (${coreLines} lines), reference (${reference.split('\n').length} lines), ` +

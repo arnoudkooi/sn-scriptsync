@@ -83,6 +83,8 @@ export interface DoctorReport {
 	instances: Array<{ name: string; origin: string | null; hasSettings: boolean }>;
 	auth: Array<{ instance: string; state: string; ok: boolean; lastValidatedAt: number | null }>;
 	capabilities: { tier: string | null; proFeatures: boolean | null; commandReview: boolean | null } | null;
+	/** The helper's Usage Data setting. unknown when it is not connected or does not report it. */
+	usage: { collection: 'on' | 'off' | 'unknown'; sharingPreference: 'on' | 'off' | 'unknown' };
 	/** Bridge identity file, which automatic session refresh depends on. Never the id. */
 	identity: { status: string; private: boolean | null } | null;
 	findings: string[];
@@ -184,6 +186,12 @@ export function buildDoctorReport(sources: DoctorSources, now: number | null = n
 		}
 		: null;
 
+	const state = (value: unknown) => value === 'on' || value === 'off' ? value : 'unknown';
+	const usage = {
+		collection: state(sources.capabilities?.usage?.collection),
+		sharingPreference: state(sources.capabilities?.usage?.sharingPreference),
+	} as DoctorReport['usage'];
+
 	const report: DoctorReport = {
 		generatedAt: now,
 		versions: {
@@ -214,6 +222,7 @@ export function buildDoctorReport(sources: DoctorSources, now: number | null = n
 		instances,
 		auth,
 		capabilities,
+		usage,
 		identity: sources.bridgeIdentity
 			? { status: asString(sources.bridgeIdentity.status) || 'unknown', private: sources.bridgeIdentity.private ?? null }
 			: null,
@@ -367,6 +376,8 @@ export function formatDoctorReport(report: DoctorReport): string {
 	if (report.identity) {
 		lines.push(`  Bridge id      ${report.identity.status}${report.identity.private === false ? ' (not private)' : ''}`);
 	}
+	lines.push(`  Usage data     collection ${report.usage.collection}, sharing preference ${report.usage.sharingPreference}`);
+	lines.push(`                 change in SN Utils settings > Usage Data. Command name and outcome only, never data.`);
 	lines.push(`  Owner lease    ${yn(report.ownership.leasePresent)}${report.ownership.leasePid ? ` (PID ${report.ownership.leasePid}, ${report.ownership.leaseEditorKind ?? 'unknown editor'})` : ''}`);
 
 	if (report.descriptors.length) {

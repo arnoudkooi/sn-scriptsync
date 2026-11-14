@@ -69,7 +69,8 @@ const code_search: CommandHandler = {
 			'({ lineNumber, content, isMatch }) for line-level rendering. Matches are excerpts, not full field bodies — use ' +
 			'get_record / query_records to pull the complete script of a specific hit. The first search after the helper tab opens ' +
 			'may take longer while the field index builds; subsequent searches reuse the cached index. Full results can be very ' +
-			'large for a common term: pass compact: true to get only { table, label, count, names } per table, then read the hits you need.',
+			'large for a common term: pass compact: true to get only { table, label, count, names } per table, then read the hits you need.' +
+			'Inline scripts in flows are not searched: Flow Designer stores the action inputs of a flow compressed. Script steps in custom actions are searched.',
 	},
 	async handle(ctx, params) {
 		const term: string = (params?.term ?? params?.query ?? '').toString().trim();

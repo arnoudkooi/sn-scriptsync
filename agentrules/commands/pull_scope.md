@@ -30,10 +30,20 @@ The command first lists which artifact tables the application actually uses, the
       { "table": "sys_script_include", "matchedRecords": 140, "pulledRecords": 140, "filesWritten": 140, "skippedEmpty": 0, "truncated": false }
     ],
     "totals": { "tables": 2, "records": 152, "filesWritten": 152, "skippedEmpty": 0 },
-    "skippedTables": [ { "table": "sys_properties", "records": 4 } ],
-    "warnings": []
+    "skippedTables": [ { "table": "sys_properties", "records": 4, "reason": "no_scriptable_fields" } ],
+    "warnings": [],
+    "complete": true,
+    "outcome": "complete"
   }
 }
 ```
+
+**`outcome`** says what the pull achieved. Check it, not only the HTTP status:
+- `complete` — every table with script fields was pulled and verified.
+- `partial` — files were written, but something was skipped (`reason: "dictionary_unavailable"`), could not be verified, or hit `limit`. `note` and `warnings` say which. Re-run, or pull the named tables with `pull_records`.
+- `empty` — the scope has no records in tables with script fields, established from a complete record list. Nothing to do.
+- Discovery failure is an **error**, not an outcome: `E_DISCOVERY_FAILED` (HTTP 422, CLI exit 1) when no table could be pulled because the instance dictionary could not be read, or because the list of the scope's records was incomplete, so emptiness could not be established. `details` holds the full report above, including every skipped table and warning. Pull single tables with `pull_records` meanwhile.
+
+When the instance dictionary cannot be read for a table, known tables fall back to the field definitions bundled with sn-scriptsync and `snu`, with a warning; a table is only reported as `no_scriptable_fields` when its dictionary was read completely.
 
 Existing local files for the same records are refreshed in place and keep their file names through `_map.json`; a remote field that is now empty clears the local file. Run it again at any time to re-sync the whole application.

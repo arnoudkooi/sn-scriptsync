@@ -48,13 +48,17 @@ function parseQueryPairs(raw: string): Record<string, string> {
   return out;
 }
 
+/** Shared by the registry and the MCP server so the two cannot drift. */
+export const SCHEMA_DESCRIPTION =
+  'Fetch the columns of a table, including inherited ones: name, label, type, and when the instance reports them reference target, mandatory, readOnly, maxLength, defaultValue and choiceCount (pass choices: true for the values). A missing key means unknown, not false. exampleValue is a generated sample from the API documentation, not record data.';
+
 export const TOOLS: ToolDefinition[] = [
   // 1. Code Search
   {
     name: 'snu_code_search',
     agentCommand: 'code_search',
     description:
-      'Fast SN Utils GraphQL field-index code search across Script Includes, Business Rules, Client Scripts, UI Actions, and Flow Actions. Requires SN Utils Pro.',
+      'Fast SN Utils GraphQL field-index code search across Script Includes, Business Rules, Client Scripts, UI Actions, and Flow Actions. Requires SN Utils Pro. Inline scripts in flows are not searched: Flow Designer stores the action inputs of a flow compressed. Script steps in custom actions are searched.',
     cliCommand: 'search',
     cliUsage: 'snu search <term> [--tables <t1,t2>] [--limit <n>] [--active-only] [--compact] [--instance <i>] [--json]',
     cliOptions: {
@@ -94,13 +98,17 @@ export const TOOLS: ToolDefinition[] = [
     name: 'snu_get_schema',
     agentCommand: 'get_table_metadata',
     description:
-      'Fetch column dictionary metadata for a table (types, labels, references, choice lists, mandatory/read-only flags).',
+      SCHEMA_DESCRIPTION,
     cliCommand: 'schema',
-    cliUsage: 'snu schema <table> [--instance <i>] [--json]',
+    cliUsage: 'snu schema <table> [--choices] [--instance <i>] [--json]',
+    cliOptions: {
+      choices: { type: 'boolean', description: 'Include the choice values and labels of choice fields' },
+    },
     inputSchema: {
       type: 'object',
       properties: {
         table: { type: 'string', description: 'ServiceNow table name (e.g. incident, sys_user)' },
+        choices: { type: 'boolean', default: false, description: 'Include { value, label } choices per choice field (otherwise only choiceCount)' },
         instance: { type: 'string', description: 'Target instance name/folder (optional)' },
       },
       required: ['table'],
@@ -111,6 +119,7 @@ export const TOOLS: ToolDefinition[] = [
       instance: input.instance,
       params: {
         table: input.table,
+        ...(input.choices === true ? { choices: true } : {}),
       },
     }),
   },
