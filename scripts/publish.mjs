@@ -16,6 +16,11 @@
  *   node scripts/publish.mjs marketplace
  *   node scripts/publish.mjs npm --dry-run
  *   node scripts/publish.mjs all [--yes] [--skip-tests] [--dry-run]
+ *   node scripts/discord-release.mjs preview --highlights 1,2,3
+ *   node scripts/discord-release.mjs post --preview <previewId>
+ *
+ * Discord announcements are a separate explicit action and use neutral rollout
+ * wording. Build, dry-run and submission commands never post automatically.
  *
  * Version bumps are manual and stay yours: bump package.json (extension) and/or
  * packages/snu/package.json first. The script refuses to publish a version that
@@ -118,6 +123,7 @@ async function openVsxVersion() {
 
 if (wants.size === 0) {
   log(`\nNothing selected. Targets: ${C.bold}vsix | marketplace | openvsx | npm | all${C.reset}  Options: --dry-run --skip-tests --yes`);
+  log('Discord release notes: node scripts/discord-release.mjs list');
   process.exit(0);
 }
 
@@ -362,3 +368,6 @@ if (wants.has('npm')) {
 
 head('Done');
 log(`Extension ${extPkg.version} | ${snuPkg.name} ${snuPkg.version}${DRY_RUN ? `  ${C.yellow}(dry run)${C.reset}` : ''}`);
+if (!DRY_RUN && (wants.has('marketplace') || wants.has('openvsx'))) {
+  log(`Discord preview, when an announcement is intended: node scripts/discord-release.mjs preview --version ${extPkg.version} --highlights 1,2,3`);
+}

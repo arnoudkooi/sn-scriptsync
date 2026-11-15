@@ -1,0 +1,10 @@
+# ScriptSync release announcements
+
+- `CHANGELOG.md` is the source for ScriptSync extension announcements. Use the version in the root `package.json`; keep `@snutils/snu` package sections separate. Do not bump versions unless requested.
+- Use `node scripts/discord-release.mjs list` to inspect versions and numbered highlights. The command returns JSON and uses the shared SN Utils release tooling, webhook, and posting history. Set `SNU_RELEASE_TOOLING_ROOT` if the SN Utils Pro checkout is not next to this repository.
+- For an authorized agent-led release announcement, run `node scripts/discord-release.mjs preview --version <version> --highlights 1,2,3`, review the exact payload and destination, then `node scripts/discord-release.mjs post --preview <previewId>`. Run `verify --version <version>` afterward and report the message link.
+- Default wording: "This release is rolling out. Availability may vary between the VS Code Marketplace and Open VSX while updates are processed." Do not promise availability or approval timing. A build or submission alone does not authorize a Discord announcement.
+- Previews expire after 30 minutes. Existing announcements are updated, not duplicated. Preserve the shared `publish/discord-releases.json`; use `recover --version <version> --message-url <link>` for an unconfirmed delivery. Never clear history to force a retry.
+- ScriptSync's changelog is already public. Strip HTML comments, including internal reporter annotations. `web: skip` concerns website syncing, not this feed. Use `discord: skip` to omit a bullet or release from Discord, or `discord-section: skip` to omit a subsection. Do not use em dashes in new user-facing copy.
+- The local SN Utils release dashboard also has a ScriptSync product choice. Posting does not cross-post to servers following the channel; Discord's Publish action is separate.
+- For changes to this release wrapper, run `node --test scripts/test-discord-release.mjs`. For changes to shared announcement behavior, also run the shared announcement tests and required SN Utils preflight checks.

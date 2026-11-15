@@ -44,6 +44,9 @@ package-lock.json
 
 # Documentation for contributors
 CONTRIBUTING.md
+AGENTS.md
+scripts/discord-release.mjs
+scripts/test-discord-release.mjs
 
 # Roadmap
 roadmap/**
