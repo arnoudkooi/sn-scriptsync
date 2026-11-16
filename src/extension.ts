@@ -3855,8 +3855,8 @@ function requestInstanceScope(instance, scopeId) {
 
 // A custom application built in the Global scope (#169) has scope name "global"
 // but its own sys_id: its files carry sys_scope=<app sys_id>, exactly like a
-// scoped app. A file under <instance>/global/ can't say which of those apps it
-// belongs to, and the Global scope itself is far too large to load, so ask.
+// scoped app. The folder alone can't identify the app, so use the current
+// record's sys_scope first and ask only when that lookup cannot resolve it.
 async function pickGlobalApplication(instance: any): Promise<{ sysId: string; name: string } | undefined> {
 	const found = await readAllPages(scopePageFetcher(instance), 'sys_scope', 'scope=global^sys_class_name=sys_app^ORDERBYname', 'sys_id,name');
 	const apps = found.rows
@@ -3874,6 +3874,37 @@ async function pickGlobalApplication(instance: any): Promise<{ sysId: string; na
 		{ title: 'Load Scope: Global application', placeHolder: 'Select the Global application to load', matchOnDescription: true }
 	);
 	return picked?.app;
+}
+
+async function globalApplicationForArtifact(scriptObj: any): Promise<{ sysId: string; name: string } | undefined> {
+	if (typeof scriptObj.tableName !== 'string' || !/^[a-zA-Z0-9_]+$/.test(scriptObj.tableName) ||
+		typeof scriptObj.sys_id !== 'string' || !/^[0-9a-f]{32}$/i.test(scriptObj.sys_id)) return undefined;
+	const recordId = scriptObj.sys_id.toLowerCase();
+	const fetchPage = scopePageFetcher(scriptObj.instance);
+	const queryOptions = {
+		sysparm_limit: '1', sysparm_display_value: 'false',
+		sysparm_exclude_reference_link: 'true', sysparm_no_count: 'true',
+	};
+	try {
+		const records = await fetchPage(scriptObj.tableName, {
+			...queryOptions, sysparm_query: `sys_id=${recordId}`, sysparm_fields: 'sys_id,sys_scope',
+		});
+		const record = records.rows.length === 1 ? records.rows[0] : undefined;
+		if (scalar(record?.sys_id).toLowerCase() !== recordId) return undefined;
+		const appId = scalar(record.sys_scope).toLowerCase();
+		if (!/^[0-9a-f]{32}$/.test(appId)) return undefined;
+		const apps = await fetchPage('sys_scope', {
+			...queryOptions, sysparm_query: `sys_id=${appId}^scope=global^sys_class_name=sys_app`,
+			sysparm_fields: 'sys_id,name,scope,sys_class_name',
+		});
+		const app = apps.rows.length === 1 ? apps.rows[0] : undefined;
+		if (scalar(app?.sys_id).toLowerCase() !== appId || scalar(app?.scope) !== 'global' ||
+			scalar(app?.sys_class_name) !== 'sys_app') return undefined;
+		return { sysId: appId, name: scalar(app.name) || appId };
+	} catch {
+		// An unreadable record or application still permits an explicit choice.
+		return undefined;
+	}
 }
 
 function requestScopeArtifacts(includeEmpty = false, scriptObj = null, showWarning = true) {
@@ -3900,7 +3931,7 @@ function requestScopeArtifacts(includeEmpty = false, scriptObj = null, showWarni
 			let scopeSysId = String(scriptObj.scope || '');
 			let scopeLabel = scriptObj.scopeLabel || '';
 			if (scriptObj.scopeName === 'global' && !/^[0-9a-f]{32}$/i.test(scopeSysId)) {
-				const app = await pickGlobalApplication(scriptObj.instance);
+				const app = await globalApplicationForArtifact(scriptObj) || await pickGlobalApplication(scriptObj.instance);
 				if (!app) return;
 				scopeSysId = app.sysId;
 				scopeLabel = app.name;
