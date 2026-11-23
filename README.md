@@ -81,7 +81,7 @@ curl -s -X POST http://127.0.0.1:$PORT/api \
 - Browser: `open_in_browser`, `refresh_preview`, `take_screenshot`, `navigate_and_screenshot`, `run_slash_command`, `activate_tab`, `switch_context`, `upload_attachment`, `download_attachment`, `delete_attachment`
 - Live form/page control: `navigate`, `set_field`, `get_form_state`, `run_ui_action`, `click_element`
 
-See [CHANGELOG.md](https://github.com/arnoudkooi/sn-scriptsync/blob/main/CHANGELOG.md) for the full list of changes.
+See [CHANGELOG.md](https://github.com/arnoudkooi/sn-scriptsync/blob/master/CHANGELOG.md) for the full list of changes.
 
 ### 🔒 Security Enhancements
 
