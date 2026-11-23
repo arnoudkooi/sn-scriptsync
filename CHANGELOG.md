@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 4.10.8 (2026-11-23)
+
+- **Agents change a Lux app where its source lives:** the `snu-aix-experience` skill first tells an app built from a Lux project from one composed of records, then edits the project and deploys with `sdk_deploy` instead of writing to records the next deploy overwrites. It also covers where a built widget keeps its original source and how classic pages open in the Lux shell. <!-- reported-by: Arnoud Kooi / chat 2026-11-22 --> <!-- web: skip -->
+
 ## 4.10.7 (2026-11-16)
 
 - **Load the current Global application directly:** Load Scope identifies the application of the current synced Global file and loads its scriptable artifacts without asking you to select the app. If its application cannot be determined, you can still choose one. ([#169](https://github.com/arnoudkooi/sn-scriptsync/issues/169)) <!-- reported-by: GitHub issue #169 / Arnoud Kooi follow-up --> <!-- web: skip -->
