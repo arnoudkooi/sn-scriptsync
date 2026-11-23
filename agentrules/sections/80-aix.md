@@ -1,6 +1,71 @@
 > Prereq: you drive all of this through the Agent API. Read `snu-agent-api`
 > first. For screenshots / network / console verification read `snu-browser-debug`.
 
+> Naming: **Lux** is the public name of this framework (Brazil release). On the
+> instance it is "AI Experience" (AIUX): the `sys_aix_*` tables and the `/aiux/` URLs.
+
+---
+
+## 0. First: is the app built from source or composed from records?
+
+A Lux app comes to exist in one of two ways, and they need opposite handling.
+Decide which one you have **before you create or change anything**.
+
+| | Source-built | Record-composed |
+|---|---|---|
+| Where the truth lives | A Lux project on disk (`aiux.json`, `pages/`, `widgets/`), deployed with the ServiceNow SDK | The `sys_aix_*` records themselves |
+| Pages | One page file per route; the page record has a `page_widget` and no containers | Containers and widget instances under the page |
+| Widgets | `sourcemap` is filled, `component_compile_metadata` contains `"asset"`, `component` is minified | `component` holds readable Lit source, `sourcemap` is empty |
+| How to change it | Edit the project files, then deploy | Edit the records (sections 1 to 9) |
+
+To tell from the instance, query `sys_aix_widget` for the app's scope with the
+fields `id,name,component_compile_metadata`: `"asset"` in the metadata means
+built from source. The page widgets of a source-built app are hidden from
+`sys_aix_widget` queries; read them through the parent table `sys_ux_widget`
+(`sys_class_name=sys_aix_widget`).
+
+### Source-built: never write to its `sys_aix_*` records
+
+They are build output. The next deploy regenerates them, so a record edit is
+silently lost.
+
+- Work in the project. It ships its own agent instructions (`AGENTS.md` /
+  `CLAUDE.md` and the skills from `@servicenow/agent-pack-aiux`); follow those
+  for pages, widgets, loaders and styling. This skill does not replace them.
+- Deploy with `sdk_deploy` and wait for its final install result.
+- Use the Agent API for what the project cannot do: read records, check the
+  rendered page, read logs.
+- No project on disk? The source is on the instance. Each built widget keeps
+  its original files in `sourcemap` (`sourcesContent`), and the whole project is
+  a zip attached to a `sn_glider_source_artifact` record (file name
+  `aiux-source <app sys_id>.zip`); fetch it with `download_attachment`.
+
+### Record-composed: the rest of this skill is the recipe
+
+### What the page itself tells you
+
+Every Lux page describes itself, which helps when you verify in the browser:
+
+- `window.__AIUX_MANIFEST__.pages[]`: every route of the experience with its
+  element tag (`tagName`); composed pages also carry `pageSysId`.
+- `window.__APP_CONFIG__` (source-built: `name`, `basename`, `landing`) or
+  `window.__EXPERIENCE_CONFIG__` (composed: `sysId`, `urlSuffix`, `scope`).
+- On composed pages each widget element has `data-widget-id`, the sys_id of its
+  `sys_aix_widget_instance`.
+- `window.__PAGE_TAG__` is not updated on client-side navigation; match the
+  address against the routes instead.
+
+For a person at the browser, the SN Utils slash command `/lux` shows the same:
+experience, page and widgets, each with a record link.
+
+### The Lux shell
+
+With the Lux experience switched on, the instance root lands on `/aiux/ui/home`
+and classic forms and lists open inside the shell at
+`/aiux/ui/classic?target=<encoded classic URL>`; `nav_to.do?uri=...` lands
+there too. The classic page itself is unchanged (same `g_form`, same list), so
+form automation works as before.
+
 ---
 
 ## 1. Data model (the tables that matter)
@@ -44,6 +109,9 @@ A page's content is every container whose `page` points at it; the top of the tr
 ---
 
 ## 3. Creating records: use a background script, not REST
+
+> Record-composed experiences only. For a source-built app, change the project
+> and deploy (section 0).
 
 Direct REST writes to `sys_aix_*` fail (`E_ACL`, and `create_artifact` →
 `E_INTERNAL`) even with the right transaction scope. **Create/modify these
@@ -262,6 +330,7 @@ Setting `sysUserId` in instance `properties` does **not** drive these widgets.
 
 ## 9. Gotchas checklist
 
+- [ ] Source-built app (section 0) → change the project and deploy; never edit its `sys_aix_*` records.
 - [ ] Creating `sys_aix_*` via REST → use `run_background_script` instead.
 - [ ] Page not found → URL is `/aiux/<suffix>/...`, and you flushed `/cache.do`.
 - [ ] Edits not showing → load in a **fresh tab** (client config cache).

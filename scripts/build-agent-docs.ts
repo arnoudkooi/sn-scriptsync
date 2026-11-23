@@ -178,7 +178,11 @@ const MANIFEST_OUTPUT = path.join(SKILLS_DIR, '_skills.json');
 //   v37 -> v38: smaller results (code_search compact, query_records coverage and
 //               referenceLinks), normalized get_table_metadata columns, pull_scope
 //               outcomes and E_DISCOVERY_FAILED, flow inline script limitation.
-const INSTRUCTIONS_VERSION = 38;
+//   v38 -> v39: snu-aix-experience tells source-built Lux apps (edit the project,
+//               deploy with sdk_deploy, never write their sys_aix_* records) apart
+//               from record-composed ones, and adds the page self-description,
+//               source recovery and the Lux shell.
+const INSTRUCTIONS_VERSION = 39;
 
 // Marker that identifies a file as an extension-managed skill. The extension
 // only ever deletes files that carry this marker, so user-authored files in the
@@ -284,11 +288,11 @@ const SKILLS: SkillDef[] = [
 	},
 	{
 		name: 'snu-aix-experience',
-		title: 'SN ScriptSync — AI Experience (AIX)',
+		title: 'SN ScriptSync — Lux / AI Experience (AIX)',
 		description:
-			'Build/edit ServiceNow AI Experience (AIX) apps on the sys_aix_* tables: experiences, pages, containers, custom Lit widgets + server data scripts, left-nav menus, and record click-through. Covers routing/cache rules, why creation needs a background script (REST = E_ACL), the widget compile-metadata pattern, and the OOTB-widget/app-shell gotchas. Read this before creating or modifying anything on the sys_aix_* tables.',
+			'Build/edit ServiceNow Lux apps (AI Experience, AIX) on the sys_aix_* tables: experiences, pages, containers, custom Lit widgets + server data scripts, left-nav menus, and record click-through. Starts with telling a source-built app (edit the Lux project and deploy, never its records) from a record-composed one. Covers routing/cache rules, why creation needs a background script (REST = E_ACL), the widget compile-metadata pattern, and the OOTB-widget/app-shell gotchas. Read this before creating or modifying anything on the sys_aix_* tables.',
 		intro:
-			'How to build a working AI Experience end-to-end on the sys_aix_* tables: the data model, routing/cache rules, custom Lit widgets with server data, left-nav menus, and record click-through. This is a new, lightly-documented framework — the notes below are the field-tested recipe, including the dead ends to avoid.',
+			'How to work on a Lux app (AI Experience) without losing changes, and how to build a record-composed one end-to-end on the sys_aix_* tables: the data model, routing/cache rules, custom Lit widgets with server data, left-nav menus, and record click-through. This is a new, lightly-documented framework — the notes below are the field-tested recipe, including the dead ends to avoid.',
 		sections: ['80-aix'],
 		commands: [],
 	},
